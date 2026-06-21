@@ -1,13 +1,9 @@
 # api/__init__.py
-"""API module for AP Automation Engine.
+"""API package for AP Automation Core Engine.
 
-This package contains FastAPI routers, schemas, and endpoint handlers.
+This package contains:
+- v1/: Versioned API endpoints
+- schemas.py: Shared Pydantic request/response models
 """
 
-from api.schemas import BaseResponse, ErrorResponse, PaginatedResponse
-
-__all__ = [
-    "BaseResponse",
-    "ErrorResponse",
-    "PaginatedResponse",
-]
+__all__ = []

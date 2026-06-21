@@ -1,157 +1,234 @@
 # models/cross_ref.py
-"""Cross Reference SQLAlchemy model.
-
-Stores learned associations between invoices, POs, and delivery notes.
-Implements the learning loop for the matching engine.
-"""
+"""Cross Reference model for the learning loop functionality."""
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
     Date,
-    DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
     Text,
-    func,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base
-from models.enums import CrossRefStatus
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.enums import MatchDecision, MatchConfidence
 
 if TYPE_CHECKING:
-    from models.invoice import Invoice, InvoiceLine
+    from models.purchase_order import PurchaseOrderLine
 
 
-class CrossRef(Base):
-    """Cross Reference model for learning loop.
+class CrossRef(TimestampMixin, UUIDPrimaryKeyMixin, Base):
+    """Cross Reference table for learning/promotion functionality.
 
-    Records confirmed matches between entities to improve future matching.
-    Tracks learned associations and promotes reliable patterns.
+    This table tracks confirmed matches between invoice lines and PO lines,
+    building a historical record that can be used to:
+    - Learn supplier-specific patterns
+    - Promote confirmed matches for future automatic matching
+    - Build confidence scores based on historical accuracy
     """
 
     __tablename__ = "cross_ref"
-    __table_args__ = (
-        Index("ix_cross_ref_invoice_id", "invoice_id"),
-        Index("ix_cross_ref_po_id", "po_id"),
-        Index("ix_cross_ref_dn_id", "dn_id"),
-        Index("ix_cross_ref_status", "status"),
-        Index("ix_cross_ref_confirmed_count", "confirmed_count"),
-        Index("ix_cross_ref_last_confirmed", "last_confirmed_at"),
-        {"schema": None},
-    )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    invoice_id: Mapped[uuid.UUID] = mapped_column(
+    # Source records
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
     )
     invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoice_lines.id", ondelete="CASCADE"),
         nullable=True,
+        index=True,
     )
     po_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=True,
+        index=True,
     )
     po_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=True,
-    )
-    dn_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    status: Mapped[CrossRefStatus] = mapped_column(
-        String(30),
-        default=CrossRefStatus.PENDING,
-        nullable=False,
-    )
-    match_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
-        nullable=False,
-    )
-    match_type: Mapped[str] = mapped_column(String(50), nullable=True)
-    confirmed_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
-    )
-    rejected_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
-    )
-    reliability_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
-        nullable=False,
-    )
-    first_confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    last_confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
-    match_metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_auto_promoted: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        index=True,
     )
 
+    # Product matching
+    invoice_sku: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    po_sku: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    sku_match_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    # Supplier info
+    supplier_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    supplier_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    # Match metrics
+    price_variance_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 4),
+        nullable=True,
+    )
+    quantity_variance_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 4),
+        nullable=True,
+    )
+    match_score: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    match_decision: Mapped[MatchDecision | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    # Status
+    is_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    confirmation_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    # Promotion tracking
+    promotion_level: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    """Promotion level: 0=new, 1=promoted once, 2=promoted twice, etc."""
+    match_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    """How many times this exact match has been confirmed"""
+    auto_match_threshold: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=100,
+    )
+    """Threshold score at which this cross_ref enables auto-match"""
+
+    # Learning data
+    last_matched_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    first_matched_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    # Confidence
+    confidence: Mapped[MatchConfidence] = mapped_column(
+        String(20),
+        nullable=False,
+        default=MatchConfidence.NONE,
+    )
+
+    # Notes
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Relationships
-    invoice: Mapped["Invoice"] = relationship(
-        "Invoice",
+    po_line: Mapped["PurchaseOrderLine | None"] = relationship(
+        "PurchaseOrderLine",
         back_populates="cross_refs",
     )
 
+    __table_args__ = (
+        Index("ix_cross_ref_supplier_sku", "supplier_id", "po_sku"),
+        Index("ix_cross_ref_invoice_sku", "invoice_sku"),
+        Index("ix_cross_ref_promotion", "is_active", "match_count"),
+        Index("ix_cross_ref_confirmed", "is_confirmed", "supplier_id"),
+    )
+
     def __repr__(self) -> str:
-        return f"<CrossRef {self.id}: score={self.match_score}, status={self.status}>"
+        return f"<CrossRef SKU:{self.po_sku} Supplier:{self.supplier_id} Count:{self.match_count}>"
 
-    @property
-    def is_promoted(self) -> bool:
-        """Check if this cross-reference has been promoted."""
-        return self.status == CrossRefStatus.PROMOTED
+    def should_auto_match(self, score: int) -> bool:
+        """Determine if this cross_ref enables auto-matching.
 
-    @property
-    def promotion_eligible(self) -> bool:
-        """Check if this cross-reference is eligible for promotion."""
-        return (
-            self.confirmed_count >= 3
-            and self.reliability_score >= Decimal("0.80")
-            and self.status == CrossRefStatus.LEARNED
-        )
+        Args:
+            score: Current match score
+
+        Returns:
+            True if match should be automatic
+        """
+        if not self.is_active or not self.is_confirmed:
+            return False
+        return score >= self.auto_match_threshold
+
+    def promote(self) -> None:
+        """Promote this cross_ref to higher auto-match confidence."""
+        self.promotion_level += 1
+        self.match_count += 1
+        # Increase threshold for auto-match as confidence grows
+        # Level 0: 95+, Level 1: 90+, Level 2: 85+, etc.
+        self.auto_match_threshold = max(50, 100 - (self.promotion_level * 5))
+        self.confidence = self._calculate_confidence()
+
+    def confirm(self, confirmation_date: date | None = None) -> None:
+        """Confirm this cross_ref match.
+
+        Args:
+            confirmation_date: When the match was confirmed
+        """
+        self.is_confirmed = True
+        self.confirmation_date = confirmation_date or date.today()
+        if not self.first_matched_date:
+            self.first_matched_date = self.confirmation_date
+        self.last_matched_date = self.confirmation_date
+        self.promote()
+
+    def _calculate_confidence(self) -> MatchConfidence:
+        """Calculate confidence level based on match count and promotion level."""
+        if self.match_count >= 10 and self.promotion_level >= 2:
+            return MatchConfidence.EXACT
+        elif self.match_count >= 5 and self.promotion_level >= 1:
+            return MatchConfidence.HIGH
+        elif self.match_count >= 2:
+            return MatchConfidence.MEDIUM
+        elif self.match_count >= 1:
+            return MatchConfidence.LOW
+        return MatchConfidence.NONE
+
+
+__all__ = ["CrossRef"]

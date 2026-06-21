@@ -1,32 +1,20 @@
-# Phase 2 Summary: Technical Stack
+# Phase 2 — Technical Stack Summary
 
 ## AP Automation Core Engine — FinaRo
 
----
+### Technology Stack
+- **Language:** Python 3.11+
+- **Framework:** FastAPI (async, Pydantic-first)
+- **Database:** PostgreSQL 15+ with PGBouncer
+- **ORM:** SQLAlchemy 2.0 (async)
+- **Migrations:** Alembic
+- **Auth:** JWT (HS256) + bcrypt
 
-## Tech Stack at a Glance
+### Key Design Decisions
+- UUIDs for all primary keys
+- `created_at`/`updated_at` timestamps on all tables
+- RESTful API with `/api/v1/` versioning
+- Configurable matching thresholds via env vars
+- Service layer for business logic isolation
 
-| Layer | Technology | Version |
-|-------|------------|---------|
-| Language | Python | 3.11+ |
-| Framework | FastAPI | 0.110+ |
-| Database | PostgreSQL | 15+ |
-| ORM | SQLAlchemy | 2.0+ (async) |
-| Migrations | Alembic | 1.13+ |
-| Auth | JWT (HS256) + bcrypt | - |
-| Container | Docker | - |
-
----
-
-## Key Decisions
-
-1. **Async-first**: All DB operations use `asyncpg` + `asyncio`
-2. **UUID PKs**: All entities use UUIDs as primary keys
-3. **Pydantic V2**: Settings and schemas via `pydantic-settings`
-4. **Versioned API**: All routes under `/api/v1/`
-5. **Configurable thresholds**: Match decision thresholds via env vars
-
----
-
-## Project Layout
-
+### Project Structure

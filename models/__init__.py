@@ -1,48 +1,44 @@
 # models/__init__.py
-"""Data models package.
+"""Data models package for AP Automation Core Engine.
 
-Exports all SQLAlchemy models and enums for easy importing.
+This package contains all SQLAlchemy ORM models representing the
+database schema for invoices, purchase orders, delivery notes,
+balance ledger, and learning/cross-reference tables.
 """
 
 from models.base import Base
-from models.enums import (
-    BalanceTransactionType,
-    CrossRefStatus,
-    ExceptionReason,
-    ExceptionStatus,
-    InvoiceStatus,
-    MatchingDecision,
-    MatchingStatus,
-    PurchaseOrderStatus,
-    DeliveryNoteStatus,
-    LineStatus,
-)
 from models.invoice import Invoice
-from models.purchase_order import PurchaseOrder, POLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
 from models.cross_ref import CrossRef
+from models.enums import (
+    InvoiceStatus,
+    PurchaseOrderStatus,
+    DeliveryNoteStatus,
+    MatchStatus,
+    MatchDecision,
+    ExceptionType,
+    ExceptionStatus,
+)
 
 __all__ = [
     # Base
     "Base",
-    # Enums
-    "InvoiceStatus",
-    "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
-    "MatchingStatus",
-    "MatchingDecision",
-    "ExceptionStatus",
-    "ExceptionReason",
-    "LineStatus",
-    "BalanceTransactionType",
-    "CrossRefStatus",
     # Models
     "Invoice",
     "PurchaseOrder",
-    "POLine",
+    "PurchaseOrderLine",
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
     "CrossRef",
+    # Enums
+    "InvoiceStatus",
+    "PurchaseOrderStatus",
+    "DeliveryNoteStatus",
+    "MatchStatus",
+    "MatchDecision",
+    "ExceptionType",
+    "ExceptionStatus",
 ]

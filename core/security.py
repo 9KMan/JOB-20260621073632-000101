@@ -1,9 +1,5 @@
 # core/security.py
-"""Security utilities for authentication and authorization.
-
-Provides JWT token handling and password hashing using bcrypt.
-All security functions are async-compatible.
-"""
+"""Security utilities for JWT and password hashing."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -14,7 +10,7 @@ from passlib.context import CryptContext
 from core.config import settings
 
 # Password hashing context using bcrypt
-pwd_context: CryptContext = CryptContext(
+pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
     bcrypt__rounds=12,
@@ -22,128 +18,134 @@ pwd_context: CryptContext = CryptContext(
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password.
-
-    Args:
-        plain_password: The plain text password to verify.
-        hashed_password: The bcrypt hashed password to compare against.
-
-    Returns:
-        bool: True if password matches, False otherwise.
-    """
+    """Verify a plain password against a hashed password."""
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt.
-
-    Args:
-        password: The plain text password to hash.
-
-    Returns:
-        str: The bcrypt hashed password.
-    """
+    """Hash a password using bcrypt."""
     return pwd_context.hash(password)
 
 
 def create_access_token(
-    data: dict[str, Any],
+    subject: str | Any,
     expires_delta: timedelta | None = None,
+    extra_claims: dict[str, Any] | None = None,
 ) -> str:
     """Create a JWT access token.
 
     Args:
-        data: The payload data to encode in the token.
-        expires_delta: Optional custom expiration time delta.
+        subject: The token subject (usually user ID)
+        expires_delta: Optional custom expiration time
+        extra_claims: Additional claims to include in the token
 
     Returns:
-        str: The encoded JWT token.
+        Encoded JWT token string
     """
-    to_encode = data.copy()
-
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+            minutes=settings.jwt.jwt_access_token_expire_minutes
         )
 
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    to_encode: dict[str, Any] = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "access",
+    }
+
+    if extra_claims:
+        to_encode.update(extra_claims)
 
     encoded_jwt = jwt.encode(
         to_encode,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
+        settings.jwt.jwt_secret_key,
+        algorithm=settings.jwt.jwt_algorithm,
     )
-
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> dict[str, Any] | None:
-    """Decode and validate a JWT access token.
+def create_refresh_token(
+    subject: str | Any,
+    expires_delta: timedelta | None = None,
+) -> str:
+    """Create a JWT refresh token.
 
     Args:
-        token: The JWT token string to decode.
+        subject: The token subject (usually user ID)
+        expires_delta: Optional custom expiration time
 
     Returns:
-        dict[str, Any] | None: The decoded payload if valid, None otherwise.
+        Encoded JWT refresh token string
+    """
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(
+            days=settings.jwt.jwt_refresh_token_expire_days
+        )
+
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "refresh",
+    }
+
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.jwt.jwt_secret_key,
+        algorithm=settings.jwt.jwt_algorithm,
+    )
+    return encoded_jwt
+
+
+def decode_token(token: str) -> dict[str, Any] | None:
+    """Decode and validate a JWT token.
+
+    Args:
+        token: The JWT token string
+
+    Returns:
+        Decoded token payload or None if invalid
     """
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
+            settings.jwt.jwt_secret_key,
+            algorithms=[settings.jwt.jwt_algorithm],
         )
         return payload
     except JWTError:
         return None
 
 
-def create_refresh_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
-) -> str:
-    """Create a JWT refresh token with longer expiry.
+def verify_access_token(token: str) -> str | None:
+    """Verify an access token and return the subject.
 
     Args:
-        data: The payload data to encode in the token.
-        expires_delta: Optional custom expiration time delta.
+        token: The JWT access token string
 
     Returns:
-        str: The encoded JWT refresh token.
+        Subject (user ID) if valid, None otherwise
     """
-    to_encode = data.copy()
+    payload = decode_token(token)
+    if payload is None:
+        return None
 
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
-        )
+    token_type = payload.get("type")
+    if token_type != "access":
+        return None
 
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-        "type": "refresh",
-    })
-
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
-
-    return encoded_jwt
+    return payload.get("sub")
 
 
-def verify_token_type(token_data: dict[str, Any], expected_type: str = "access") -> bool:
-    """Verify the type of a JWT token.
-
-    Args:
-        token_data: The decoded JWT payload.
-        expected_type: The expected token type ('access' or 'refresh').
-
-    Returns:
-        bool: True if token type matches, False otherwise.
-    """
-    return token_data.get("type") == expected_type
+__all__ = [
+    "pwd_context",
+    "verify_password",
+    "hash_password",
+    "create_access_token",
+    "create_refresh_token",
+    "decode_token",
+    "verify_access_token",
+]

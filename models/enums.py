@@ -1,66 +1,50 @@
 # models/enums.py
-"""Enum definitions for the AP Automation system.
+"""Enumeration types for AP Automation Core Engine.
 
-All enums use PostgreSQL native type with checks for data integrity.
+All enums are implemented as Python Enum classes with explicit string values
+for database storage and JSON serialization.
 """
 
-import uuid
 from enum import Enum
 
-from sqlalchemy import CheckConstraint
-from sqlalchemy.dialects.postgresql import ENUM as PGEnum
-from sqlalchemy.orm import Mapped, mapped_column
 
-
-# Invoice Status Enum
 class InvoiceStatus(str, Enum):
-    """Status values for invoice records."""
+    """Invoice status values."""
 
     DRAFT = "draft"
     PENDING = "pending"
     MATCHING = "matching"
     MATCHED = "matched"
-    APPROVED = "approved"
     EXCEPTION = "exception"
+    APPROVED = "approved"
     REJECTED = "rejected"
+    PAID = "paid"
     CANCELLED = "cancelled"
 
 
-# Purchase Order Status Enum
 class PurchaseOrderStatus(str, Enum):
-    """Status values for purchase orders."""
+    """Purchase order status values."""
 
     DRAFT = "draft"
     ACTIVE = "active"
+    PARTIALLY_RECEIVED = "partially_received"
+    FULLY_RECEIVED = "fully_received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-# Delivery Note Status Enum
 class DeliveryNoteStatus(str, Enum):
-    """Status values for delivery notes."""
+    """Delivery note status values."""
 
     DRAFT = "draft"
-    RECEIVED = "received"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
+    CONFIRMED = "confirmed"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    FULLY_INVOICED = "fully_invoiced"
     CANCELLED = "cancelled"
 
 
-# Line Item Status Enum
-class LineStatus(str, Enum):
-    """Status values for line items (PO lines, invoice lines, DN lines)."""
-
-    PENDING = "pending"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    OVER_DELIVERED = "over_delivered"
-    CLOSED = "closed"
-
-
-# Matching Status Enum
-class MatchingStatus(str, Enum):
-    """Status values for matching operations."""
+class MatchStatus(str, Enum):
+    """Matching status values."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -69,125 +53,65 @@ class MatchingStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-# Matching Decision Enum
-class MatchingDecision(str, Enum):
-    """Decision outcomes from the matching engine."""
+class MatchDecision(str, Enum):
+    """Matching decision outcomes.
 
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_REVIEW = "one_click_review"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
+    HIGH: Auto-approved (above threshold_high)
+    MID: 1-click review required (above threshold_mid)
+    LOW: Exception flagged (below threshold_low)
+    """
+
+    HIGH = "high"
+    MID = "mid"
+    LOW = "low"
+    MANUAL = "manual"
+    NO_MATCH = "no_match"
 
 
-# Exception Status Enum
+class ExceptionType(str, Enum):
+    """Types of matching exceptions."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    MISSING_PO = "missing_po"
+    MULTIPLE_PO_MATCH = "multiple_po_match"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DATE_VARIANCE = "date_variance"
+    PARTIAL_MATCH = "partial_match"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    TAX_VARIANCE = "tax_variance"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    UNKNOWN = "unknown"
+
+
 class ExceptionStatus(str, Enum):
-    """Status values for matching exceptions."""
+    """Exception resolution status."""
 
     OPEN = "open"
     UNDER_REVIEW = "under_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
+    ESCALATED = "escalated"
 
 
-# Exception Reason Enum
-class ExceptionReason(str, Enum):
-    """Reasons why a match resulted in an exception."""
+class MatchConfidence(str, Enum):
+    """Match confidence levels based on score."""
 
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY_NOTE = "missing_delivery_note"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    OVER_INVOICED = "over_invoiced"
-    UNDER_INVOICED = "under_invoiced"
-    DATE_MISMATCH = "date_mismatch"
-    PARTIAL_MATCH = "partial_match"
-    MULTIPLE_POSSIBILITIES = "multiple_possibilities"
-    MANUAL_REVIEW_REQUIRED = "manual_review_required"
+    EXACT = "exact"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NONE = "none"
 
 
-# Balance Transaction Type Enum
-class BalanceTransactionType(str, Enum):
-    """Types of balance ledger transactions."""
-
-    INVOICE_RECEIVED = "invoice_received"
-    INVOICE_CANCELLED = "invoice_cancelled"
-    DELIVERY_RECEIVED = "delivery_received"
-    CREDIT_NOTE = "credit_note"
-    PAYMENT = "payment"
-    WRITE_OFF = "write_off"
-    MANUAL_ADJUSTMENT = "manual_adjustment"
-
-
-# Cross Reference Status Enum
-class CrossRefStatus(str, Enum):
-    """Status values for learning cross-references."""
-
-    PENDING = "pending"
-    LEARNED = "learned"
-    PROMOTED = "promoted"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
-
-
-# SQLAlchemy enum columns for use in models
-# These are defined as functions to allow reuse across models
-
-def invoice_status_column() -> dict:
-    """Return column configuration for invoice status."""
-    return {
-        "name": "status",
-        "type_": PGEnum(
-            InvoiceStatus,
-            name="invoice_status",
-            create_constraint=True,
-            preguard=True,
-        ),
-        "default": InvoiceStatus.DRAFT,
-        "nullable": False,
-    }
-
-
-def po_status_column() -> dict:
-    """Return column configuration for PO status."""
-    return {
-        "name": "status",
-        "type_": PGEnum(
-            PurchaseOrderStatus,
-            name="purchase_order_status",
-            create_constraint=True,
-            preguard=True,
-        ),
-        "default": PurchaseOrderStatus.DRAFT,
-        "nullable": False,
-    }
-
-
-def delivery_note_status_column() -> dict:
-    """Return column configuration for delivery note status."""
-    return {
-        "name": "status",
-        "type_": PGEnum(
-            DeliveryNoteStatus,
-            name="delivery_note_status",
-            create_constraint=True,
-            preguard=True,
-        ),
-        "default": DeliveryNoteStatus.DRAFT,
-        "nullable": False,
-    }
-
-
-def line_status_column() -> dict:
-    """Return column configuration for line status."""
-    return {
-        "name": "status",
-        "type_": PGEnum(
-            LineStatus,
-            name="line_status",
-            create_constraint=True,
-            preguard=True,
-        ),
-        "default": LineStatus.PENDING,
-        "nullable": False,
-    }
+__all__ = [
+    "InvoiceStatus",
+    "PurchaseOrderStatus",
+    "DeliveryNoteStatus",
+    "MatchStatus",
+    "MatchDecision",
+    "ExceptionType",
+    "ExceptionStatus",
+    "MatchConfidence",
+]

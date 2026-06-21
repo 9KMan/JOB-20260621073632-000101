@@ -1,73 +1,91 @@
 # models/base.py
-"""SQLAlchemy declarative base configuration.
-
-All database models should inherit from this Base class.
-Provides UUID primary key generation and common mixins.
-"""
+"""SQLAlchemy declarative base configuration."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import DateTime, String, event, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-# Naming convention for constraints
-convention = {
-    "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-    "ck": "ck_%(table_name)s_%(constraint_name)s",
-    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s",
-}
-
-
-# Global metadata with naming convention
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class.
+    """Base class for all SQLAlchemy models.
 
-    All models should inherit from this class.
-    Uses PostgreSQL UUID as default primary key type.
+    Provides:
+    - UUID primary key generation
+    - Automatic created_at/updated_at timestamps
+    - Soft delete support via deleted_at
     """
 
-    metadata = MetaData(naming_convention=convention)
+    type_annotation_map = {
+        uuid.UUID: UUID(as_uuid=True),
+        datetime: DateTime(timezone=True),
+    }
 
-    # Default primary key - UUID
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        doc="Primary key as UUID",
-    )
 
-    # Timestamps
+class TimestampMixin:
+    """Mixin for created_at and updated_at timestamps."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
-        doc="Record creation timestamp",
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
-        doc="Record last update timestamp",
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model instance to dictionary.
 
-        Returns:
-            dict[str, Any]: Dictionary representation of the model.
-        """
-        return {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
-        }
+class SoftDeleteMixin:
+    """Mixin for soft delete support."""
 
-    def __repr__(self) -> str:
-        """String representation of the model."""
-        return f"<{self.__class__.__name__} id={self.id}>"
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if the record is soft-deleted."""
+        return self.deleted_at is not None
+
+
+class UUIDPrimaryKeyMixin:
+    """Mixin for UUID primary key generation."""
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+        index=True,
+    )
+
+
+class TimestampTriggerMixin:
+    """Mixin that adds database triggers for updated_at (PostgreSQL)."""
+
+    pass
+
+
+# Event listener to set updated_at before update
+@event.listens_for(TimestampMixin, "before_update", propagate=True)
+def set_updated_at(mapper: Any, connection: Any, target: Any) -> None:
+    """Automatically set updated_at before any update operation."""
+    target.updated_at = datetime.now(timezone.utc)
+
+
+__all__ = [
+    "Base",
+    "TimestampMixin",
+    "SoftDeleteMixin",
+    "UUIDPrimaryKeyMixin",
+    "TimestampTriggerMixin",
+]
