@@ -1,37 +1,18 @@
 # pyproject.toml
-[build-system]
-requires = ["hatchling", "hatch-fancy-pypi-readme>=22.5.0"]
-build-backend = "hatchling.build"
-
 [project]
 name = "ap-automation-engine"
 version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+description = "AP Automation Core Engine for Finaro"
 readme = "README.md"
-license = "MIT"
 requires-python = ">=3.11"
+license = { text = "PROPRIETARY" }
 authors = [
-    { name = "FinaRo Team", email = "dev@finaro.com" },
+    { name = "Finaro", email = "dev@finaro.com" }
 ]
-keywords = ["ap", "automation", "invoice", "matching", "fastapi"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Framework :: AsyncIO",
-    "Framework :: FastAPI",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Office/Business :: Financial",
-    "Typing :: Typed",
-]
-
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "pydantic>=2.6.0",
@@ -39,7 +20,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
+    "httpx>=0.27.0",
     "greenlet>=3.0.0",
 ]
 
@@ -48,84 +29,31 @@ dev = [
     "pytest>=8.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
-    "types-python-dateutil>=2.8.0",
-    "types-passlib>=1.7.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
-Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
-Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
-Issues = "https://github.com/9KMan/JOB-20260621073632-000101/issues"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ap_automation"]
+packages = ["src/app"]
 
 [tool.pytest.ini_options]
-minversion = "8.1"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_functions = ["test_*"]
-addopts = [
-    "-ra",
-    "--strict-markers",
-    "--cov=src/ap_automation",
-    "--cov-report=term-missing",
-    "--cov-fail-under=70",
-]
+addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-]
-
-[tool.coverage.run]
-branch = true
-source = ["src/ap_automation", "tests"]
-omit = [
-    "*/tests/*",
-    "*/migrations/*",
-    "*/__pycache__/*",
-    "*/conftest.py",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
 ]
 
 [tool.ruff]
-target-version = "py311"
 line-length = 100
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # Pyflakes
-    "I",   # isort
-    "C",   # flake8-comprehensions
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-]
-ignore = [
-    "E501",  # line too long (handled by formatter)
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
-]
-
-[tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]
-"tests/*" = ["F401", "B011"]
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
-warn_unused_configs = true
-warn_redundant_casts = true

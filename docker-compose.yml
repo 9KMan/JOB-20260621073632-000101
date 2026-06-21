@@ -1,47 +1,60 @@
-version: '3.8'
+# docker-compose.yml
+version: "3.9"
 
 services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://finaro:finaro@db:5432/finaro
-      - SECRET_KEY=dev-secret-key-change-in-production
-      - DEBUG=true
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-    command: >
-      sh -c "alembic upgrade head && uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload"
-
-  db:
+  postgres:
     image: postgres:15-alpine
+    container_name: ap-postgres
     environment:
-      - POSTGRES_USER=finaro
-      - POSTGRES_PASSWORD=finaro
-      - POSTGRES_DB=finaro
+      POSTGRES_USER: ${POSTGRES_USER:-apuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
+      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap-pgbouncer
     environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
-      - PGADMIN_DEFAULT_PASSWORD=admin
+      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "10"
     ports:
-      - "5050:80"
+      - "6432:5432"
     depends_on:
-      - db
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-api
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
+      PGBOUNCER_HOST: pgbouncer
+      PGBOUNCER_PORT: 5432
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_ALGORITHM: HS256
+      THRESHOLD_HIGH: ${THRESHOLD_HIGH:-95}
+      THRESHOLD_MID: ${THRESHOLD_MID:-70}
+      THRESHOLD_LOW: ${THRESHOLD_LOW:-40}
+      TOLERANCE_PRICE: ${TOLERANCE_PRICE:-5}
+      TOLERANCE_QTY: ${TOLERANCE_QTY:-10}
+    ports:
+      - "8000:8000"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:

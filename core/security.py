@@ -1,5 +1,5 @@
 # core/security.py
-"""JWT and password hashing utilities using HS256 and bcrypt."""
+"""JWT and password hashing utilities."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -9,31 +9,37 @@ from passlib.context import CryptContext
 
 from core.config import settings
 
-# Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=settings.BCRYPT_ROUNDS,
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a bcrypt hash.
-
+    """
+    Verify a plain password against a hashed password.
+    
     Args:
-        plain_password: The plain-text password.
-        hashed_password: The bcrypt-hashed password.
-
+        plain_password: The plain text password
+        hashed_password: The hashed password to verify against
+        
     Returns:
-        True if the password matches, False otherwise.
+        True if password matches, False otherwise
     """
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt.
-
+    """
+    Hash a password using bcrypt.
+    
     Args:
-        password: The plain-text password to hash.
-
+        password: The plain text password to hash
+        
     Returns:
-        The bcrypt hash string.
+        The hashed password
     """
     return pwd_context.hash(password)
 
@@ -42,42 +48,85 @@ def create_access_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Create a JWT access token using HS256.
-
+    """
+    Create a JWT access token.
+    
     Args:
-        data: Payload data to encode in the token.
-        expires_delta: Optional custom expiry timedelta.
-
+        data: The payload data to encode
+        expires_delta: Optional custom expiration time
+        
     Returns:
-        Encoded JWT string.
+        The encoded JWT token
     """
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta
-        or timedelta(minutes=settings.jwt.access_token_expire_minutes)
-    )
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    return jwt.encode(
+    
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        )
+    
+    to_encode.update({"exp": expire, "type": "access"})
+    
+    encoded_jwt = jwt.encode(
         to_encode,
-        settings.jwt.secret_key,
-        algorithm=settings.jwt.algorithm,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
     )
+    
+    return encoded_jwt
 
 
-def decode_access_token(token: str) -> dict[str, Any] | None:
-    """Decode and validate a JWT access token.
-
+def create_refresh_token(
+    data: dict[str, Any],
+    expires_delta: timedelta | None = None,
+) -> str:
+    """
+    Create a JWT refresh token.
+    
     Args:
-        token: The JWT string to decode.
-
+        data: The payload data to encode
+        expires_delta: Optional custom expiration time
+        
     Returns:
-        Decoded payload dict, or None if invalid/expired.
+        The encoded JWT refresh token
+    """
+    to_encode = data.copy()
+    
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(
+            days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        )
+    
+    to_encode.update({"exp": expire, "type": "refresh"})
+    
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    
+    return encoded_jwt
+
+
+def decode_token(token: str) -> dict[str, Any] | None:
+    """
+    Decode and validate a JWT token.
+    
+    Args:
+        token: The JWT token to decode
+        
+    Returns:
+        The decoded payload or None if invalid
     """
     try:
         payload = jwt.decode(
             token,
-            settings.jwt.secret_key,
-            algorithms=[settings.jwt.algorithm],
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
         )
         return payload
     except JWTError:

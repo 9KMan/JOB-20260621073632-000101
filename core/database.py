@@ -4,7 +4,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -13,24 +12,22 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from core.config import get_settings
-
-settings = get_settings()
+from core.config import settings
 
 # Create async engine
 engine: AsyncEngine = create_async_engine(
-    settings.database_pool_url,
-    echo=settings.DEBUG,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,
+    settings.DATABASE_URL,
+    echo=settings.DB_ECHO,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=True,
+    poolclass=NullPool if settings.DEBUG else None,
 )
 
 # Create async session factory
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
+async_session_maker = async_sessionmaker(
+    engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
@@ -38,25 +35,14 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def init_db() -> None:
-    """Initialize database connection pool."""
-    # Test connection
-    async with engine.connect() as conn:
-        await conn.execute("SELECT 1")
-
-
-async def close_db() -> None:
-    """Close database connection pool."""
-    await engine.dispose()
-
-
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for FastAPI to get async database session.
-
-    Yields:
-        AsyncSession: SQLAlchemy async session
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    async with AsyncSessionLocal() as session:
+    Dependency that provides a database session.
+    
+    Yields:
+        AsyncSession: Database session that auto-closes on exit.
+    """
+    async with async_session_maker() as session:
         try:
             yield session
             await session.commit()
@@ -68,13 +54,16 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 @asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database sessions outside of FastAPI dependencies.
-
-    Yields:
-        AsyncSession: SQLAlchemy async session
+async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
     """
-    async with AsyncSessionLocal() as session:
+    Context manager for database sessions.
+    
+    Useful for non-FastAPI contexts like background workers.
+    
+    Yields:
+        AsyncSession: Database session that auto-closes on exit.
+    """
+    async with async_session_maker() as session:
         try:
             yield session
             await session.commit()
@@ -85,11 +74,14 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def get_db_session_for_background() -> AsyncSession:
-    """Get a new session for background tasks.
+async def init_db() -> None:
+    """Initialize database tables."""
+    from models.base import Base
+    
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    Returns:
-        AsyncSession: New SQLAlchemy async session (caller must close)
-    """
-    session = AsyncSessionLocal()
-    return session
+
+async def close_db() -> None:
+    """Close database connections."""
+    await engine.dispose()
