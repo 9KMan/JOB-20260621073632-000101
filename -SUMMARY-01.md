@@ -1,26 +1,28 @@
-// -SUMMARY-01.md
 # Phase 2 Summary — Technical Stack
 
-## Quick Reference
+## AP Automation Core Engine — FinaRo
 
-| Component | Technology |
-|-----------|------------|
-| Language | Python 3.11+ |
-| Framework | FastAPI |
-| Database | PostgreSQL 15+ |
-| ORM | SQLAlchemy 2.0 (async) |
-| Migrations | Alembic |
-| Auth | JWT (HS256) + bcrypt |
-| Testing | pytest + pytest-asyncio |
-| Container | Docker + docker-compose |
+### Technology Choices
 
-## Key Architecture Decisions
+| Component | Choice | Version |
+|---|---|---|
+| Language | Python | 3.11+ |
+| Web Framework | FastAPI | 0.110+ |
+| Database | PostgreSQL | 15+ |
+| ORM | SQLAlchemy (async) | 2.0+ |
+| Migrations | Alembic | 1.13+ |
+| Connection Pooling | PGBouncer | - |
+| Authentication | JWT (HS256) + bcrypt | - |
+| Testing | pytest + pytest-asyncio | 8.1+ / 0.23+ |
 
-1. **UUID Primary Keys** — All tables use UUIDs, not auto-increment
-2. **Async-First** — SQLAlchemy async engine, async FastAPI endpoints
-3. **Layered Services** — Anchoring → Cascade → Scoring → Learning
-4. **Versioned API** — All routes under `/api/v1/`
-5. **Environment Config** — All settings via pydantic-settings
+### Configuration
 
-## Project Structure
+All settings via environment variables using `pydantic-settings`:
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `JWT_SECRET_KEY` / `JWT_ALGORITHM` — Token signing
+- `THRESHOLD_HIGH` / `THRESHOLD_MID` / `THRESHOLD_LOW` — Decision thresholds
+- `TOLERANCE_PRICE` / `TOLERANCE_QTY` — Matching tolerances
+
+### Project Structure
 

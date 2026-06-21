@@ -1,16 +1,7 @@
 # core/__init__.py
-"""
-Core package initialization.
-
-This module exposes the core application components including
-configuration, database, and security utilities.
-"""
+"""Core utilities and configuration."""
 
 from core.config import settings
-from core.database import get_db, DatabaseManager
+from core.database import get_db_session, Base, engine
 
-__all__ = [
-    "settings",
-    "get_db",
-    "DatabaseManager",
-]
+__all__ = ["settings", "get_db_session", "Base", "engine"]

@@ -1,9 +1,5 @@
 # models/__init__.py
-"""
-Data models package.
-
-Exports all SQLAlchemy models for easy importing.
-"""
+"""Database models package."""
 
 from models.base import Base
 from models.invoice import Invoice, InvoiceLine
@@ -16,23 +12,11 @@ from models.enums import (
     PurchaseOrderStatus,
     DeliveryNoteStatus,
     MatchDecision,
-    MatchConfidence,
-    ExceptionType,
-    ExceptionStatus,
+    MatchStatus,
 )
 
 __all__ = [
-    # Base
     "Base",
-    # Enums
-    "InvoiceStatus",
-    "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
-    "MatchDecision",
-    "MatchConfidence",
-    "ExceptionType",
-    "ExceptionStatus",
-    # Models
     "Invoice",
     "InvoiceLine",
     "PurchaseOrder",
@@ -41,4 +25,9 @@ __all__ = [
     "DeliveryNoteLine",
     "BalanceLedger",
     "CrossRef",
+    "InvoiceStatus",
+    "PurchaseOrderStatus",
+    "DeliveryNoteStatus",
+    "MatchDecision",
+    "MatchStatus",
 ]
