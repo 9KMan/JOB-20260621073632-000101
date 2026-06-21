@@ -1,103 +1,74 @@
-# docker-compose.yml
-version: "3.9"
+// docker-compose.yml
+version: '3.8'
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
+    container_name: finaro-ap-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ap_automation
-      - PGBOUNCER_HOST=pgbouncer
-      - PGBOUNCER_PORT=5432
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/finaro_ap
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
       - JWT_ALGORITHM=HS256
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=90
-      - THRESHOLD_MID=70
-      - THRESHOLD_LOW=50
-      - TOLERANCE_PRICE=5
-      - TOLERANCE_QTY=10
+      - DEBUG=true
       - LOG_LEVEL=INFO
+      - MATCHING_WEIGHT_LINE_LEVEL=70
+      - MATCHING_WEIGHT_AMOUNT=20
+      - MATCHING_WEIGHT_DATE=10
+      - AUTO_APPROVE_THRESHOLD=95
+      - HUMAN_REVIEW_THRESHOLD=70
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    volumes:
+      - ./src:/app/src
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+      "
     networks:
-      - ap-network
-    restart: unless-stopped
+      - finaro-network
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap-automation-postgres
+  db:
+    image: postgres:16-alpine
+    container_name: finaro-ap-db
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=ap_automation
+      - POSTGRES_DB=finaro_ap
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d finaro_ap"]
+      interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - ap-network
-    restart: unless-stopped
+      - finaro-network
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: finaro-pgadmin
     environment:
-      - DATABASE_URL=postgres:5432
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - SERVER_IDLE_TIMEOUT=600
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
     ports:
-      - "5433:5432"
+      - "5050:80"
     depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo show version | nc localhost 5432 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - db
     networks:
-      - ap-network
-    restart: unless-stopped
+      - finaro-network
 
-  alembic:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-automation-alembic
-    command: ["alembic", "upgrade", "head"]
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ap_automation
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ap-network
+networks:
+  finaro-network:
+    driver: bridge
 
 volumes:
   postgres_data:
-
-networks:
-  ap-network:
-    driver: bridge

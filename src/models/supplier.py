@@ -1,28 +1,71 @@
 // src/models/supplier.py
-"""Supplier model definition."""
-from sqlalchemy import String
+"""Supplier model."""
+from decimal import Decimal
+from typing import List, Optional
+
+from sqlalchemy import Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import BaseModel
 
 
 class Supplier(BaseModel):
-    """Supplier entity representing vendors in the system."""
+    """Supplier/vendor model."""
     
     __tablename__ = "suppliers"
     
-    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    tax_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    code: Mapped[str] = mapped_column(
+        String(length=50),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(
+        String(length=255),
+        nullable=False,
+    )
+    email: Mapped[Optional[str]] = mapped_column(
+        String(length=255),
+        nullable=True,
+    )
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(length=50),
+        nullable=True,
+    )
+    address: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    tax_id: Mapped[Optional[str]] = mapped_column(
+        String(length=50),
+        nullable=True,
+    )
+    payment_terms_days: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
     
-    # Relationships
-    purchase_orders = relationship("PurchaseOrder", back_populates="supplier")
-    invoices = relationship("Invoice", back_populates="supplier")
-    delivery_notes = relationship("DeliveryNote", back_populates="supplier")
+    purchase_orders: Mapped[List["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        back_populates="supplier",
+    )
+    invoices: Mapped[List["Invoice"]] = relationship(
+        "Invoice",
+        back_populates="supplier",
+    )
+    delivery_notes: Mapped[List["DeliveryNote"]] = relationship(
+        "DeliveryNote",
+        back_populates="supplier",
+    )
+    cross_references: Mapped[List["CrossReference"]] = relationship(
+        "CrossReference",
+        back_populates="supplier",
+    )
     
     def __repr__(self) -> str:
-        return f"<Supplier(id={self.id}, name={self.name}, code={self.code})>"
+        return f"<Supplier {self.code}: {self.name}>"

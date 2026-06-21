@@ -1,52 +1,46 @@
 // src/models/user.py
 """User model for authentication."""
-import uuid
-from typing import TYPE_CHECKING
-
-from sqlalchemy import String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import BaseModel
 
-if TYPE_CHECKING:
-    from src.models.purchase_order import PurchaseOrder
 
-
-class User(BaseModel):
+class User(BaseModel, Base):
     """User model for authentication and authorization."""
-
+    
     __tablename__ = "users"
-
+    
     email: Mapped[str] = mapped_column(
-        String(255),
+        String(length=255),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
+    )
+    username: Mapped[str] = mapped_column(
+        String(length=100),
+        unique=True,
+        nullable=False,
+        index=True,
     )
     hashed_password: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False
+        String(length=255),
+        nullable=False,
     )
-    full_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False
+    full_name: Mapped[str | None] = mapped_column(
+        String(length=255),
+        nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(
+        Boolean,
         default=True,
-        nullable=False
+        nullable=False,
     )
     is_superuser: Mapped[bool] = mapped_column(
+        Boolean,
         default=False,
-        nullable=False
+        nullable=False,
     )
-
-    # Relationships
-    purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(
-        "PurchaseOrder",
-        back_populates="created_by_user",
-        foreign_keys="PurchaseOrder.created_by",
-    )
-
+    
     def __repr__(self) -> str:
         return f"<User {self.email}>"
