@@ -1,32 +1,44 @@
 // docs/architecture.md
-# FinaRo — AP Automation Core Engine Architecture
+# FinaRo — AP Automation Core Engine
 
-## 1. Project Overview
+## Architecture Documentation
 
-**Project Name:** FinaRo — AP Automation Core Engine  
-**Client:** Finaro  
-**Type:** 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order)  
-**Budget:** $14,250–$21,375 (150–225 hrs @ $95/hr)  
-**Timeline:** 4–8 weeks
+---
 
-FinaRo is an Accounts Payable automation engine that performs intelligent 3-way matching between invoices, delivery notes (DN), and purchase orders (PO). The system establishes a deterministic anchor using POs as the single source of truth, performs cascade matching across document pairs, and resolves partial matches through a balances ledger mechanism.
+## 1. Project Identity
+
+| Field | Value |
+|---|---|
+| Project Name | FinaRo — AP Automation Core Engine |
+| Client | Finaro |
+| Type | 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order) |
+| Tier | PREMIUM |
+| Budget | $14,250–$21,375 (150–225 hrs @ $95/hr) |
+| Timeline | 4–8 weeks |
+| GitHub | https://github.com/9KMan/JOB-20260621073632-000101 |
+| Rate | $95/hr |
 
 ---
 
 ## 2. Technical Stack
 
 | Component | Technology |
-|-----------|------------|
+|---|---|
 | Backend | Python 3.11+, FastAPI |
 | Database | PostgreSQL 15+ |
-| ORM | SQLAlchemy 2.0 |
+| ORM | SQLAlchemy 2.0+ |
 | Migrations | Alembic |
-| Testing | pytest |
+| Authentication | JWT (HS256) |
+| Password Hashing | bcrypt |
+| Testing | pytest, pytest-asyncio |
 | Containerization | Docker, docker-compose |
-| Authentication | JWT (HS256), bcrypt |
-| API | RESTful JSON endpoints |
+| API Documentation | OpenAPI/Swagger (auto-generated) |
 
 ---
 
-## 3. System Architecture
+## 3. Architecture Overview
+
+The FinaRo AP Automation Core Engine implements a 3-way matching system for accounts payable automation. The system matches Invoices, Delivery Notes (GRN/Goods Receipt Notes), and Purchase Orders using a multi-layer matching architecture.
+
+### 3.1 High-Level Architecture Diagram
 
