@@ -1,34 +1,7 @@
 # api/__init__.py
-"""API package for FastAPI routes and schemas."""
+"""API package for AP Automation Engine.
 
-from api.schemas import (
-    InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
-    PurchaseOrderCreate,
-    PurchaseOrderResponse,
-    DeliveryNoteCreate,
-    DeliveryNoteResponse,
-    MatchTriggerRequest,
-    MatchDecisionResponse,
-    ExceptionResponse,
-    ExceptionResolveRequest,
-    PaginatedResponse,
-    ErrorResponse,
-)
+Contains FastAPI routers and Pydantic schemas.
+"""
 
-__all__ = [
-    "InvoiceCreate",
-    "InvoiceUpdate",
-    "InvoiceResponse",
-    "PurchaseOrderCreate",
-    "PurchaseOrderResponse",
-    "DeliveryNoteCreate",
-    "DeliveryNoteResponse",
-    "MatchTriggerRequest",
-    "MatchDecisionResponse",
-    "ExceptionResponse",
-    "ExceptionResolveRequest",
-    "PaginatedResponse",
-    "ErrorResponse",
-]
+__all__ = ["schemas"]

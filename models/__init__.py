@@ -1,13 +1,18 @@
 # models/__init__.py
-"""Data models package."""
+"""Database models for AP Automation Engine.
+
+This package contains all SQLAlchemy models representing the database schema.
+"""
 
 from models.base import Base
 from models.enums import (
+    DecisionType,
+    DocumentStatus,
+    ExceptionReason,
+    ExceptionStatus,
     InvoiceStatus,
+    MatchingStatus,
     PurchaseOrderStatus,
-    DeliveryNoteStatus,
-    MatchDecision,
-    ExceptionType,
 )
 from models.invoice import Invoice, InvoiceLine
 from models.purchase_order import PurchaseOrder, PurchaseOrderLine
@@ -16,12 +21,17 @@ from models.balance_ledger import BalanceLedger
 from models.cross_ref import CrossRef
 
 __all__ = [
+    # Base
     "Base",
+    # Enums
+    "DocumentStatus",
     "InvoiceStatus",
     "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
-    "MatchDecision",
-    "ExceptionType",
+    "MatchingStatus",
+    "DecisionType",
+    "ExceptionReason",
+    "ExceptionStatus",
+    # Models
     "Invoice",
     "InvoiceLine",
     "PurchaseOrder",
