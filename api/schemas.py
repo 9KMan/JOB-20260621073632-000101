@@ -1,69 +1,112 @@
 // api/schemas.py
-"""Shared Pydantic request/response schemas.
+"""
+Shared Pydantic request/response schemas.
 
-Contains common schemas used across multiple endpoints.
+These schemas are used across multiple API endpoints for common
+request validation and response formatting.
 """
 
-from datetime import datetime
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
-from uuid import UUID
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class BaseSchema(BaseModel):
-    """Base schema with common configuration."""
-
-    model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        json_encoders={Decimal: str, datetime: lambda v: v.isoformat()},
-    )
+T = TypeVar("T")
 
 
-class PaginationParams(BaseModel):
-    """Pagination parameters."""
+class HealthCheck(BaseModel):
+    """Health check response schema."""
 
-    skip: int = Field(default=0, ge=0)
-    limit: int = Field(default=100, ge=1, le=1000)
-    order_by: str | None = Field(default=None)
-    order_dir: str = Field(default="asc", pattern="^(asc|desc)$")
-
-
-class PaginatedResponse(BaseModel):
-    """Paginated response wrapper."""
-
-    items: list[Any]
-    total: int
-    skip: int
-    limit: int
-    has_more: bool
-
-
-class HealthCheckResponse(BaseModel):
-    """Health check response."""
-
-    status: str = "healthy"
-    version: str = "0.1.0"
-    database: str = "connected"
-    timestamp: datetime
-
-
-class ErrorDetail(BaseModel):
-    """Error detail schema."""
-
-    code: str
-    message: str
-    field: str | None = None
-    details: dict[str, Any] | None = None
+    status: str = Field(default="healthy")
+    version: str = Field(default="0.1.0")
+    database: str = Field(default="connected")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ErrorResponse(BaseModel):
-    """Error response schema."""
+    """Standard error response schema."""
 
-    error: ErrorDetail
-    request_id: str | None = None
+    error: str = Field(..., description="Error type/code")
+    message: str = Field(..., description="Human-readable error message")
+    details: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional error details"
+    )
+    request_id: str | None = Field(
+        default=None,
+        description="Request ID for tracing"
+    )
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Generic paginated response wrapper."""
+
+    items: list[T] = Field(..., description="List of items")
+    total: int = Field(..., description="Total number of items")
+    page: int = Field(..., ge=1, description="Current page number")
+    page_size: int = Field(..., ge=1, description="Items per page")
+    total_pages: int = Field(..., ge=0, description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there are more pages")
+    has_prev: bool = Field(..., description="Whether there are previous pages")
+
+
+class PaginationParams(BaseModel):
+    """Pagination parameters for list endpoints."""
+
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("page")
+    @classmethod
+    def validate_page(cls, v: int) -> int:
+        if v < 1:
+            return 1
+        return v
+
+    @field_validator("page_size")
+    @classmethod
+    def validate_page_size(cls, v: int) -> int:
+        if v < 1:
+            return 20
+        if v > 100:
+            return 100
+        return v
+
+
+class DateRangeParams(BaseModel):
+    """Date range filter parameters."""
+
+    start_date: date | None = Field(default=None)
+    end_date: date | None = Field(default=None)
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date(cls, v: date | None, info) -> date | None:
+        start = info.data.get("start_date")
+        if v and start and v < start:
+            raise ValueError("end_date must be after start_date")
+        return v
+
+
+class MoneyAmount(BaseModel):
+    """Monetary amount with currency."""
+
+    model_config = ConfigDict(decimal_precision=2)
+
+    amount: Decimal = Field(..., description="Monetary amount")
+    currency: str = Field(default="USD", description="ISO 4217 currency code")
+
+
+class Quantity(BaseModel):
+    """Quantity with unit of measure."""
+
+    model_config = ConfigDict(decimal_precision=4)
+
+    quantity: Decimal = Field(..., description="Numeric quantity")
+    unit: str = Field(default="EA", description="Unit of measure code")
 
 
 class TimestampMixin(BaseModel):
@@ -73,74 +116,7 @@ class TimestampMixin(BaseModel):
     updated_at: datetime
 
 
-class MoneyAmount(BaseModel):
-    """Money amount with currency."""
+class UUIDMixin(BaseModel):
+    """Mixin for UUID id field."""
 
-    amount: Decimal
-    currency: str = "USD"
-
-
-class QuantityAmount(BaseModel):
-    """Quantity with unit of measure."""
-
-    quantity: Decimal
-    unit_of_measure: str | None = None
-
-
-class MatchScore(BaseModel):
-    """Match score result."""
-
-    score: float = Field(ge=0, le=100)
-    decision: str
-    confidence: float = Field(ge=0, le=1)
-    factors: dict[str, Any] | None = None
-
-
-class VendorReference(BaseModel):
-    """Vendor reference schema."""
-
-    vendor_id: str | None = None
-    vendor_number: str
-    vendor_name: str
-
-
-class ProductReference(BaseModel):
-    """Product reference schema."""
-
-    sku: str | None = None
-    name: str | None = None
-    description: str | None = None
-
-
-class AuditInfo(BaseModel):
-    """Audit information schema."""
-
-    created_at: datetime
-    updated_at: datetime
-    created_by: str | None = None
-    updated_by: str | None = None
-
-
-class BulkOperationResult(BaseModel):
-    """Result of a bulk operation."""
-
-    success_count: int
-    failure_count: int
-    total_count: int
-    errors: list[ErrorDetail] = Field(default_factory=list)
-
-
-class BulkIngestRequest(BaseModel):
-    """Request for bulk ingestion of records."""
-
-    items: list[dict[str, Any]]
-    validate_only: bool = Field(default=False)
-    skip_duplicates: bool = Field(default=True)
-
-
-class BulkIngestResponse(BaseModel):
-    """Response for bulk ingestion."""
-
-    result: BulkOperationResult
-    ingested_ids: list[str] = Field(default_factory=list)
-    skipped_ids: list[str] = Field(default_factory=list)
+    id: uuid.UUID

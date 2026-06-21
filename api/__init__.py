@@ -1,6 +1,18 @@
 // api/__init__.py
-"""API package initialization."""
+"""
+API package for FastAPI endpoints.
 
-from api.v1.router import api_router
+This package contains all API routes, schemas, and utilities.
+"""
 
-__all__ = ["api_router"]
+from api.schemas import (
+    ErrorResponse,
+    HealthCheck,
+    PaginatedResponse,
+)
+
+__all__ = [
+    "ErrorResponse",
+    "HealthCheck",
+    "PaginatedResponse",
+]
