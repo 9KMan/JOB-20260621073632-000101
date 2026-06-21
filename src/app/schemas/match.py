@@ -1,143 +1,129 @@
 // src/app/schemas/match.py
 """Match schemas."""
-import uuid
-from datetime import datetime
-from decimal import Decimal
-from typing import Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.common import BaseSchema, TimestampMixin, UUIDMixin
 
 
 class MatchLineBase(BaseModel):
-    """Base schema for Match line."""
+    """Match Line base schema."""
 
-    po_line_id: Optional[uuid.UUID] = None
-    invoice_line_id: Optional[uuid.UUID] = None
-    dn_line_id: Optional[uuid.UUID] = None
-    product_match_score: Decimal = Decimal("0.0000")
-    quantity_match_score: Decimal = Decimal("0.0000")
-    price_match_score: Decimal = Decimal("0.0000")
-    line_total_score: Decimal = Decimal("0.0000")
-    po_quantity: Optional[Decimal] = None
+    match_type: str
+    score: Decimal = Field(ge=0, le=100)
+    quantity_match: bool = False
+    price_match: bool = False
+    product_match: bool = False
     invoice_quantity: Optional[Decimal] = None
     dn_quantity: Optional[Decimal] = None
-    quantity_variance: Decimal = Decimal("0.0000")
-    po_line_total: Optional[Decimal] = None
-    invoice_line_total: Optional[Decimal] = None
-    dn_line_total: Optional[Decimal] = None
-    amount_variance: Decimal = Decimal("0.00")
-    metadata: Optional[dict] = None
+    po_quantity: Optional[Decimal] = None
+    matched_quantity: Decimal = Field(default=Decimal("0.00"))
+    invoice_amount: Optional[Decimal] = None
+    po_amount: Optional[Decimal] = None
+    variance_quantity: Decimal = Field(default=Decimal("0.00"))
+    variance_amount: Decimal = Field(default=Decimal("0.00"))
 
 
 class MatchLineCreate(MatchLineBase):
-    """Schema for creating a Match line."""
+    """Match Line creation schema."""
 
-    match_id: uuid.UUID
+    invoice_line_id: Optional[UUID] = None
+    dn_line_id: Optional[UUID] = None
+    po_line_id: Optional[UUID] = None
 
 
-class MatchLineResponse(MatchLineBase):
-    """Schema for Match line response."""
+class MatchLineResponse(MatchLineBase, UUIDMixin, TimestampMixin):
+    """Match Line response schema."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
-    match_id: uuid.UUID
-    created_at: datetime
-    updated_at: datetime
+    invoice_line_id: Optional[str] = None
+    dn_line_id: Optional[str] = None
+    po_line_id: Optional[str] = None
 
 
 class MatchBase(BaseModel):
-    """Base schema for Match."""
+    """Match base schema."""
 
-    purchase_order_id: Optional[uuid.UUID] = None
-    invoice_id: Optional[uuid.UUID] = None
-    delivery_note_id: Optional[uuid.UUID] = None
+    invoice_id: Optional[UUID] = None
+    dn_id: Optional[UUID] = None
+    po_id: Optional[UUID] = None
     match_type: str
-    match_score: Decimal = Decimal("0.0000")
+    status: str = "pending"
+    result: str = "no_match"
+    overall_score: Decimal = Field(default=Decimal("0.00"))
+    line_level_score: Decimal = Field(default=Decimal("0.00"))
+    amount_score: Decimal = Field(default=Decimal("0.00"))
+    date_score: Decimal = Field(default=Decimal("0.00"))
+    invoice_amount: Optional[Decimal] = None
+    dn_amount: Optional[Decimal] = None
+    po_amount: Optional[Decimal] = None
+    variance_amount: Decimal = Field(default=Decimal("0.00"))
+    match_date: date
     notes: Optional[str] = None
-    metadata: Optional[dict] = None
 
 
 class MatchCreate(MatchBase):
-    """Schema for creating a Match."""
+    """Match creation schema."""
 
-    lines: List[MatchLineCreate] = Field(default_factory=list)
+    lines: list[MatchLineCreate] = Field(default_factory=list)
 
 
 class MatchUpdate(BaseModel):
-    """Schema for updating a Match."""
+    """Match update schema."""
 
-    decision: Optional[str] = None
+    status: Optional[str] = None
+    result: Optional[str] = None
+    decision_notes: Optional[str] = None
     notes: Optional[str] = None
-    dispute_reason: Optional[str] = None
-    metadata: Optional[dict] = None
 
 
-class MatchDecisionUpdate(BaseModel):
-    """Schema for updating match decision."""
-
-    decision: str = Field(..., description="AUTO_APPROVED, HUMAN_REVIEW, REJECTED, or DISPUTED")
-    notes: Optional[str] = None
-    dispute_reason: Optional[str] = None
-
-
-class MatchResponse(MatchBase):
-    """Schema for Match response."""
+class MatchResponse(MatchBase, UUIDMixin, TimestampMixin):
+    """Match response schema."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
-    line_level_score: Decimal
-    amount_score: Decimal
-    date_score: Decimal
-    po_amount: Decimal
-    invoice_amount: Decimal
-    dn_amount: Decimal
-    variance_amount: Decimal
-    decision: str
-    confirmed_by_id: Optional[uuid.UUID] = None
-    confirmed_at: Optional[datetime] = None
-    lines: List[MatchLineResponse] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    decision_date: Optional[date] = None
+    decision_notes: Optional[str] = None
+    scoring_details: Optional[dict[str, Any]] = None
+    lines: list[MatchLineResponse] = Field(default_factory=list)
 
 
 class MatchListResponse(BaseModel):
-    """Schema for paginated Match list."""
+    """Match list response schema."""
 
-    items: List[MatchResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    invoice_id: Optional[str] = None
+    dn_id: Optional[str] = None
+    po_id: Optional[str] = None
+    match_type: str
+    status: str
+    result: str
+    overall_score: Decimal
+    match_date: date
+    created_at: datetime
 
 
-class MatchScoreSummary(BaseModel):
-    """Summary of match scores."""
+class MatchDecisionRequest(BaseModel):
+    """Request schema for match decision."""
 
-    total_score: Decimal
+    match_id: UUID
+    decision: str = Field(pattern="^(confirmed|rejected)$")
+    notes: Optional[str] = None
+
+
+class MatchScoreBreakdown(BaseModel):
+    """Match score breakdown."""
+
     line_level_score: Decimal
     amount_score: Decimal
     date_score: Decimal
-    matched_lines: int
-    total_lines: int
-    matched_amount: Decimal
-    variance_amount: Decimal
-
-
-class ThreeWayMatchRequest(BaseModel):
-    """Request for 3-way matching."""
-
-    invoice_id: uuid.UUID
-    delivery_note_ids: List[uuid.UUID] = Field(default_factory=list)
-    po_reference: Optional[str] = None
-    auto_match: bool = Field(default=True, description="Whether to auto-create matches")
-
-
-class ThreeWayMatchResponse(BaseModel):
-    """Response for 3-way matching."""
-
-    matches: List[MatchResponse]
-    unmatched_invoices: List[uuid.UUID] = Field(default_factory=list)
-    unmatched_delivery_notes: List[uuid.UUID] = Field(default_factory=list)
-    summary: MatchScoreSummary
+    overall_score: Decimal
+    details: dict[str, Any] = Field(default_factory=dict)

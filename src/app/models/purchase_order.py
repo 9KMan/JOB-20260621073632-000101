@@ -1,34 +1,28 @@
 // src/app/models/purchase_order.py
-"""Purchase Order models."""
-import uuid
-from datetime import date, datetime
+"""Purchase Order model."""
+
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING
+from uuid import UUID
 
-from sqlalchemy import (
-    String,
-    Numeric,
-    Date,
-    DateTime,
-    Text,
-    ForeignKey,
-    Enum as SQLEnum,
-    Index,
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models.base import TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from app.models.match import Match
-
-PO_STATUS = Enum("PO_STATUS", ["DRAFT", "SENT", "CONFIRMED", "PARTIAL", "CLOSED", "CANCELLED"])
+from app.models.base import BaseModel
 
 
-class PurchaseOrder(Base, UUIDMixin, TimestampMixin):
+class POStatus(str, Enum):
+    """Purchase order status enumeration."""
+
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+class PurchaseOrder(BaseModel):
     """Purchase Order model."""
 
     __tablename__ = "purchase_orders"
@@ -36,68 +30,120 @@ class PurchaseOrder(Base, UUIDMixin, TimestampMixin):
     po_number: Mapped[str] = mapped_column(
         String(50),
         unique=True,
-        nullable=False,
         index=True,
-    )
-    supplier_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    supplier_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[PO_STATUS] = mapped_column(
-        SQLEnum(PO_STATUS, name="po_status"),
-        default=PO_STATUS.DRAFT,
         nullable=False,
     )
-    order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    supplier_id: Mapped[str] = mapped_column(
+        String(100),
+        index=True,
+        nullable=False,
+    )
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    supplier_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[POStatus] = mapped_column(
+        SQLEnum(POStatus),
+        default=POStatus.DRAFT,
+        nullable=False,
+    )
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    po_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    expected_delivery_date: Mapped[Date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_fully_matched: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
 
     # Relationships
-    lines: Mapped[list["PurchaseOrderLine"]] = relationship(
-        "PurchaseOrderLine",
+    lines: Mapped[list["POLine"]] = relationship(
+        "POLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
-        lazy="selectin",
+    )
+    invoice_matches: Mapped[list["Match"]] = relationship(
+        "Match",
+        foreign_keys="Match.po_id",
+        back_populates="purchase_order",
+    )
+    delivery_note_matches: Mapped[list["Match"]] = relationship(
+        "Match",
+        foreign_keys="Match.po_id",
+        back_populates="purchase_order_for_dn",
     )
 
-    __table_args__ = (
-        Index("ix_po_supplier_status", "supplier_id", "status"),
-        Index("ix_po_order_date", "order_date"),
-    )
+    def __repr__(self) -> str:
+        return f"<PurchaseOrder {self.po_number}>"
 
 
-class PurchaseOrderLine(Base, UUIDMixin, TimestampMixin):
+class POLine(BaseModel):
     """Purchase Order Line Item model."""
 
-    __tablename__ = "purchase_order_lines"
+    __tablename__ = "po_lines"
 
-    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
+    po_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=False,
         index=True,
+        nullable=False,
     )
     line_number: Mapped[int] = mapped_column(nullable=False)
     product_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    product_description: Mapped[str] = mapped_column(Text, nullable=False)
+    product_description: Mapped[str] = mapped_column(String(500), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA")
     unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+    )
+    expected_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    delivered_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.00"),
+    )
 
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
         "PurchaseOrder",
         back_populates="lines",
     )
-
-    __table_args__ = (
-        Index("ix_pol_po_id", "purchase_order_id"),
-        Index("ix_pol_product_code", "product_code"),
+    matched_lines: Mapped[list["MatchLine"]] = relationship(
+        "MatchLine",
+        back_populates="po_line",
     )
+
+    def __repr__(self) -> str:
+        return f"<POLine {self.line_number} - {self.product_code}>"
+
+
+# Import at bottom to avoid circular imports
+from app.models.invoice import Invoice, InvoiceLine
+from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from app.models.match import Match, MatchLine

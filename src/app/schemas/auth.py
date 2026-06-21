@@ -1,60 +1,59 @@
 // src/app/schemas/auth.py
-"""
-Authentication schemas.
-"""
-from typing import Optional
-from datetime import datetime
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+"""Authentication schemas."""
 
-from app.schemas.common import BaseSchema, TimestampMixin
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
-class TokenSchema(BaseModel):
+class Token(BaseModel):
     """Token response schema."""
+
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
-    expires_in: int
 
 
 class TokenPayload(BaseModel):
     """Token payload schema."""
-    sub: str  # user id
-    exp: datetime
-    type: str  # access or refresh
-    role: Optional[str] = None
+
+    sub: str
+    exp: int
 
 
-class LoginRequest(BaseModel):
-    """Login request schema."""
-    username: str = Field(..., min_length=3, max_length=100)
-    password: str = Field(..., min_length=6)
+class UserBase(BaseModel):
+    """Base user schema."""
 
-
-class UserCreate(BaseSchema):
-    """User creation schema."""
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=100)
-    password: str = Field(..., min_length=6)
-    full_name: Optional[str] = Field(default=None, max_length=255)
-    role: str = Field(default="user", pattern="^(admin|user|reviewer)$")
+    full_name: str = Field(min_length=1, max_length=255)
 
 
-class UserUpdate(BaseSchema):
+class UserCreate(UserBase):
+    """User creation schema."""
+
+    password: str = Field(min_length=8, max_length=100)
+
+
+class UserUpdate(BaseModel):
     """User update schema."""
-    email: Optional[EmailStr] = None
-    username: Optional[str] = Field(default=None, min_length=3, max_length=100)
-    full_name: Optional[str] = Field(default=None, max_length=255)
-    role: Optional[str] = Field(default=None, pattern="^(admin|user|reviewer)$")
-    is_active: Optional[bool] = None
+
+    email: EmailStr | None = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    password: str | None = Field(default=None, min_length=8, max_length=100)
+    is_active: bool | None = None
 
 
-class UserResponse(BaseSchema, TimestampMixin):
+class UserResponse(UserBase):
     """User response schema."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
-    email: str
-    username: str
-    full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool
-    role: str
+    created_at: str
+    updated_at: str
+
+
+class UserLogin(BaseModel):
+    """User login schema."""
+
+    username: EmailStr
+    password: str

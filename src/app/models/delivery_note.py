@@ -1,109 +1,129 @@
 // src/app/models/delivery_note.py
-"""Delivery Note models."""
-import uuid
-from datetime import date, datetime
+"""Delivery Note model."""
+
 from decimal import Decimal
 from enum import Enum
+from uuid import UUID
 
-from sqlalchemy import (
-    String,
-    Numeric,
-    Date,
-    DateTime,
-    Text,
-    ForeignKey,
-    Enum as SQLEnum,
-    Index,
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models.base import TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from app.models.match import Match
-
-DN_STATUS = Enum(
-    "DN_STATUS",
-    ["DRAFT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "PARTIAL", "CANCELLED"],
-)
+from app.models.base import BaseModel
 
 
-class DeliveryNote(Base, UUIDMixin, TimestampMixin):
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status enumeration."""
+
+    RECEIVED = "received"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+    RETURNED = "returned"
+    CANCELLED = "cancelled"
+
+
+class DeliveryNote(BaseModel):
     """Delivery Note model."""
 
     __tablename__ = "delivery_notes"
 
     dn_number: Mapped[str] = mapped_column(
-        String(50),
+        String(100),
         unique=True,
-        nullable=False,
         index=True,
-    )
-    supplier_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[DN_STATUS] = mapped_column(
-        SQLEnum(DN_STATUS, name="dn_status"),
-        default=DN_STATUS.DRAFT,
         nullable=False,
     )
-    po_reference: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
-    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)
-    received_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    supplier_id: Mapped[str] = mapped_column(
+        String(100),
+        index=True,
+        nullable=False,
+    )
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    po_reference: Mapped[str | None] = mapped_column(
+        String(50),
+        index=True,
+        nullable=True,
+    )
+    status: Mapped[DeliveryNoteStatus] = mapped_column(
+        SQLEnum(DeliveryNoteStatus),
+        default=DeliveryNoteStatus.RECEIVED,
+        nullable=False,
+    )
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    delivery_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    received_date: Mapped[Date] = mapped_column(Date, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_fully_matched: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
 
     # Relationships
     lines: Mapped[list["DeliveryNoteLine"]] = relationship(
         "DeliveryNoteLine",
         back_populates="delivery_note",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
     matches: Mapped[list["Match"]] = relationship(
         "Match",
+        foreign_keys="Match.dn_id",
         back_populates="delivery_note",
-        foreign_keys="Match.delivery_note_id",
     )
 
-    __table_args__ = (
-        Index("ix_dn_supplier_status", "supplier_id", "status"),
-        Index("ix_dn_delivery_date", "delivery_date"),
-        Index("ix_dn_po_reference", "po_reference"),
-    )
+    def __repr__(self) -> str:
+        return f"<DeliveryNote {self.dn_number}>"
 
 
-class DeliveryNoteLine(Base, UUIDMixin, TimestampMixin):
+class DeliveryNoteLine(BaseModel):
     """Delivery Note Line Item model."""
 
     __tablename__ = "delivery_note_lines"
 
-    delivery_note_id: Mapped[uuid.UUID] = mapped_column(
+    dn_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=False,
         index=True,
+        nullable=False,
     )
     line_number: Mapped[int] = mapped_column(nullable=False)
-    product_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    product_description: Mapped[str] = mapped_column(Text, nullable=False)
-    quantity_delivered: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    quantity_accepted: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=True)
-    quantity_rejected: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=True)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    product_description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA")
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.00"),
+    )
+    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    matched_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.00"),
+    )
 
     # Relationships
     delivery_note: Mapped["DeliveryNote"] = relationship(
         "DeliveryNote",
         back_populates="lines",
     )
-
-    __table_args__ = (
-        Index("ix_dnl_dn_id", "delivery_note_id"),
-        Index("ix_dnl_product_code", "product_code"),
+    matched_lines: Mapped[list["MatchLine"]] = relationship(
+        "MatchLine",
+        back_populates="dn_line",
     )
+
+    def __repr__(self) -> str:
+        return f"<DeliveryNoteLine {self.line_number} - {self.product_code}>"
+
+
+# Import at bottom to avoid circular imports
+from app.models.match import Match, MatchLine

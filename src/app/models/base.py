@@ -1,5 +1,6 @@
 // src/app/models/base.py
-"""Base model with common fields."""
+"""Base model classes with common fields."""
+
 import uuid
 from datetime import datetime
 
@@ -7,9 +8,11 @@ from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.database import Base
+
 
 class TimestampMixin:
-    """Mixin to add created_at and updated_at timestamps."""
+    """Mixin that adds created_at and updated_at timestamps."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -25,7 +28,7 @@ class TimestampMixin:
 
 
 class UUIDMixin:
-    """Mixin to add UUID primary key."""
+    """Mixin that adds UUID primary key."""
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -35,12 +38,7 @@ class UUIDMixin:
     )
 
 
-class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
+class BaseModel(Base, TimestampMixin, UUIDMixin):
+    """Base model combining all common mixins."""
 
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        default=None,
-    )
-    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    __abstract__ = True

@@ -1,54 +1,71 @@
 // src/app/config.py
-"""Application configuration from environment variables."""
+"""Application configuration management."""
+
 import os
 from functools import lru_cache
-from typing import Optional
+from typing import Literal
 
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     # Application
-    APP_NAME: str = "FinaRo AP Automation"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
-    API_V1_PREFIX: str = "/api/v1"
+    app_name: str = "FinaRo AP Automation"
+    app_version: str = "1.0.0"
+    environment: Literal["development", "staging", "production"] = "development"
+    debug: bool = False
 
     # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/finaro"
-    DB_POOL_SIZE: int = 10
-    DB_MAX_OVERFLOW: int = 20
-    DB_POOL_TIMEOUT: int = 30
-    DB_POOL_RECYCLE: int = 3600
+    database_url: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/finaro_ap",
+        alias="DATABASE_URL",
+    )
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_echo: bool = False
 
-    # Authentication
-    SECRET_KEY: str = "your-secret-key-change-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Security
+    secret_key: str = Field(
+        default="change-me-in-production-use-strong-secret",
+        alias="SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(
+        default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    # API
+    api_v1_prefix: str = "/api/v1"
+    cors_origins: list[str] = ["*"]
 
-    # Matching Thresholds
-    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
-    MATCH_THRESHOLD_HUMAN_REVIEW: float = 0.70
-    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
-    MATCH_WEIGHT_AMOUNT: float = 0.20
-    MATCH_WEIGHT_DATE: float = 0.10
+    # Logging
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    # Balance Resolution
-    BALANCE_TOLERANCE_AMOUNT: float = 0.01
-    BALANCE_TOLERANCE_PERCENT: float = 0.001
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production."""
+        return self.environment == "production"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development."""
+        return self.environment == "development"
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+settings = get_settings()
