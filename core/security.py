@@ -1,13 +1,13 @@
-// core/security.py
-"""Security utilities for JWT authentication and password hashing.
+# core/security.py
+"""Security utilities for JWT and password management.
 
-Provides secure password hashing using bcrypt and JWT token generation
-using HS256 algorithm as specified in the project requirements.
+Provides JWT token creation/validation and password hashing
+using bcrypt via passlib.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -20,132 +20,112 @@ logger = logging.getLogger(__name__)
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
-    bcrypt__rounds=12,  # Cost factor for bcrypt
+    bcrypt__rounds=12,
 )
-
-# Settings cache
-_settings = get_settings
-
-
-def get_jwt_settings() -> Any:
-    """Get JWT settings (lazy loaded)."""
-    return _settings().jwt
-
-
-def get_app_settings() -> Any:
-    """Get app settings (lazy loaded)."""
-    return _settings()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password.
-    
-    Uses bcrypt for secure comparison that is resistant to timing attacks.
-    
+
     Args:
-        plain_password: The plain text password to verify.
-        hashed_password: The bcrypt hashed password to compare against.
-    
+        plain_password: The plain text password to verify
+        hashed_password: The hashed password to compare against
+
     Returns:
-        bool: True if password matches, False otherwise.
+        True if password matches, False otherwise
     """
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception as e:
-        logger.warning(f"Password verification failed: {e}")
-        return False
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
     """Hash a password using bcrypt.
-    
-    Creates a secure hash of the password that can be stored
-    in the database for later verification.
-    
+
     Args:
-        password: The plain text password to hash.
-    
+        password: The plain text password to hash
+
     Returns:
-        str: The bcrypt hashed password.
+        The bcrypt hashed password
     """
     return pwd_context.hash(password)
 
 
 def create_access_token(
-    data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    data: dict[str, Any],
+    expires_delta: timedelta | None = None,
     token_type: str = "access",
 ) -> str:
     """Create a JWT access token.
-    
-    Generates a JSON Web Token signed with HS256 algorithm.
-    The token includes standard claims and any additional data provided.
-    
-    Args:
-        data: Dictionary of claims to include in the token payload.
-        expires_delta: Optional custom expiration time delta.
-        token_type: Type of token ('access' or 'refresh').
-    
-    Returns:
-        str: The encoded JWT token.
-    """
-    settings = get_app_settings()
-    jwt_settings = get_jwt_settings()
 
-    # Create a copy of the data to avoid modifying the original
+    Args:
+        data: Payload data to encode in the token
+        expires_delta: Optional custom expiration time
+        token_type: Type of token (access or refresh)
+
+    Returns:
+        Encoded JWT token string
+    """
+    settings = get_settings()
+
     to_encode = data.copy()
 
-    # Calculate expiration time
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         if token_type == "refresh":
             expire = datetime.now(timezone.utc) + timedelta(
-                days=jwt_settings.jwt_refresh_token_expire_days
+                days=settings.jwt_refresh_token_expire_days
             )
         else:
             expire = datetime.now(timezone.utc) + timedelta(
-                minutes=jwt_settings.jwt_access_token_expire_minutes
+                minutes=settings.jwt_access_token_expire_minutes
             )
 
-    # Add standard claims
     to_encode.update({
         "exp": expire,
         "iat": datetime.now(timezone.utc),
         "type": token_type,
     })
 
-    # Encode and sign the token
     encoded_jwt = jwt.encode(
-        claims=to_encode,
-        key=jwt_settings.jwt_secret_key,
-        algorithm=jwt_settings.jwt_algorithm,
+        to_encode,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
     )
 
     return encoded_jwt
 
 
-def decode_token(token: str, verify_exp: bool = True) -> Optional[Dict[str, Any]]:
-    """Decode and verify a JWT token.
-    
-    Validates the token signature and optionally the expiration time.
-    
+def create_refresh_token(user_id: str) -> str:
+    """Create a JWT refresh token.
+
     Args:
-        token: The JWT token string to decode.
-        verify_exp: Whether to verify token expiration.
-    
+        user_id: User identifier for the token
+
     Returns:
-        Optional[Dict[str, Any]]: The decoded token payload if valid, None otherwise.
+        Encoded JWT refresh token string
     """
-    settings = get_app_settings()
-    jwt_settings = get_jwt_settings()
+    return create_access_token(
+        data={"sub": user_id, "token_type": "refresh"},
+        token_type="refresh",
+    )
+
+
+def decode_token(token: str) -> dict[str, Any] | None:
+    """Decode and validate a JWT token.
+
+    Args:
+        token: JWT token string to decode
+
+    Returns:
+        Decoded token payload or None if invalid
+    """
+    settings = get_settings()
 
     try:
         payload = jwt.decode(
             token,
-            key=jwt_settings.jwt_secret_key,
-            algorithms=[jwt_settings.jwt_algorithm],
-            options={"verify_exp": verify_exp},
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
         )
         return payload
     except JWTError as e:
@@ -153,185 +133,44 @@ def decode_token(token: str, verify_exp: bool = True) -> Optional[Dict[str, Any]
         return None
 
 
-def create_refresh_token(data: Dict[str, Any]) -> str:
-    """Create a JWT refresh token.
-    
-    Refresh tokens have a longer expiration time than access tokens
-    and are used to obtain new access tokens.
-    
-    Args:
-        data: Dictionary of claims to include in the token payload.
-    
-    Returns:
-        str: The encoded JWT refresh token.
-    """
-    return create_access_token(data, token_type="refresh")
+def verify_access_token(token: str) -> dict[str, Any] | None:
+    """Verify an access token and return its payload.
 
-
-def get_token_payload(token: str) -> Optional["JWTPayload"]:
-    """Extract and validate token payload.
-    
     Args:
-        token: The JWT token string.
-    
+        token: JWT access token string
+
     Returns:
-        Optional[JWTPayload]: Validated payload or None.
+        Token payload if valid, None otherwise
     """
-    from core.security import JWTPayload
-    
     payload = decode_token(token)
+
     if payload is None:
         return None
 
-    return JWTPayload(**payload)
+    if payload.get("type") != "access":
+        logger.warning("Token type mismatch - expected access token")
+        return None
+
+    return payload
 
 
-class JWTPayload:
-    """JWT Token payload model.
-    
-    Represents the claims stored in a JWT token.
-    """
-    
-    def __init__(
-        self,
-        sub: str,
-        exp: datetime,
-        iat: datetime,
-        type: str = "access",
-        **extra: Any,
-    ) -> None:
-        self.sub = sub  # Subject (usually user ID)
-        self.exp = exp  # Expiration time
-        self.iat = iat  # Issued at
-        self.type = type  # Token type
-        self.extra = extra  # Additional claims
-    
-    @property
-    def user_id(self) -> str:
-        """Get user ID from subject claim."""
-        return self.sub
-    
-    @property
-    def is_access_token(self) -> bool:
-        """Check if this is an access token."""
-        return self.type == "access"
-    
-    @property
-    def is_refresh_token(self) -> bool:
-        """Check if this is a refresh token."""
-        return self.type == "refresh"
-    
-    def is_expired(self) -> bool:
-        """Check if the token is expired."""
-        return datetime.now(timezone.utc) > self.exp
-    
-    @classmethod
-    def from_token(cls, token: str) -> Optional["JWTPayload"]:
-        """Create JWTPayload from token string.
-        
-        Args:
-            token: JWT token string.
-        
-        Returns:
-            JWTPayload instance if token is valid, None otherwise.
-        """
-        payload = decode_token(token)
-        if payload is None:
-            return None
-        
-        return cls(**payload)
+def get_token_expiration(token: str) -> datetime | None:
+    """Get the expiration datetime from a token.
 
-
-# Import for type hints
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from fastapi import Depends, HTTPException, status
-    from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-    security = HTTPBearer()
-
-
-async def get_current_user(
-    credentials: "HTTPAuthorizationCredentials" = Depends(security),
-) -> Dict[str, Any]:
-    """FastAPI dependency to get the current authenticated user.
-    
-    Extracts and validates the JWT token from the Authorization header,
-    then returns the user information from the token payload.
-    
     Args:
-        credentials: HTTP Bearer token credentials.
-    
-    Returns:
-        Dict containing user information from the token.
-    
-    Raises:
-        HTTPException: If token is invalid or expired.
-    """
-    from fastapi import HTTPException, status
-    
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+        token: JWT token string
 
-    payload = decode_token(credentials.credentials)
+    Returns:
+        Expiration datetime or None if invalid
+    """
+    payload = decode_token(token)
+
     if payload is None:
-        raise credentials_exception
+        return None
 
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
+    exp = payload.get("exp")
 
-    # You could add database lookup here to get full user info
-    # For now, we just return what's in the token
-    return {
-        "user_id": user_id,
-        "email": payload.get("email"),
-        "roles": payload.get("roles", []),
-    }
+    if exp is None:
+        return None
 
-
-async def get_current_active_user(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, Any]:
-    """Verify that the current user is active.
-    
-    Can be extended to check user status in database.
-    
-    Args:
-        current_user: Current authenticated user from get_current_user.
-    
-    Returns:
-        Dict containing active user information.
-    """
-    # Add any active status checks here
-    # For example, check if user.is_active in database
-    return current_user
-
-
-def create_token_pair(user_id: str, additional_claims: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-    """Create both access and refresh tokens for a user.
-    
-    Convenience function to generate a complete token pair
-    for authentication flows.
-    
-    Args:
-        user_id: The user's unique identifier.
-        additional_claims: Optional additional claims to include.
-    
-    Returns:
-        Dict with 'access_token' and 'refresh_token' keys.
-    """
-    base_claims = {"sub": user_id}
-    if additional_claims:
-        base_claims.update(additional_claims)
-
-    return {
-        "access_token": create_access_token(base_claims),
-        "refresh_token": create_refresh_token(base_claims),
-        "token_type": "bearer",
-    }
+    return datetime.fromtimestamp(exp, tz=timezone.utc)

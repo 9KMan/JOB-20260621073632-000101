@@ -1,12 +1,7 @@
-// api/v1/__init__.py
-"""API v1 package.
+# api/v1/__init__.py
+"""API v1 module.
 
-This package contains versioned API routes:
-- invoices.py: Invoice endpoints
-- purchase_orders.py: PO endpoints
-- delivery_notes.py: Delivery note endpoints
-- matching.py: Matching engine endpoints
-- exceptions.py: Exception handling endpoints
+Contains all versioned API endpoints under /api/v1 prefix.
 """
 
 from api.v1.router import api_router
