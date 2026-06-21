@@ -1,76 +1,99 @@
-// app/schemas/purchase_order.py
+# app/schemas/purchase_order.py
 """Purchase Order schemas."""
-import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class PurchaseOrderLineBase(BaseModel):
     """Base purchase order line schema."""
+
     line_number: int = Field(..., ge=1)
-    product_code: str = Field(..., min_length=1, max_length=100)
-    description: str = Field(..., min_length=1, max_length=500)
-    quantity: Decimal = Field(..., gt=0)
+    product_code: Optional[str] = Field(None, max_length=100)
+    description: str = Field(..., min_length=1)
+    quantity: Decimal = Field(..., ge=0)
     unit_of_measure: str = Field(default="EA", max_length=20)
     unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0, le=1)
-    line_total: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    expected_delivery_date: Optional[str] = None
 
 
 class PurchaseOrderLineCreate(PurchaseOrderLineBase):
-    """Schema for creating a purchase order line."""
+    """Purchase order line creation request."""
+
     pass
 
 
 class PurchaseOrderLineResponse(PurchaseOrderLineBase):
-    """Schema for purchase order line response."""
-    id: uuid.UUID
-    purchase_order_id: uuid.UUID
+    """Purchase order line response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    line_total: Decimal
     created_at: datetime
     updated_at: datetime
-    
-    model_config = {"from_attributes": True}
 
 
 class PurchaseOrderBase(BaseModel):
     """Base purchase order schema."""
+
     po_number: str = Field(..., min_length=1, max_length=50)
-    vendor_id: uuid.UUID
-    order_date: date
-    expected_delivery_date: Optional[date] = None
+    vendor_id: str
+    order_date: str
+    expected_delivery_date: Optional[str] = None
     currency: str = Field(default="USD", max_length=3)
+    shipping_cost: Decimal = Field(default=Decimal("0"), ge=0)
     notes: Optional[str] = None
+    terms_and_conditions: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for creating a purchase order."""
-    status: str = Field(default="DRAFT", max_length=20)
-    lines: List[PurchaseOrderLineCreate] = Field(default_factory=list)
+    """Purchase order creation request."""
+
+    lines: List[PurchaseOrderLineCreate]
+    status: str = Field(default="submitted")
 
 
 class PurchaseOrderUpdate(BaseModel):
-    """Schema for updating a purchase order."""
-    vendor_id: Optional[uuid.UUID] = None
-    order_date: Optional[date] = None
-    expected_delivery_date: Optional[date] = None
-    status: Optional[str] = Field(None, max_length=20)
+    """Purchase order update request."""
+
+    po_number: Optional[str] = Field(None, min_length=1, max_length=50)
+    vendor_id: Optional[str] = None
+    status: Optional[str] = None
+    order_date: Optional[str] = None
+    expected_delivery_date: Optional[str] = None
     currency: Optional[str] = Field(None, max_length=3)
+    shipping_cost: Optional[Decimal] = Field(None, ge=0)
     notes: Optional[str] = None
-    lines: Optional[List[PurchaseOrderLineCreate]] = None
+    terms_and_conditions: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
 
 
 class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for purchase order response."""
-    id: uuid.UUID
+    """Purchase order response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
     status: str
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     lines: List[PurchaseOrderLineResponse] = []
-    
-    model_config = {"from_attributes": True}
+
+
+class PurchaseOrderListResponse(BaseModel):
+    """Purchase order list response with pagination."""
+
+    items: List[PurchaseOrderResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

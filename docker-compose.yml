@@ -2,66 +2,46 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap_postgres
+  api:
+    build: .
+    ports:
+      - "8000:8000"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/finaro_ap
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finaro_ap
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap_pgbouncer
+  migrate:
+    build: .
     environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 100
-      DEFAULT_POOL_SIZE: 20
-    ports:
-      - "5433:5432"
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/finaro_ap
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap_api
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
-      DATABASE_POOL_SIZE: 20
-      DATABASE_MAX_OVERFLOW: 10
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-supersecretkey-change-in-production}
-      JWT_ALGORITHM: HS256
-      JWT_EXPIRATION_MINUTES: 30
-      THRESHOLD_HIGH: 95
-      THRESHOLD_MID: 75
-      THRESHOLD_LOW: 50
-      TOLERANCE_PRICE: 2.0
-      TOLERANCE_QTY: 5.0
-      LOG_LEVEL: INFO
-    ports:
-      - "8000:8000"
-    depends_on:
-      pgbo
-ouncer:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    volumes:
-      - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: alembic upgrade head
 
 volumes:
   postgres_data:

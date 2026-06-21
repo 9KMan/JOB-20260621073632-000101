@@ -1,95 +1,99 @@
-// app/models/purchase_order.py
+# app/models/purchase_order.py
 """Purchase Order and Purchase Order Line models."""
-import uuid
-from decimal import Decimal
-from datetime import date
-from typing import List, TYPE_CHECKING
-
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, Integer, func
+from sqlalchemy import Column, String, Numeric, ForeignKey, Integer, Text, Enum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import relationship
+import uuid
+import enum
 
-from app.models.base import Base, TimestampMixin, UUIDMixin, SoftDeleteMixin
-
-if TYPE_CHECKING:
-    from app.models.vendor import Vendor
-    from app.models.matching import MatchResult, BalanceLedger
+from app.models.base import Base, TimestampMixin
 
 
-class PurchaseOrder(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Purchase Order model."""
-    
+class POStatus(str, enum.Enum):
+    """Purchase Order status enum."""
+
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+class PurchaseOrder(Base, TimestampMixin):
+    """Purchase Order model - Single source of truth in Layer 1."""
+
     __tablename__ = "purchase_orders"
-    
-    po_number: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    vendor_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("vendors.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="DRAFT",
-        index=True,
-    )
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_number = Column(String(50), unique=True, nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=False)
+    status = Column(String(20), default=POStatus.SUBMITTED.value, nullable=False, index=True)
+    order_date = Column(String(20), nullable=False)  # ISO date string
+    expected_delivery_date = Column(String(20), nullable=True)
+    currency = Column(String(3), default="USD", nullable=False)
+    subtotal = Column(Numeric(15, 2), default=0, nullable=False)
+    tax_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    total_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    shipping_cost = Column(Numeric(15, 2), default=0, nullable=False)
+    notes = Column(Text, nullable=True)
+    terms_and_conditions = Column(Text, nullable=True)
+    approved_by = Column(String(255), nullable=True)
+    approved_at = Column(String(30), nullable=True)
+
     # Relationships
-    vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="purchase_orders")
-    lines: Mapped[List["PurchaseOrderLine"]] = relationship(
+    vendor = relationship("Vendor", back_populates="purchase_orders")
+    lines = relationship(
         "PurchaseOrderLine",
         back_populates="purchase_order",
-        lazy="selectin",
         cascade="all, delete-orphan",
     )
-    match_results: Mapped[List["MatchResult"]] = relationship(
-        "MatchResult",
+    matched_invoices = relationship(
+        "MatchingResult",
+        foreign_keys="MatchingResult.po_id",
         back_populates="purchase_order",
-        lazy="selectin",
     )
-    balance_ledger_entries: Mapped[List["BalanceLedger"]] = relationship(
-        "BalanceLedger",
-        back_populates="purchase_order",
-        lazy="selectin",
+    matched_delivery_notes = relationship(
+        "MatchingResult",
+        foreign_keys="MatchingResult.dn_id",
+        back_populates="delivery_note",
     )
-    
+
     def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number}>"
+        return f"<PurchaseOrder(id={self.id}, po_number={self.po_number}, total={self.total_amount})>"
 
 
-class PurchaseOrderLine(Base, UUIDMixin, TimestampMixin):
+class PurchaseOrderLine(Base, TimestampMixin):
     """Purchase Order Line Item model."""
-    
+
     __tablename__ = "purchase_order_lines"
-    
-    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    purchase_order_id = Column(
+        UUID(as_uuid=True), ForeignKey("purchase_order_lines.id", use_alter=True), nullable=True
     )
-    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str] = mapped_column(String(500), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0000"))
-    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    
+    po_id = Column(
+        UUID(as_uuid=True), ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    line_number = Column(Integer, nullable=False)
+    product_code = Column(String(100), nullable=True, index=True)
+    description = Column(Text, nullable=False)
+    quantity = Column(Numeric(15, 4), default=0, nullable=False)
+    unit_of_measure = Column(String(20), default="EA", nullable=False)
+    unit_price = Column(Numeric(15, 4), default=0, nullable=False)
+    line_total = Column(Numeric(15, 2), default=0, nullable=False)
+    tax_rate = Column(Numeric(5, 4), default=0, nullable=False)
+    expected_delivery_date = Column(String(20), nullable=True)
+
     # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
+    purchase_order = relationship(
         "PurchaseOrder",
         back_populates="lines",
+        foreign_keys=[po_id],
     )
-    
+
     def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}: {self.product_code}>"
+        return f"<PurchaseOrderLine(id={self.id}, line_number={self.line_number}, product={self.product_code})>"
+
+    def calculate_line_total(self) -> None:
+        """Calculate line total including tax."""
+        self.line_total = (self.quantity * self.unit_price) * (1 + self.tax_rate)

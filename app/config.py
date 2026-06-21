@@ -1,15 +1,13 @@
-// app/config.py
-"""Application configuration management."""
-import os
+# app/config.py
+"""Configuration management using Pydantic Settings."""
 from functools import lru_cache
 from typing import List
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -18,44 +16,47 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "FinaRo"
-    app_version: str = "1.0.0"
-    debug: bool = False
-    secret_key: str = "dev-secret-key-change-in-production"
-    
+    APP_NAME: str = "FinaRo AP Automation Engine"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
+
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finaro"
-    database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/finaro"
-    database_pool_size: int = 20
-    database_max_overflow: int = 10
-    
-    # JWT Authentication
-    jwt_secret_key: str = "dev-jwt-secret-change-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
-    
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/finaro_ap"
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 3600
+
+    # Authentication
+    SECRET_KEY: str = "change-me-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # CORS
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+
+    # Matching Engine Weights
+    MATCHING_LINE_WEIGHT: float = 0.70
+    MATCHING_AMOUNT_WEIGHT: float = 0.20
+    MATCHING_DATE_WEIGHT: float = 0.10
+
+    # Decision Thresholds
+    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
+    MATCH_THRESHOLD_HUMAN_REVIEW: float = 0.70
+
     # API
-    api_v1_prefix: str = "/api/v1"
-    cors_origins: str = "http://localhost:3000,http://localhost:8000"
-    
+    API_V1_PREFIX: str = "/api/v1"
+
     @property
-    def cors_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",")]
-    
-    # Matching Configuration
-    matching_line_weight: float = 0.7
-    matching_amount_weight: float = 0.2
-    matching_date_weight: float = 0.1
-    auto_approve_threshold: float = 0.95
-    human_review_threshold: float = 0.70
-    
-    # Server
-    host: str = "0.0.0.0"
-    port: int = 8000
+    def database_url_async(self) -> str:
+        """Return async database URL for SQLAlchemy."""
+        return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+settings = get_settings()

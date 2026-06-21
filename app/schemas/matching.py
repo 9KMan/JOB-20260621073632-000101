@@ -1,116 +1,88 @@
-// app/schemas/matching.py
+# app/schemas/matching.py
 """Matching schemas."""
-import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
-
-from pydantic import BaseModel, Field
-
-
-class MatchRequest(BaseModel):
-    """Schema for initiating 3-way matching."""
-    invoice_id: Optional[uuid.UUID] = None
-    delivery_note_id: Optional[uuid.UUID] = None
-    purchase_order_id: Optional[uuid.UUID] = None
-    
-    # Matching options
-    auto_match: bool = Field(default=True)
-    include_partial_matches: bool = Field(default=True)
-    
-    model_config = {"extra": "forbid"}
+from pydantic import BaseModel, Field, ConfigDict
 
 
-class MatchScoreDetail(BaseModel):
-    """Schema for individual match score details."""
-    product_code: str
-    po_quantity: Optional[Decimal] = None
+class MatchLineResultResponse(BaseModel):
+    """Match line result response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    invoice_line_id: Optional[str] = None
+    po_line_id: Optional[str] = None
+    dn_line_id: Optional[str] = None
+    match_type: str
+    match_score: Decimal
+    product_match: str
+    quantity_match: str
+    amount_match: str
     invoice_quantity: Optional[Decimal] = None
+    po_quantity: Optional[Decimal] = None
     dn_quantity: Optional[Decimal] = None
-    quantity_match: Decimal = Field(..., ge=0, le=1)
-    price_match: Decimal = Field(..., ge=0, le=1)
-    line_score: Decimal = Field(..., ge=0, le=1)
+    quantity_variance: Optional[Decimal] = None
+    invoice_line_amount: Optional[Decimal] = None
+    po_line_amount: Optional[Decimal] = None
+    dn_line_amount: Optional[Decimal] = None
+    amount_variance: Optional[Decimal] = None
+    match_details: Optional[Dict[str, Any]] = None
+    created_at: datetime
 
 
-class MatchResultBase(BaseModel):
-    """Base match result schema."""
-    line_match_score: Decimal
-    amount_match_score: Decimal
-    date_match_score: Decimal
-    overall_score: Decimal
-    status: str
-    decision: str
-    action: str
+class MatchingResponse(BaseModel):
+    """Matching result response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    invoice_id: str
+    po_id: Optional[str] = None
+    dn_id: Optional[str] = None
     match_type: str
+    total_score: Decimal
+    line_score: Decimal
+    amount_score: Decimal
+    date_score: Decimal
+    status: str
+    decision: Optional[str] = None
+    invoice_amount: Decimal
+    po_amount: Optional[Decimal] = None
+    dn_amount: Optional[Decimal] = None
     variance_amount: Decimal
-    variance_reason: Optional[str] = None
-    line_match_details: Optional[List[Dict[str, Any]]] = None
-    matched_at: datetime
-
-
-class MatchResultResponse(MatchResultBase):
-    """Schema for match result response."""
-    id: uuid.UUID
-    invoice_id: Optional[uuid.UUID] = None
-    delivery_note_id: Optional[uuid.UUID] = None
-    purchase_order_id: Optional[uuid.UUID] = None
-    confirmed_at: Optional[datetime] = None
+    variance_details: Optional[Dict[str, Any]] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[str] = None
+    confirmation_notes: Optional[str] = None
+    error_message: Optional[str] = None
+    warnings: Optional[List[str]] = None
     created_at: datetime
     updated_at: datetime
-    
-    model_config = {"from_attributes": True}
+    line_results: List[MatchLineResultResponse] = []
 
 
-class MatchConfirmationCreate(BaseModel):
-    """Schema for confirming a match result."""
-    match_result_id: uuid.UUID
-    confirmed: bool
-    comments: Optional[str] = None
+class MatchingResultListResponse(BaseModel):
+    """Matching result list response with pagination."""
+
+    items: List[MatchingResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
-class MatchConfirmationResponse(BaseModel):
-    """Schema for match confirmation response."""
-    id: uuid.UUID
-    match_result_id: uuid.UUID
-    confirmed_by_id: uuid.UUID
-    confirmed: bool
-    final_status: str
-    final_action: str
-    comments: Optional[str] = None
-    confirmed_at: datetime
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {"from_attributes": True}
+class MatchConfirmationRequest(BaseModel):
+    """Match confirmation request."""
+
+    status: str = Field(..., pattern="^(confirmed|rejected)$")
+    notes: Optional[str] = None
 
 
-class BalanceLedgerResponse(BaseModel):
-    """Schema for balance ledger response."""
-    id: uuid.UUID
-    invoice_id: Optional[uuid.UUID] = None
-    delivery_note_id: Optional[uuid.UUID] = None
-    purchase_order_id: Optional[uuid.UUID] = None
-    original_amount: Decimal
-    matched_amount: Decimal
-    remaining_amount: Decimal
-    product_code: Optional[str] = None
-    original_quantity: Optional[Decimal] = None
-    matched_quantity: Decimal
-    remaining_quantity: Optional[Decimal] = None
-    is_settled: bool
-    settlement_date: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {"from_attributes": True}
+class MatchingRequest(BaseModel):
+    """Matching request for manual matching."""
 
-
-class MatchResponse(BaseModel):
-    """Schema for match response containing results and balances."""
-    match_id: uuid.UUID
-    status: str
-    match_type: str
-    results: List[MatchResultResponse]
-    balance_summary: Dict[str, Any]
-    decision: str
-    action: str
+    invoice_id: str
+    po_id: Optional[str] = None
+    dn_id: Optional[str] = None

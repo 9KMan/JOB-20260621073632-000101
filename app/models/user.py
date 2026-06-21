@@ -1,34 +1,30 @@
-// app/models/user.py
-"""User model for authentication."""
-import uuid
-from typing import List, TYPE_CHECKING
-
-from sqlalchemy import Boolean, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+# app/models/user.py
+"""User model for authentication and authorization."""
+from sqlalchemy import Column, String, Boolean
+from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from app.models.matching import MatchConfirmation
 
 
 class User(Base, UUIDMixin, TimestampMixin):
-    """User model for authentication and authorization."""
-    
+    """User model for system authentication."""
+
     __tablename__ = "users"
-    
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
-    full_name: Mapped[str] = mapped_column(String(255))
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_superuser = Column(Boolean, default=False, nullable=False)
+    role = Column(String(50), default="user", nullable=False)
+
     # Relationships
-    confirmations: Mapped[List["MatchConfirmation"]] = relationship(
-        "MatchConfirmation",
+    audit_logs = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+    matching_confirmations = relationship(
+        "MatchingResult",
+        foreign_keys="MatchingResult.confirmed_by",
         back_populates="confirmed_by_user",
-        lazy="selectin",
     )
-    
+
     def __repr__(self) -> str:
-        return f"<User {self.email}>"
+        return f"<User(id={self.id}, email={self.email}, role={self.role})>"
