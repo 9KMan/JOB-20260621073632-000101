@@ -1,158 +1,112 @@
-// models/cross_ref.py
-"""CrossRef SQLAlchemy model for learning/cross-reference data."""
+# models/cross_ref.py
+"""CrossRef SQLAlchemy model for learning loop / matching history."""
 
-import uuid
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Date, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import CrossRefType
+from models.enums import ExceptionType, MatchingDecision
 
 if TYPE_CHECKING:
-    from models.purchase_order import PurchaseOrderLine
+    from models.invoice import InvoiceLine
+    from models.purchase_order import POLine
+    from models.delivery_note import DeliveryNoteLine
 
 
-class CrossRef(Base, UUIDMixin, TimestampMixin):
-    """Cross Reference model for learning and confirmed match data.
+class CrossRef(UUIDMixin, TimestampMixin, Base):
+    """Cross Reference model for tracking match history and learning.
 
-    This table stores learned associations and confirmed matches to improve
-    future matching accuracy. It acts as a knowledge base for the matching
-    engine.
-
-    Attributes:
-        id: UUID primary key
-        ref_type: Type of cross-reference
-        supplier_id: Supplier identifier
-        supplier_sku: Supplier's SKU
-        supplier_description: Supplier's product description
-        internal_sku: Internal/System SKU
-        internal_description: Internal product description
-        confidence_score: Confidence score for this match (0-100)
-        match_count: Number of times this match was used
-        last_matched_date: Last date this reference was used
-        is_active: Whether this reference is currently active
-        is_verified: Whether this reference has been manually verified
+    This table stores all matching decisions (automatic and manual) to
+    enable the learning loop that improves future matching accuracy.
     """
 
-    __tablename__ = "cross_refs"
+    __tablename__ = "cross_ref"
     __table_args__ = (
-        UniqueConstraint(
-            "supplier_id",
-            "supplier_sku",
-            name="uq_cross_ref_supplier_sku",
-        ),
-        Index("ix_cross_refs_supplier_id", "supplier_id"),
-        Index("ix_cross_refs_supplier_sku", "supplier_sku"),
-        Index("ix_cross_refs_internal_sku", "internal_sku"),
-        Index("ix_cross_refs_ref_type", "ref_type"),
-        Index("ix_cross_refs_is_active", "is_active"),
-        {"schema": None},
+        Index("ix_cross_ref_invoice_line_id", "invoice_line_id"),
+        Index("ix_cross_ref_po_line_id", "po_line_id"),
+        Index("ix_cross_ref_delivery_line_id", "delivery_line_id"),
+        Index("ix_cross_ref_decision", "decision"),
+        Index("ix_cross_ref_match_date", "match_date"),
+        Index("ix_cross_ref_composite", "vendor_number", "item_number"),
     )
 
-    # Reference type
-    ref_type: Mapped[CrossRefType] = mapped_column(
-        String(20),
-        nullable=False,
-        index=True,
-        doc="Type of cross-reference",
+    invoice_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    po_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delivery_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
+        nullable=True,
     )
 
-    # Supplier information
-    supplier_id: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        index=True,
-        doc="Supplier identifier",
+    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    item_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    match_date: Mapped[date] = mapped_column(Date, nullable=False)
+    decision: Mapped[MatchingDecision] = mapped_column(String(30), nullable=False)
+    match_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    price_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    qty_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    tolerance_price: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    tolerance_qty: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+
+    invoice_quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True
     )
-    supplier_sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="Supplier's SKU or product code",
+    po_quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True
     )
-    supplier_description: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-        doc="Supplier's product description",
+    delivery_quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True
     )
-    supplier_unit_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(precision=15, scale=4),
-        nullable=True,
-        doc="Supplier's unit price",
+    invoice_unit_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True
+    )
+    po_unit_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True
     )
 
-    # Internal/canonical information
-    internal_sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="Internal or canonical SKU",
+    exception_type: Mapped[ExceptionType | None] = mapped_column(
+        String(30), nullable=True
     )
-    internal_description: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-        doc="Internal product description",
-    )
-    internal_unit_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(precision=15, scale=4),
-        nullable=True,
-        doc="Internal standard price",
-    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Category mapping
-    category: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="Product category",
-    )
+    confirmed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    confirmed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confirmed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # Confidence and usage tracking
-    confidence_score: Mapped[float] = mapped_column(
-        Numeric(precision=5, scale=2),
-        nullable=False,
-        default=0.0,
-        doc="Confidence score (0-100)",
-    )
-    match_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        doc="Number of times this match was used",
-    )
-    last_matched_date: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
-        doc="Last date this reference was used for matching",
-    )
+    promotion_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_promoted_at: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    # Status
-    is_active: Mapped[bool] = mapped_column(
-        default=True,
-        doc="Whether this reference is currently active",
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine", back_populates="cross_refs"
     )
-    is_verified: Mapped[bool] = mapped_column(
-        default=False,
-        doc="Whether this reference has been manually verified",
+    po_line: Mapped["POLine | None"] = relationship(
+        "POLine", back_populates="cross_refs"
     )
-
-    # Promotion tracking
-    promoted_from_learned: Mapped[bool] = mapped_column(
-        default=False,
-        doc="Whether this was promoted from a learned to a verified reference",
-    )
-    promotion_date: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
-        doc="Date when this reference was promoted",
+    delivery_note_line: Mapped["DeliveryNoteLine | None"] = relationship(
+        "DeliveryNoteLine", back_populates="cross_refs"
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<CrossRef(id={self.id}, type={self.ref_type}, "
-            f"supplier_sku={self.supplier_sku}, internal_sku={self.internal_sku})>"
-        )
+        return f"<CrossRef {self.vendor_number}/{self.item_number}: {self.decision}>"
+
+    @property
+    def is_confirmed(self) -> bool:
+        """Check if this cross-reference has been confirmed."""
+        return self.confirmed
+
+    @property
+    def is_promotable(self) -> bool:
+        """Check if this cross-reference can be promoted to global rules."""
+        return self.confirmed and self.promotion_count >= 3

@@ -1,140 +1,82 @@
 # models/balance_ledger.py
-"""Balance Ledger model for tracking partial matches and balances."""
+"""BalanceLedger SQLAlchemy model for tracking quantities and amounts."""
 
-import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import BaseModel
+from models.base import Base, TimestampMixin, UUIDMixin
+from models.enums import BalanceType
 
 if TYPE_CHECKING:
-    from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-    from models.invoice import Invoice, InvoiceLine
-    from models.delivery_note import DeliveryNote, DeliveryNoteLine
-    from models.match import Match
+    from models.invoice import InvoiceLine
+    from models.purchase_order import POLine
+    from models.delivery_note import DeliveryNoteLine
 
 
-class BalanceType(str, Enum):
-    """Balance type enumeration."""
+class BalanceLedger(UUIDMixin, TimestampMixin, Base):
+    """Balance Ledger model for tracking expected vs actual quantities.
 
-    PO_OPEN = "PO_OPEN"
-    PO_INVOICED = "PO_INVOICED"
-    PO_DELIVERED = "PO_DELIVERED"
-    INVOICE_OPEN = "INVOICE_OPEN"
-    INVOICE_MATCHED = "INVOICE_MATCHED"
-    DN_PENDING = "DN_PENDING"
-    DN_RECONCILED = "DN_RECONCILED"
-
-
-class BalanceLedger(BaseModel):
-    """Balance Ledger model for tracking balances across documents."""
+    This table maintains the running balance of quantities and amounts
+    for each PO line, delivery note line, and invoice line to enable
+    matching and variance analysis.
+    """
 
     __tablename__ = "balance_ledger"
-
-    balance_type: Mapped[str] = mapped_column(
-        String(30),
-        nullable=False,
-        index=True,
-    )
-
-    # Document references
-    document_type: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-    )
-
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-        index=True,
-    )
-
-    document_number: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-
-    # Line reference (optional)
-    line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-        index=True,
-    )
-
-    line_number: Mapped[int | None] = mapped_column(
-        nullable=True,
-    )
-
-    # Balance tracking
-    original_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-
-    current_balance: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-
-    matched_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-
-    variance_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-
-    # Reference to matching
-    match_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matches.id"),
-        nullable=True,
-        index=True,
-    )
-
-    # Status
-    is_closed: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-    )
-
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-    closed_reason: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    # Relationships
-    match: Mapped[Optional["Match"]] = relationship(
-        "Match",
-        foreign_keys=[match_id],
-    )
-
     __table_args__ = (
-        Index("ix_balance_doc", "document_type", "document_id"),
-        Index("ix_balance_type_doc", "balance_type", "document_type", "is_closed"),
-        Index("ix_balance_match", "match_id"),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_delivery_line_id", "delivery_line_id"),
+        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        Index("ix_balance_ledger_balance_type", "balance_type"),
+        Index("ix_balance_ledger_transaction_date", "transaction_date"),
+        Index("ix_balance_ledger_source_id_type", "source_type", "source_id"),
+    )
+
+    po_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delivery_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    invoice_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    balance_type: Mapped[BalanceType] = mapped_column(String(20), nullable=False)
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    po_line: Mapped["POLine | None"] = relationship(
+        "POLine", back_populates="balance_ledger_entries"
+    )
+    delivery_note_line: Mapped["DeliveryNoteLine | None"] = relationship(
+        "DeliveryNoteLine", back_populates="balance_ledger_entries"
+    )
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine", back_populates="balance_ledger_entries"
     )
 
     def __repr__(self) -> str:
-        """String representation."""
-        return f"<BalanceLedger(type={self.balance_type}, doc={self.document_number}, balance={self.current_balance})>"
+        return f"<BalanceLedger {self.balance_type}: {self.quantity} @ {self.amount}>"
+
+    @property
+    def net_amount(self) -> Decimal:
+        """Calculate net amount (quantity * unit_price)."""
+        if self.unit_price is not None:
+            return self.quantity * self.unit_price
+        return self.amount

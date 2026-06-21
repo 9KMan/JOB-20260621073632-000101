@@ -1,75 +1,123 @@
 # pyproject.toml
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finaro-ap-automation"
-version = "1.0.0"
-description = "FinaRo AP Automation Core Engine - 3-Way Matching Engine"
+name = "ap-automation-engine"
+version = "0.1.0"
+description = "AP Automation Core Engine for FinaRo - Invoice/PO/Delivery Note Matching"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "FinaRo Team", email = "dev@finaro.io"}
+    {name = "FinaRo", email = "dev@finaro.example.com"}
 ]
+keywords = ["ap", "automation", "invoice", "matching", "erp"]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Framework :: FastAPI",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
 ]
 
 dependencies = [
-    "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
-    "pydantic>=2.6.0",
-    "pydantic-settings>=2.1.0",
-    "sqlalchemy>=2.0.25",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
-    "psycopg2-binary>=2.9.9",
+    "alembic>=1.13.1",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "python-dotenv>=1.0.1",
-    "httpx>=0.26.0",
-    "email-validator>=2.1.0",
-    "celery>=5.3.6",
-    "redis>=5.0.1",
-    "structlog>=24.1.0",
+    "greenlet>=3.0.0",
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
+    "pytest>=8.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "black>=24.1.0",
-    "ruff>=0.2.0",
-    "mypy>=1.8.0",
+    "black>=24.3.0",
+    "isort>=5.13.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
+include = ["core*", "models*", "api*", "services*", "workers*", "migrations*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.tox
+  | build
+  | dist
+  | migrations/versions
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+skip = [".git", ".venv", ".tox", "build", "dist", "migrations/versions"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]

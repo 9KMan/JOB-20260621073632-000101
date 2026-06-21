@@ -1,80 +1,98 @@
 # models/enums.py
-"""Enumeration types for the AP Automation Engine."""
+"""Enumeration types for AP Automation Engine.
+
+Defines all status and type enums used throughout the application.
+"""
 
 from enum import Enum
 
 
-class DocumentStatus(str, Enum):
-    """Status values for documents (Invoice, PO, Delivery Note)."""
+class InvoiceStatus(str, Enum):
+    """Status values for invoices."""
 
     DRAFT = "draft"
     PENDING = "pending"
+    UNDER_REVIEW = "under_review"
     MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    EXCEPTION = "exception"
     APPROVED = "approved"
+    EXCEPTION = "exception"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
-    ARCHIVED = "archived"
+    PAID = "paid"
 
 
-class MatchStatus(str, Enum):
-    """Status values for matching operations."""
+class PurchaseOrderStatus(str, Enum):
+    """Status values for purchase orders."""
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    NO_MATCH = "no_match"
-    EXCEPTION = "exception"
+    DRAFT = "draft"
+    OPEN = "open"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
+    CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class DecisionType(str, Enum):
-    """Decision types from the matching engine."""
+class DeliveryNoteStatus(str, Enum):
+    """Status values for delivery notes."""
 
-    AUTO_APPROVE = "auto_approve"
+    DRAFT = "draft"
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    INVOICED = "invoiced"
+    CANCELLED = "cancelled"
+
+
+class MatchingDecision(str, Enum):
+    """Matching engine decision types."""
+
+    AUTO_APPROVED = "auto_approved"
+    ONE_CLICK_REVIEW = "one_click_review"
     MANUAL_REVIEW = "manual_review"
     EXCEPTION = "exception"
-    REJECT = "reject"
+    NO_MATCH = "no_match"
 
 
-class ExceptionStatus(str, Enum):
-    """Status values for exceptions."""
+class ExceptionType(str, Enum):
+    """Types of matching exceptions."""
 
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
-
-
-class ExceptionReason(str, Enum):
-    """Reason codes for exceptions."""
-
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY = "missing_delivery"
     DUPLICATE_INVOICE = "duplicate_invoice"
-    MISSING_PURCHASE_ORDER = "missing_purchase_order"
-    MISSING_DELIVERY_NOTE = "missing_delivery_note"
-    PARTIAL_DELIVERY = "partial_delivery"
-    OVERDELIVERY = "overdelivery"
-    UNDERDELIVERY = "underdelivery"
-    UNMATCHED_LINES = "unmatched_lines"
-    PO_EXPIRED = "po_expired"
-    PO_CLOSED = "po_closed"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    DATE_MISMATCH = "date_mismatch"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    TAX_MISMATCH = "tax_mismatch"
-    OTHER = "other"
+    PARTIAL_MATCH = "partial_match"
+    MULTIPLE_MATCHES = "multiple_matches"
+    TIMING_ISSUE = "timing_issue"
+    DATA_MISMATCH = "data_mismatch"
+
+
+class ExceptionResolution(str, Enum):
+    """Ways to resolve matching exceptions."""
+
+    APPROVED_AS_IS = "approved_as_is"
+    ADJUSTED_AND_APPROVED = "adjusted_and_approved"
+    REJECTED = "rejected"
+    ESCALATED = "escalated"
+    DISMISSED = "dismissed"
+    PENDING_VENDOR_RESPONSE = "pending_vendor_response"
 
 
 class LineStatus(str, Enum):
-    """Status values for invoice/PO/delivery note lines."""
+    """Status values for individual invoice/PO/delivery lines."""
 
     OPEN = "open"
-    MATCHED = "matched"
     PARTIALLY_MATCHED = "partially_matched"
-    EXCEPTION = "exception"
-    CANCELLED = "cancelled"
+    FULLY_MATCHED = "fully_matched"
+    CLOSED = "closed"
+
+
+class BalanceType(str, Enum):
+    """Types of balance ledger entries."""
+
+    EXPECTED = "expected"
+    DELIVERED = "delivered"
+    INVOICED = "invoiced"
+    PAID = "paid"
+    VARIANCE = "variance"
+    CREDIT = "credit"

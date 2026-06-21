@@ -1,29 +1,46 @@
 # models/__init__.py
-"""Database models package."""
+"""Database models for AP Automation Engine.
 
-from models.base import BaseModel
-from models.user import User
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+This module exports all SQLAlchemy models used in the application.
+"""
+
+from models.base import Base
+from models.enums import (
+    InvoiceStatus,
+    PurchaseOrderStatus,
+    DeliveryNoteStatus,
+    MatchingDecision,
+    ExceptionType,
+    ExceptionResolution,
+    LineStatus,
+    BalanceType,
+)
 from models.invoice import Invoice, InvoiceLine
+from models.purchase_order import PurchaseOrder, POLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
-from models.match import Match, MatchLine, MatchStatus
-from models.balance_ledger import BalanceLedger, BalanceType
-from models.decision import Decision, DecisionType
+from models.balance_ledger import BalanceLedger
+from models.cross_ref import CrossRef
+
 
 __all__ = [
-    "BaseModel",
-    "User",
-    "PurchaseOrder",
-    "PurchaseOrderLine",
+    # Base
+    "Base",
+    # Enums
+    "InvoiceStatus",
+    "PurchaseOrderStatus",
+    "DeliveryNoteStatus",
+    "MatchingDecision",
+    "ExceptionType",
+    "ExceptionResolution",
+    "LineStatus",
+    "BalanceType",
+    # Models
     "Invoice",
     "InvoiceLine",
+    "PurchaseOrder",
+    "POLine",
     "DeliveryNote",
     "DeliveryNoteLine",
-    "Match",
-    "MatchLine",
-    "MatchStatus",
     "BalanceLedger",
-    "BalanceType",
-    "Decision",
-    "DecisionType",
+    "CrossRef",
 ]
