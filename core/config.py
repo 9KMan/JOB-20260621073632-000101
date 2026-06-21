@@ -1,16 +1,94 @@
-// core/config.py
-"""Application configuration using pydantic-settings."""
+# core/config.py
+"""Application configuration using pydantic-settings.
+
+All configuration is loaded from environment variables.
+No hardcoded secrets or configuration values.
+"""
 
 from functools import lru_cache
-from typing import Optional
-
-from pydantic import Field
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-
+    """Application settings loaded from environment variables.
+    
+    All fields have sensible defaults for local development.
+    Override via environment variables in production.
+    """
+    
+    # Application
+    app_name: str = Field(default="AP Automation Core Engine", alias="APP_NAME")
+    app_version: str = Field(default="0.1.0", alias="APP_VERSION")
+    debug: bool = Field(default=False, alias="DEBUG")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    
+    # Database
+    database_url: str = Field(
+        default="postgresql+asyncpg://finaro:changeme@localhost:5432/ap_automation",
+        alias="DATABASE_URL"
+    )
+    pgbouncer_host: Optional[str] = Field(default=None, alias="PGBOUNCER_HOST")
+    pgbouncer_port: int = Field(default=5432, alias="PGBOUNCER_PORT")
+    database_echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    database_pool_size: int = Field(default=20, alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=10, alias="DATABASE_MAX_OVERFLOW")
+    
+    # Security / JWT
+    jwt_secret_key: str = Field(
+        default="dev-secret-key-change-in-production",
+        alias="JWT_SECRET_KEY"
+    )
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    jwt_expiration_minutes: int = Field(default=30, alias="JWT_EXPIRATION_MINUTES")
+    
+    # Matching Thresholds
+    threshold_high: float = Field(default=95.0, alias="THRESHOLD_HIGH")
+    threshold_mid: float = Field(default=70.0, alias="THRESHOLD_MID")
+    threshold_low: float = Field(default=40.0, alias="THRESHOLD_LOW")
+    
+    # Tolerance Settings
+    tolerance_price: float = Field(default=5.0, alias="TOLERANCE_PRICE")
+    tolerance_qty: float = Field(default=10.0, alias="TOLERANCE_QTY")
+    
+    # CORS
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://localhost:8080",
+        alias="CORS_ORIGINS"
+    )
+    
+    @field_validator("cors_origins")
+    @classmethod
+    def parse_cors_origins(cls, v: str) -> str:
+        """Validate CORS origins format."""
+        if not v:
+            return ""
+        return v
+    
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Parse CORS origins string into list."""
+        if not self.cors_origins:
+            return []
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+    
+    @field_validator("threshold_high", "threshold_mid", "threshold_low")
+    @classmethod
+    def validate_thresholds(cls, v: float) -> float:
+        """Ensure threshold is within valid range."""
+        if not 0 <= v <= 100:
+            raise ValueError("Threshold must be between 0 and 100")
+        return v
+    
+    @field_validator("tolerance_price", "tolerance_qty")
+    @classmethod
+    def validate_tolerance(cls, v: float) -> float:
+        """Ensure tolerance is non-negative."""
+        if v < 0:
+            raise ValueError("Tolerance must be non-negative")
+        return v
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -18,97 +96,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application
-    app_name: str = "AP Automation Engine"
-    app_version: str = "0.1.0"
-    debug: bool = Field(default=False, validation_alias="DEBUG")
-    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
-    # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        validation_alias="DATABASE_URL",
-    )
-    pgbouncer_host: Optional[str] = Field(default=None, validation_alias="PGBOUNCER_HOST")
-    pgbouncer_port: int = Field(default=5432, validation_alias="PGBOUNCER_PORT")
-    database_pool_size: int = Field(default=20, validation_alias="DATABASE_POOL_SIZE")
-    database_max_overflow: int = Field(default=10, validation_alias="DATABASE_MAX_OVERFLOW")
-
-    # JWT Authentication
-    jwt_secret_key: str = Field(
-        default="supersecretkey-change-in-production",
-        validation_alias="JWT_SECRET_KEY",
-    )
-    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    access_token_expire_minutes: int = Field(
-        default=30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
-    refresh_token_expire_days: int = Field(
-        default=7, validation_alias="REFRESH_TOKEN_EXPIRE_DAYS"
-    )
-
-    # Matching Thresholds
-    threshold_high: int = Field(
-        default=95,
-        validation_alias="THRESHOLD_HIGH",
-        description="Auto-approve threshold (percentage)",
-    )
-    threshold_mid: int = Field(
-        default=70,
-        validation_alias="THRESHOLD_MID",
-        description="1-click review threshold (percentage)",
-    )
-    threshold_low: int = Field(
-        default=40,
-        validation_alias="THRESHOLD_LOW",
-        description="Exception threshold (percentage)",
-    )
-
-    # Matching Tolerances
-    tolerance_price: float = Field(
-        default=5.0,
-        validation_alias="TOLERANCE_PRICE",
-        description="Price match tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        validation_alias="TOLERANCE_QTY",
-        description="Quantity match tolerance percentage",
-    )
-
-    # Learning Loop
-    learning_confidence_boost: float = Field(
-        default=5.0,
-        description="Confidence boost for confirmed matches in learning loop",
-    )
-    learning_min_confirmations: int = Field(
-        default=3,
-        description="Minimum confirmations before promoting to high-confidence match",
-    )
-
-    @property
-    def effective_database_url(self) -> str:
-        """Get the effective database URL, considering PGBouncer."""
-        if self.pgbouncer_host:
-            return self.database_url.replace(
-                "localhost",
-                f"{self.pgbouncer_host}:{self.pgbouncer_port}",
-            )
-        return self.database_url
-
-    def get_threshold_for_decision(self, score: float) -> str:
-        """Determine decision based on score and thresholds."""
-        if score >= self.threshold_high:
-            return "auto_approve"
-        elif score >= self.threshold_mid:
-            return "review"
-        elif score >= self.threshold_low:
-            return "exception"
-        else:
-            return "reject"
-
-
-@lru_cache
+@lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings instance.
+    
+    Uses lru_cache to ensure settings are only loaded once.
+    """
     return Settings()
+
+
+# Convenience accessor for dependency injection
+settings = get_settings()

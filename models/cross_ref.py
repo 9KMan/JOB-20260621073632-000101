@@ -1,97 +1,134 @@
-// models/cross_ref.py
-"""Cross Reference table for the learning loop functionality."""
+# models/cross_ref.py
+"""CrossRef SQLAlchemy model for learning/promotion logic.
+
+Stores confirmed matches for the learning loop to improve future matching.
+"""
 
 import uuid
-from datetime import datetime
+from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from models.invoice import InvoiceLine
-    from models.purchase_order import PurchaseOrderLine
+from models.base import Base, UUIDMixin, TimestampMixin
+from models.enums import MatchConfidence
 
 
 class CrossRef(Base, UUIDMixin, TimestampMixin):
-    """Cross Reference table for learned matches and patterns."""
-
+    """Cross Reference model for learned matches.
+    
+    Stores confirmed match patterns to improve future matching accuracy.
+    This enables the learning loop to promote low-confidence matches
+    to higher confidence when patterns are repeatedly confirmed.
+    """
+    
     __tablename__ = "cross_ref"
     __table_args__ = (
-        Index("ix_cross_ref_po_line_id", "po_line_id"),
-        Index("ix_cross_ref_invoice_line_id", "invoice_line_id"),
-        Index("ix_cross_ref_vendor_number", "vendor_number"),
-        Index("ix_cross_ref_item_code", "item_code"),
-        Index("ix_cross_ref_confirmed_count", "confirmed_count"),
+        Index("ix_xref_vendor_number", "vendor_number"),
+        Index("ix_xref_item_number", "item_number"),
+        Index("ix_xref_vendor_item_number", "vendor_item_number"),
+        Index("ix_xref_po_line_id", "po_line_id"),
+        Index("ix_xref_confidence", "confidence"),
+        Index("ix_xref_promoted", "is_promoted"),
+        Index("ix_xref_created_at", "created_at"),
+        {"schema": None},
     )
-
-    # Foreign keys
+    
+    # Vendor identification
+    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    
+    # Product matching keys
+    item_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    vendor_item_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    
+    # PO Line reference (the anchor)
     po_line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
     )
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
+    
+    # Pricing patterns (learned from confirmed matches)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    price_tolerance_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("5.00"),
+    )
+    
+    # Quantity patterns
+    typical_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 3),
         nullable=True,
     )
-
-    # Match criteria
-    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
-    vendor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    item_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    item_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quantity_tolerance_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("10.00"),
+    )
     
-    # Matched prices
-    po_unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    matched_unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    price_variance_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=Decimal("0.00"))
+    # Match confidence
+    confidence: Mapped[MatchConfidence] = mapped_column(
+        String(20),
+        nullable=False,
+        default=MatchConfidence.MEDIUM,
+        index=True,
+    )
     
-    # Matched quantities
-    po_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    matched_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    quantity_variance_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=Decimal("0.00"))
-    
-    # Confidence and learning
-    base_confidence: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
-    current_confidence: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
-    confirmed_count: Mapped[int] = mapped_column(Integer, default=0)
-    rejected_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Learning loop tracking
+    match_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    confirm_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reject_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     
     # Promotion tracking
-    promotion_level: Mapped[int] = mapped_column(Integer, default=0)
-    last_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_promoted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    promoted_at: Mapped[Optional[DateTime]] = mapped_column(DateTime, nullable=True)
+    promoted_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
-    # Pattern info
-    match_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    match_method: Mapped[str] = mapped_column(String(30), nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    # Confidence score threshold
+    last_match_score: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+    )
+    
+    # Date patterns
+    typical_delivery_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Source tracking
+    source_system: Mapped[str] = mapped_column(String(50), nullable=False, default="learning")
+    
+    # Notes
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Deactivation
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deactivated_at: Mapped[Optional[DateTime]] = mapped_column(DateTime, nullable=True)
+    deactivation_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # User attribution
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime, nullable=True)
+    
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship("PurchaseOrderLine")
-    invoice_line: Mapped["InvoiceLine | None"] = relationship("InvoiceLine")
-
-    def promote_confidence(self, boost_amount: float) -> None:
-        """Increase confidence when a match is confirmed."""
-        self.confirmed_count += 1
-        self.current_confidence = min(100.0, self.current_confidence + boost_amount)
-        self.last_confirmed_at = datetime.utcnow()
-        
-        # Promote to next level after enough confirmations
-        if self.confirmed_count >= 3 and self.promotion_level == 0:
-            self.promotion_level = 1
-        elif self.confirmed_count >= 5 and self.promotion_level == 1:
-            self.promotion_level = 2
-
-    def demote_confidence(self, penalty_amount: float) -> None:
-        """Decrease confidence when a match is rejected."""
-        self.rejected_count += 1
-        self.current_confidence = max(0.0, self.current_confidence - penalty_amount)
-        self.last_rejected_at = datetime.utcnow()
-        
-        # Reset promotion level on rejection
-        if self.rejected_count >= 2:
-            self.promotion_level = max(0, self.promotion_level - 1)
+    po_line: Mapped[Optional["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<CrossRef {self.vendor_number}:{self.item_number} - {self.confidence.value}>"
