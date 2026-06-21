@@ -1,115 +1,89 @@
-# src/models/enums.py
-"""Enumerations for AP Automation Core Engine.
-
-Contains status enums, decision types, and other domain-specific constants.
-"""
-
+// src/models/enums.py
+"""Enumeration types for the application."""
 import enum
-from typing import Any
-
-
-class DocumentStatus(str, enum.Enum):
-    """Status for invoices, purchase orders, and delivery notes."""
-
-    DRAFT = "draft"
-    PENDING = "pending"
-    SUBMITTED = "submitted"
-    APPROVED = "approved"
-    MATCHED = "matched"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    PAID = "paid"
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
 
 class MatchStatus(str, enum.Enum):
-    """Status for the matching process."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    AUTO_MATCHED = "auto_matched"
-    MANUAL_MATCHED = "manual_matched"
-    EXCEPTION = "exception"
-    NO_MATCH = "no_match"
+    """Status of a match between documents."""
+    PENDING = "PENDING"           # Awaiting review
+    CONFIRMED = "CONFIRMED"       # Match confirmed
+    REJECTED = "REJECTED"         # Match rejected
+    AUTO_APPROVED = "AUTO_APPROVED"  # Automatically approved
+    DISPUTE = "DISPUTE"           # In dispute
 
 
-class DecisionType(str, enum.Enum):
-    """Decision outcome for the matching engine."""
-
-    AUTO_APPROVE = "auto_approve"
-    ONE_CLICK_REVIEW = "one_click_review"
-    EXCEPTION = "exception"
-    REJECT = "reject"
-    MANUAL = "manual"
+class MatchType(str, enum.Enum):
+    """Type of document match."""
+    PO_INVOICE = "PO_INVOICE"           # Purchase Order ↔ Invoice
+    PO_DELIVERY = "PO_DELIVERY"         # Purchase Order ↔ Delivery Note
+    INVOICE_DELIVERY = "INVOICE_DELIVERY"  # Invoice ↔ Delivery Note
+    THREE_WAY = "THREE_WAY"             # All three documents matched
 
 
-class ExceptionStatus(str, enum.Enum):
-    """Status for exceptions in the matching process."""
-
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
+class BalanceType(str, enum.Enum):
+    """Type of balance entry."""
+    INVOICE_BALANCE = "INVOICE_BALANCE"       # Remaining invoice amount
+    DELIVERY_BALANCE = "DELIVERY_BALANCE"     # Remaining delivery amount
+    PO_BALANCE = "PO_BALANCE"                 # Remaining PO amount
 
 
-class ExceptionReason(str, enum.Enum):
-    """Reasons why an exception was raised during matching."""
-
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    DATE_MISMATCH = "date_mismatch"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    MISSING_PO = "missing_po"
-    MULTIPLE_PO_MATCH = "multiple_po_match"
-    PARTIAL_MATCH = "partial_match"
-    UNEXPECTED_LINE_ITEM = "unexpected_line_item"
-    MISSING_LINE_ITEM = "missing_line_item"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    TAX_MISMATCH = "tax_mismatch"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    OTHER = "other"
+class DocumentStatus(str, enum.Enum):
+    """Status of a document."""
+    DRAFT = "DRAFT"               # Not yet processed
+    OPEN = "OPEN"                 # Open/active
+    PARTIALLY_MATCHED = "PARTIALLY_MATCHED"  # Some lines matched
+    FULLY_MATCHED = "FULLY_MATCHED"          # All lines matched
+    CLOSED = "CLOSED"             # Fully processed
+    CANCELLED = "CANCELLED"       # Cancelled
 
 
-class LineStatus(str, enum.Enum):
-    """Status for individual invoice/PO lines."""
-
-    OPEN = "open"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    OVER_DELIVERED = "over_delivered"
-    CLOSED = "closed"
+class UserRole(str, enum.Enum):
+    """User roles for access control."""
+    ADMIN = "ADMIN"
+    MANAGER = "MANAGER"
+    REVIEWER = "REVIEWER"
+    VIEWER = "VIEWER"
 
 
-class LearningStatus(str, enum.Enum):
-    """Status for learned cross-references."""
+# SQLAlchemy enum types for PostgreSQL
+match_status_enum = PGEnum(
+    MatchStatus,
+    name="match_status_enum",
+    create_type=True,
+    create_constraint=True,
+    validate_strings=True
+)
 
-    LEARNING = "learning"
-    PROMOTED = "promoted"
-    DEMOTED = "demoted"
-    REJECTED = "rejected"
+match_type_enum = PGEnum(
+    MatchType,
+    name="match_type_enum",
+    create_type=True,
+    create_constraint=True,
+    validate_strings=True
+)
 
+balance_type_enum = PGEnum(
+    BalanceType,
+    name="balance_type_enum",
+    create_type=True,
+    create_constraint=True,
+    validate_strings=True
+)
 
-def get_enum_values(enum_class: type[enum.Enum]) -> list[str]:
-    """Get all values from an enum as a list of strings.
+document_status_enum = PGEnum(
+    DocumentStatus,
+    name="document_status_enum",
+    create_type=True,
+    create_constraint=True,
+    validate_strings=True
+)
 
-    Args:
-        enum_class: The enum class to get values from.
-
-    Returns:
-        List of enum values as strings.
-    """
-    return [e.value for e in enum_class]
-
-
-def validate_enum_value(enum_class: type[enum.Enum], value: str) -> bool:
-    """Validate that a value is a valid enum value.
-
-    Args:
-        enum_class: The enum class to validate against.
-        value: The value to validate.
-
-    Returns:
-        True if the value is valid, False otherwise.
-    """
-    return value in get_enum_values(enum_class)
+user_role_enum = PGEnum(
+    UserRole,
+    name="user_role_enum",
+    create_type=True,
+    create_constraint=True,
+    validate_strings=True
+)

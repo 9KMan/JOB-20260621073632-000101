@@ -1,99 +1,56 @@
 // src/database.py
-"""Database connection and session management."""
-import logging
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+"""Database configuration and session management."""
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
+from typing import Generator
 
-from sqlalchemy import create_engine, event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from src.config import get_settings
 
-from src.config import settings
 
-logger = logging.getLogger(__name__)
+settings = get_settings()
+
+# Create engine with connection pooling
+if settings.debug:
+    # Use NullPool for development to avoid connection issues
+    engine = create_engine(
+        settings.database_url,
+        poolclass=NullPool,
+        echo=settings.debug,
+    )
+else:
+    # Use built-in pool for production
+    engine = create_engine(
+        settings.database_url,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_pre_ping=True,
+        echo=False,
+    )
+
+# Session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
-
     pass
 
 
-# Synchronous engine (for migrations and CLI)
-sync_engine = create_engine(
-    settings.database_url_sync,
-    **settings.get_database_pool_config(),
-    pool_pre_ping=True,
-)
-
-SyncSessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=sync_engine,
-)
-
-# Asynchronous engine (for FastAPI)
-async_engine = create_async_engine(
-    settings.database_url_async,
-    **settings.get_database_pool_config(),
-    pool_pre_ping=True,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False,
-)
-
-
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+def get_db() -> Generator:
     """
-    Dependency for FastAPI to get async database session.
-
+    Dependency that provides a database session.
+    
     Yields:
-        AsyncSession: Database session
+        Session: SQLAlchemy session instance
+        
+    Usage:
+        @app.get("/items")
+        def get_items(db: Session = Depends(get_db)):
+            ...
     """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-@asynccontextmanager
-async def get_async_session_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for async database session.
-
-    Yields:
-        AsyncSession: Database session
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
-async def init_db() -> None:
-    """
-    Initialize database tables.
-    Used for creating tables on startup.
-    """
-    async with async_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-async def close_db() -> None:
-    """
-    Close database connections.
-    """
-    await async_engine.dispose()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
