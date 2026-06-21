@@ -4,7 +4,10 @@ You are a senior full-stack engineer. Write ALL source code for this project.
 
 
 ## Files to Create
-(determine from SPEC)
+- PLAN-01.md
+- -SUMMARY-01.md
+- | 1 | `.planning/phases/1-project-overview/PLAN-01.md` | This document — full project overview |
+- .planning/phases/1-project-overview/PLAN-01.md
 
 ## SPEC.md (read carefully)
 # Specification: Senior-leaning Python Developer — AP Automation Core Engine
