@@ -1,25 +1,29 @@
+# pyproject.toml
 [build-system]
 requires = ["hatchling", "hatch-fancy-pypi-readme>=22.5.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "finaro-ap-automation"
+name = "ap-automation-engine"
 version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+description = "AP Automation Core Engine — FinaRo"
 readme = "README.md"
-requires-python = ">=3.11"
 license = "MIT"
+requires-python = ">=3.11"
 authors = [
-    { name = "FinaRo", email = "dev@finaro.com" }
+    { name = "FinaRo", email = "dev@finaro.example.com" },
 ]
-keywords = ["ap-automation", "invoice-matching", "fastapi", "postgresql"]
+keywords = ["ap", "automation", "invoice", "matching", "erp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Framework :: FastAPI",
 ]
-
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
@@ -31,8 +35,8 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "httpx>=0.27.0",
     "greenlet>=3.0.0",
+    "psycopg2-binary>=2.9.9; python_version < '3.12'",
 ]
 
 [project.optional-dependencies]
@@ -40,26 +44,31 @@ dev = [
     "pytest>=8.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "pytest-mock>=3.12.0",
+    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
-    "types-python-jose>=3.3.7",
-    "types-passlib>=1.7.4",
+    "types-python-jose>=3.3.4",
+    "types-passlib>=1.7.7",
+]
+worker = [
+    "celery>=5.3.0",
+    "redis>=5.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
-Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
 Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
 [tool.pytest.ini_options]
+minversion = "8.1"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 filterwarnings = [
@@ -67,27 +76,13 @@ filterwarnings = [
     "ignore::PendingDeprecationWarning",
 ]
 
-[tool.coverage.run]
-source = ["src", "tests"]
-omit = ["*/tests/*", "*/migrations/*"]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
-]
-
 [tool.ruff]
-line-length = 100
 target-version = "py311"
+line-length = 100
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
-    "F",   # Pyflakes
+    "F",   # pyflakes
     "I",   # isort
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
@@ -96,11 +91,12 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
 ]
 
 [tool.mypy]
 python_version = "3.11"
-plugins = ["pydantic.mypy"]
 strict = true
-ignore_missing_imports = true
 warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true

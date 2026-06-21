@@ -1,75 +1,82 @@
+# Dockerfile
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim as base
 
-# Set environment variables
+# Prevent Python from writing pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_USER=1 \
+    UV_SYSTEM_PYTHON=1
+
+WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Create app directory
-WORKDIR /app
+# Install uv for faster package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install Python dependencies
-FROM base as builder
+FROM base as python-deps
 
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+COPY --link pyproject.toml .
+# Install dependencies using uv for reproducibility
+RUN uv sync --frozen --no-install-project
 
-# Install dependencies
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e ".[dev]"
+# Development image
+FROM base as development
+
+# Copy lockfile for dependency verification
+COPY --link --from=python-deps /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:${PATH}" \
+    VIRTUAL_ENV=/app/.venv
+
+# Copy source code
+COPY --link src/ ./src/
+COPY --link migrations/ ./migrations/
+COPY --link alembic.ini .
+
+# Create non-root user
+RUN adduser --disabled-password --gecos '' apuser && chown -R apuser:apuser /app
+USER apuser
+
+EXPOSE 8000
+CMD ["uvicorn", "src.core.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # Production image
 FROM base as production
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Copy lockfile for dependency verification
+COPY --link --from=python-deps /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:${PATH}" \
+    VIRTUAL_ENV=/app/.venv
 
-# Copy application code
-COPY --chown=1000:1000 . .
+# Copy source code
+COPY --link src/ ./src/
+COPY --link migrations/ ./migrations/
+COPY --link alembic.ini .
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
-USER appuser
+# Non-root user for security
+RUN addgroup --system --gid 1001 apgroup && \
+    adduser --system --uid 1001 --gid 1001 --shell /bin/false --home /nonexistent apuser && \
+    chown -R apuser:apgroup /app
 
-# Expose port
-EXPOSE 8000
+USER apuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run application
-CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-# Development image
-FROM base as development
-
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy application code
-COPY --chown=1000:1000 . .
-
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
-USER appuser
-
-# Expose port
 EXPOSE 8000
 
-# Run with auto-reload
-CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Run as module (production)
+CMD ["uvicorn", "src.core.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
