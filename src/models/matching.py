@@ -1,152 +1,102 @@
 // src/models/matching.py
-"""Matching and balance tracking models."""
+"""Matching record and decision models."""
+import uuid
+from datetime import datetime
 from decimal import Decimal
+from enum import Enum
+from typing import Optional
 
-from sqlalchemy import Column, String, Text, Numeric, ForeignKey, Integer, Enum as SQLEnum
+from sqlalchemy import Column, String, DateTime, Numeric, ForeignKey, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-import enum
 
 from src.models.base import BaseModel
 
 
-class MatchType(str, enum.Enum):
+class MatchType(str, Enum):
     """Type of match between documents."""
-    INVOICE_TO_PO = "invoice_to_po"
-    DN_TO_PO = "dn_to_po"
-    INVOICE_TO_DN = "invoice_to_dn"
+    PO_INVOICE = "po_invoice"
+    PO_DELIVERY = "po_delivery"
+    INVOICE_DELIVERY = "invoice_delivery"
     THREE_WAY = "three_way"
 
 
-class MatchStatus(str, enum.Enum):
-    """Match record status."""
+class MatchStatus(str, Enum):
+    """Status of the matching record."""
     PENDING = "pending"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
+    MATCHED = "matched"
+    PARTIALLY_MATCHED = "partially_matched"
+    UNMATCHED = "unmatched"
+    DISPUTED = "disputed"
+
+
+class MatchDecision(str, Enum):
+    """Decision outcome from matching engine."""
     AUTO_APPROVED = "auto_approved"
+    HUMAN_REVIEW = "human_review"
+    REJECTED = "rejected"
 
 
-class MatchRecord(BaseModel):
-    """Record of a match between documents."""
+class MatchConfidenceLevel(str, Enum):
+    """Confidence level of the match."""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
-    __tablename__ = "match_records"
 
-    match_type = Column(SQLEnum(MatchType), nullable=False, index=True)
-    status = Column(SQLEnum(MatchStatus), default=MatchStatus.PENDING, nullable=False, index=True)
+class MatchingRecord(BaseModel):
+    """Matching record model - tracks all matches between documents."""
+
+    __tablename__ = "matching_records"
+
+    # Match type and status
+    match_type: str = Column(String(20), nullable=False)
+    status: str = Column(String(20), default=MatchStatus.PENDING.value, nullable=False)
+    decision: Optional[str] = Column(String(20), nullable=True)
+
+    # Confidence and scores
+    overall_score: Decimal = Column(Numeric(5, 4), default=Decimal("0.00"), nullable=False)
+    line_level_score: Decimal = Column(Numeric(5, 4), default=Decimal("0.00"), nullable=False)
+    amount_score: Decimal = Column(Numeric(5, 4), default=Decimal("0.00"), nullable=False)
+    date_score: Decimal = Column(Numeric(5, 4), default=Decimal("0.00"), nullable=False)
+    confidence_level: str = Column(String(10), default=MatchConfidenceLevel.LOW.value, nullable=False)
 
     # Document references
-    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
-    dn_id = Column(UUID(as_uuid=True), ForeignKey("delivery_notes.id"), nullable=True)
-    po_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
-
-    # Match scores (0.0 to 1.0)
-    line_score = Column(Numeric(5, 4), default=Decimal("0.0000"), nullable=False)
-    amount_score = Column(Numeric(5, 4), default=Decimal("0.0000"), nullable=False)
-    date_score = Column(Numeric(5, 4), default=Decimal("0.0000"), nullable=False)
-    total_score = Column(Numeric(5, 4), default=Decimal("0.0000"), nullable=False)
+    purchase_order_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
+    invoice_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
+    delivery_note_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("delivery_notes.id"), nullable=True)
 
     # Matched amounts
-    invoice_amount = Column(Numeric(15, 2), nullable=True)
-    dn_amount = Column(Numeric(15, 2), nullable=True)
-    po_amount = Column(Numeric(15, 2), nullable=True)
-    matched_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    variance_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    po_amount: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    invoice_amount: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    delivery_amount: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    matched_amount: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    variance_amount: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
 
     # Variance details
-    quantity_variance = Column(Numeric(15, 3), nullable=True)
-    amount_variance = Column(Numeric(15, 2), nullable=True)
-    variance_reason = Column(Text, nullable=True)
+    quantity_variance: Decimal = Column(Numeric(15, 4), default=Decimal("0.00"), nullable=False)
+    amount_variance: Decimal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    price_variance: Decimal = Column(Numeric(15, 4), default=Decimal("0.00"), nullable=False)
+    date_variance_days: int = Column(Numeric(5, 0), default=0, nullable=False)
 
-    # Matched line details
-    matched_line_details = Column("matched_line_details", JSONB, nullable=True)
+    # Detailed match results as JSON
+    line_match_details: Optional[dict] = Column(JSONB, nullable=True)
+    variance_details: Optional[dict] = Column(JSONB, nullable=True)
 
-    # Decision info
-    decision = Column(SQLEnum("MatchDecision"), nullable=True)
-    decision_notes = Column(Text, nullable=True)
+    # Review information
+    review_notes: Optional[str] = Column(Text, nullable=True)
+    rejection_reason: Optional[str] = Column(Text, nullable=True)
+    confirmed_by_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    confirmed_at: Optional[datetime] = Column(DateTime, nullable=True)
 
-    # Relationships
-    invoice = relationship(
-        "Invoice",
-        foreign_keys=[invoice_id],
-        back_populates="match_records",
-    )
-    delivery_note = relationship(
-        "DeliveryNote",
-        foreign_keys=[dn_id],
-        back_populates="match_records",
-    )
-    purchase_order = relationship(
-        "PurchaseOrder",
-        foreign_keys=[po_id],
-        back_populates="matched_invoices",
-    )
-    cross_references = relationship(
-        "CrossReference",
-        back_populates="match_record",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-
-
-class MatchDecision(str, enum.Enum):
-    """Match decision outcomes."""
-    AUTO_APPROVE = "auto_approve"
-    HUMAN_REVIEW = "human_review"
-    DISPUTE = "dispute"
-
-
-class BalanceLedger(BaseModel):
-    """Ledger for tracking partial matches and balances."""
-
-    __tablename__ = "balance_ledger"
-
-    # Document reference
-    document_type = Column(String(20), nullable=False, index=True)  # invoice, dn, po
-    document_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    document_number = Column(String(100), nullable=False, index=True)
-
-    # Balance tracking
-    original_amount = Column(Numeric(15, 2), nullable=False)
-    matched_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    pending_amount = Column(Numeric(15, 2), nullable=False)
-    balance = Column(Numeric(15, 2), nullable=False)
-
-    # Reference to match record
-    match_record_id = Column(UUID(as_uuid=True), ForeignKey("match_records.id"), nullable=True)
-
-    # Status
-    is_settled = Column(Integer, default=0, nullable=False)  # 0=pending, 1=settled
+    # Learning loop - feedback from human confirmation
+    feedback_data: Optional[dict] = Column(JSONB, nullable=True)
 
     # Relationships
-    match_record = relationship("MatchRecord")
+    purchase_order = relationship("PurchaseOrder", foreign_keys=[purchase_order_id])
+    invoice = relationship("Invoice", foreign_keys=[invoice_id])
+    delivery_note = relationship("DeliveryNote", foreign_keys=[delivery_note_id])
+    confirmed_by_user = relationship("User", foreign_keys=[confirmed_by_id], back_populates="matching_confirmations")
 
-
-class CrossReference(BaseModel):
-    """Cross-reference table for human confirmations (learning loop)."""
-
-    __tablename__ = "cross_references"
-
-    match_record_id = Column(UUID(as_uuid=True), ForeignKey("match_records.id"), nullable=False)
-    
-    # Document info
-    document_type = Column(String(20), nullable=False)  # invoice, dn, po
-    document_id = Column(UUID(as_uuid=True), nullable=False)
-    document_number = Column(String(100), nullable=False)
-    
-    # Match info at time of confirmation
-    matched_against_type = Column(String(20), nullable=False)
-    matched_against_id = Column(UUID(as_uuid=True), nullable=False)
-    matched_against_number = Column(String(100), nullable=False)
-    
-    # Confirmation details
-    confirmed = Column(Integer, default=0, nullable=False)  # 0=rejected, 1=confirmed
-    confirmation_notes = Column(Text, nullable=True)
-    confirmed_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    confirmed_at = Column(Text, nullable=True)
-
-    # Feature values used for matching (for learning)
-    feature_vector = Column("feature_vector", JSONB, nullable=True)
-
-    # Relationships
-    match_record = relationship("MatchRecord", back_populates="cross_references")
-    confirmed_by_user = relationship("User", back_populates="match_decisions")
+    def __repr__(self) -> str:
+        return f"<MatchingRecord {self.id} - {self.match_type} - {self.status}>"

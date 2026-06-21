@@ -1,10 +1,10 @@
 // src/schemas/common.py
-"""Common Pydantic schemas."""
+"""Common schemas used across the application."""
 from datetime import datetime
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Optional, Generic, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 T = TypeVar("T")
 
@@ -14,51 +14,44 @@ class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class TimestampMixin(BaseSchema):
-    """Schema for timestamp fields."""
+class TimestampMixin(BaseModel):
+    """Mixin for timestamp fields."""
     created_at: datetime
     updated_at: datetime
 
 
-class SoftDeleteMixin(BaseSchema):
-    """Schema for soft delete fields."""
-    is_deleted: bool = False
-    deleted_at: Optional[datetime] = None
+class PaginationParams(BaseModel):
+    """Pagination parameters."""
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
-class PaginatedResponse(BaseSchema, Generic[T]):
+class PaginatedResponse(BaseModel, Generic[T]):
     """Paginated response wrapper."""
-    items: List[T]
+    items: list[T]
     total: int
     page: int
     page_size: int
     total_pages: int
 
 
-class ErrorResponse(BaseSchema):
-    """Standard error response."""
-    error: str
-    message: str
-    details: Optional[dict] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class SuccessResponse(BaseSchema):
+class SuccessResponse(BaseModel):
     """Standard success response."""
     success: bool = True
-    message: str
-    data: Optional[dict] = None
+    message: str = "Operation completed successfully"
 
 
-class HealthCheckResponse(BaseSchema):
+class ErrorResponse(BaseModel):
+    """Standard error response."""
+    success: bool = False
+    error: str
+    detail: Optional[str] = None
+    code: Optional[str] = None
+
+
+class HealthCheckResponse(BaseModel):
     """Health check response."""
-    status: str
+    status: str = "healthy"
     version: str
-    database: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class PaginationParams(BaseSchema):
-    """Pagination parameters."""
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=100)
+    database: str = "connected"

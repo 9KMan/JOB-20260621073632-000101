@@ -1,40 +1,92 @@
-# src/schemas/balance.py
-from datetime import date, datetime
+// src/schemas/balance.py
+"""Balance ledger schemas."""
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
-from src.schemas.common import TimestampMixinSchema, UUIDMixinSchema
+from src.schemas.common import BaseSchema, TimestampMixin
 
 
-class BalanceBase(BaseModel):
-    """Base schema for Balances."""
+class BalanceLedgerBase(BaseSchema):
+    """Base balance ledger schema."""
     balance_type: str
-    reference_type: str
-    reference_id: str
-    original_amount: Decimal = Field(ge=0)
-    matched_amount: Decimal = Field(ge=0, default=Decimal("0.00"))
-    remaining_amount: Decimal = Field(ge=0)
-    is_settled: bool = False
-    settlement_date: Optional[date] = None
-    purchase_order_id: Optional[str] = None
+    direction: str
+    status: str
 
 
-class BalanceCreate(BalanceBase):
-    """Schema for creating Balances."""
-    pass
+class BalanceLedgerCreate(BaseSchema):
+    """Schema for creating a balance entry."""
+    balance_type: str
+    direction: str
+    source_document_type: str
+    source_document_id: UUID
+    source_line_id: Optional[UUID] = None
+    related_document_type: Optional[str] = None
+    related_document_id: Optional[UUID] = None
+    original_amount: Decimal
+    balance_amount: Decimal
+    currency: str = "USD"
+    matching_record_id: Optional[UUID] = None
+    notes: Optional[str] = None
 
 
-class BalanceUpdate(BaseModel):
-    """Schema for updating Balances."""
-    matched_amount: Optional[Decimal] = None
-    remaining_amount: Optional[Decimal] = None
-    is_settled: Optional[bool] = None
-    settlement_date: Optional[date] = None
+class BalanceLedgerUpdate(BaseSchema):
+    """Schema for updating a balance entry."""
+    balance_amount: Optional[Decimal] = None
+    status: Optional[str] = None
+    resolution_type: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    resolved_by_id: Optional[UUID] = None
+    resolved_at: Optional[datetime] = None
 
 
-class BalanceResponse(BalanceBase, UUIDMixinSchema, TimestampMixinSchema):
-    """Schema for Balance response."""
-    
-    model_config = {"from_attributes": True}
+class BalanceLedgerResponse(BalanceLedgerBase, TimestampMixin):
+    """Schema for balance ledger response."""
+    id: UUID
+    source_document_type: str
+    source_document_id: UUID
+    source_line_id: Optional[UUID] = None
+    related_document_type: Optional[str] = None
+    related_document_id: Optional[UUID] = None
+    original_amount: Decimal
+    balance_amount: Decimal
+    resolved_amount: Decimal
+    currency: str
+    matching_record_id: Optional[UUID] = None
+    resolution_type: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    resolved_by_id: Optional[UUID] = None
+    resolved_at: Optional[datetime] = None
+    transaction_reference: Optional[str] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BalanceResolutionRequest(BaseSchema):
+    """Request to resolve a balance."""
+    resolution_type: str
+    resolve_amount: Optional[Decimal] = None
+    resolution_notes: Optional[str] = None
+    transaction_reference: Optional[str] = None
+
+
+class BalanceSummary(BaseSchema):
+    """Summary of balances."""
+    total_open: int
+    total_resolved: int
+    total_disputed: int
+    total_open_amount: Decimal
+    total_resolved_amount: Decimal
+
+
+class BalanceByDocument(BaseSchema):
+    """Balance grouped by document."""
+    document_type: str
+    document_id: UUID
+    document_number: str
+    balance_count: int
+    total_balance_amount: Decimal
