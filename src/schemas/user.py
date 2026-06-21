@@ -1,56 +1,57 @@
 # src/schemas/user.py
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+"""User schemas."""
 from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 class UserBase(BaseModel):
     """Base user schema."""
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=100)
     full_name: Optional[str] = None
-    role: str = Field(default="user")
+    role: str = "user"
 
 
 class UserCreate(UserBase):
-    """Schema for creating a user."""
-    password: str = Field(..., min_length=8, max_length=100)
+    """User creation schema."""
+    password: str = Field(min_length=8, max_length=100)
 
 
 class UserUpdate(BaseModel):
-    """Schema for updating a user."""
+    """User update schema."""
     email: Optional[EmailStr] = None
-    username: Optional[str] = Field(None, min_length=3, max_length=100)
     full_name: Optional[str] = None
     role: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=100)
     is_active: Optional[bool] = None
 
 
-class UserResponse(UserBase):
-    """Schema for user response."""
-    id: str
+class UserInDB(UserBase):
+    """User database schema."""
+    id: UUID
+    hashed_password: str
     is_active: bool
     is_superuser: bool
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserResponse(UserBase):
+    """User response schema."""
+    id: UUID
+    is_active: bool
+    is_superuser: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLogin(BaseModel):
-    """Schema for user login."""
-    username: str
+    """User login schema."""
+    email: EmailStr
     password: str
-
-
-class Token(BaseModel):
-    """Token response schema."""
-    access_token: str
-    token_type: str = "bearer"
-
-
-class TokenData(BaseModel):
-    """Token data schema."""
-    user_id: Optional[str] = None
-    username: Optional[str] = None

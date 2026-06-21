@@ -1,51 +1,30 @@
-// src/models/audit_log.py
-"""Audit log model for compliance tracking."""
-import uuid
-from datetime import datetime
-from enum import Enum
-from typing import Optional
-
-from sqlalchemy import DateTime, Index, String, Text
+# src/models/audit_log.py
+"""Audit Log model for tracking system events."""
+from sqlalchemy import Column, String, Text, ForeignKey, JSONB
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import relationship
 
 from src.models.base import BaseModel
 
 
-class AuditAction(str, Enum):
-    """Audit action types."""
-    CREATE = "create"
-    UPDATE = "update"
-    DELETE = "delete"
-    MATCH = "match"
-    CONFIRM = "confirm"
-    REJECT = "reject"
-    APPROVE = "approve"
-    DISPUTE = "dispute"
-
-
 class AuditLog(BaseModel):
-    """Audit log for compliance and tracking."""
+    """Audit Log model for tracking system events and changes."""
 
     __tablename__ = "audit_logs"
 
-    entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    action: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    old_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    new_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
+    action = Column(String(100), nullable=False, index=True)
+    entity_type = Column(String(100), nullable=False, index=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    changes = Column(JSONB, nullable=True)
+    description = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
 
-    __table_args__ = (
-        Index("ix_audit_logs_entity", "entity_type", "entity_id"),
-        Index("ix_audit_logs_timestamp_action", "timestamp", "action"),
-    )
+    # Relationships
+    user = relationship("User", back_populates="audit_logs")

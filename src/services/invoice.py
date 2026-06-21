@@ -1,203 +1,205 @@
-// src/services/invoice.py
+# src/services/invoice.py
 """Invoice service."""
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, joinedload
 
-from src.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from src.models.invoice import Invoice, InvoiceLine
 from src.schemas.invoice import InvoiceCreate, InvoiceUpdate
 
 
 class InvoiceService:
-    """Invoice business logic."""
-    
-    def __init__(self, db: AsyncSession):
+    """Service for invoice management."""
+
+    def __init__(self, db: Session):
+        """Initialize invoice service with database session."""
         self.db = db
-    
-    def _calculate_line_total(self, line: dict) -> Decimal:
-        """Calculate line total including tax."""
-        quantity = Decimal(str(line.quantity))
-        unit_price = Decimal(str(line.unit_price))
-        tax_rate = Decimal(str(line.get("tax_rate", "0")))
-        subtotal = quantity * unit_price
-        tax = subtotal * tax_rate
-        return subtotal + tax
-    
-    def _calculate_totals(self, lines: list[dict]) -> tuple[Decimal, Decimal, Decimal]:
-        """Calculate invoice totals."""
-        subtotal = Decimal("0.00")
-        tax_amount = Decimal("0.00")
-        for line in lines:
-            quantity = Decimal(str(line.quantity))
-            unit_price = Decimal(str(line.unit_price))
-            tax_rate = Decimal(str(line.get("tax_rate", "0")))
-            line_subtotal = quantity * unit_price
-            line_tax = line_subtotal * tax_rate
-            subtotal += line_subtotal
-            tax_amount += line_tax
-        return subtotal, tax_amount, subtotal + tax_amount
-    
-    async def create_invoice(self, invoice_data: InvoiceCreate) -> Invoice:
-        """Create a new invoice."""
-        lines_data = [line.model_dump() for line in invoice_data.lines]
-        subtotal, tax_amount, total_amount = self._calculate_totals(lines_data)
-        
-        invoice = Invoice(
-            invoice_number=invoice_data.invoice_number,
-            supplier_id=invoice_data.supplier_id,
-            supplier_name=invoice_data.supplier_name,
-            supplier_reference=invoice_data.supplier_reference,
-            po_reference=invoice_data.po_reference,
-            invoice_date=invoice_data.invoice_date,
-            due_date=invoice_data.due_date,
-            currency=invoice_data.currency,
-            subtotal=subtotal,
-            tax_amount=tax_amount,
-            total_amount=total_amount,
-            notes=invoice_data.notes,
-            status=InvoiceStatus.DRAFT,
+
+    def get_by_id(self, invoice_id: UUID) -> Optional[Invoice]:
+        """Get invoice by ID with line items."""
+        return (
+            self.db.query(Invoice)
+            .options(joinedload(Invoice.line_items))
+            .filter(Invoice.id == invoice_id)
+            .first()
         )
-        self.db.add(invoice)
-        await self.db.flush()
-        
-        for idx, line_data in enumerate(lines_data):
-            line_total = self._calculate_line_total(line_data)
-            line = InvoiceLine(
-                invoice_id=invoice.id,
-                line_number=line_data.get("line_number", idx + 1),
-                sku=line_data.get("sku"),
-                description=line_data["description"],
-                quantity=Decimal(str(line_data["quantity"])),
-                unit_of_measure=line_data.get("unit_of_measure", "EA"),
-                unit_price=Decimal(str(line_data["unit_price"])),
-                tax_rate=Decimal(str(line_data.get("tax_rate", "0"))),
-                line_total=line_total,
-            )
-            self.db.add(line)
-        
-        await self.db.commit()
-        await self.db.refresh(invoice)
-        return invoice
-    
-    async def get_invoice(self, invoice_id: UUID) -> Optional[Invoice]:
-        """Get invoice by ID."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.id == invoice_id)
+
+    def get_by_invoice_number(self, invoice_number: str) -> Optional[Invoice]:
+        """Get invoice by invoice number."""
+        return (
+            self.db.query(Invoice)
+            .options(joinedload(Invoice.line_items))
+            .filter(Invoice.invoice_number == invoice_number)
+            .first()
         )
-        return result.scalar_one_or_none()
-    
-    async def get_invoice_by_number(self, invoice_number: str) -> Optional[Invoice]:
-        """Get invoice by number."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.invoice_number == invoice_number)
-        )
-        return result.scalar_one_or_none()
-    
-    async def get_invoices(
+
+    def get_all(
         self,
         skip: int = 0,
         limit: int = 100,
         supplier_id: Optional[str] = None,
-        status: Optional[InvoiceStatus] = None,
-        po_reference: Optional[str] = None,
-    ) -> tuple[list[Invoice], int]:
-        """Get invoices with optional filters."""
-        query = select(Invoice).options(selectinload(Invoice.lines))
-        count_query = select(func.count(Invoice.id))
-        
+        status: Optional[str] = None,
+        purchase_order_id: Optional[UUID] = None,
+    ) -> List[Invoice]:
+        """Get all invoices with pagination and filters."""
+        query = self.db.query(Invoice).options(joinedload(Invoice.line_items))
+
         if supplier_id:
-            query = query.where(Invoice.supplier_id == supplier_id)
-            count_query = count_query.where(Invoice.supplier_id == supplier_id)
-        
+            query = query.filter(Invoice.supplier_id == supplier_id)
         if status:
-            query = query.where(Invoice.status == status)
-            count_query = count_query.where(Invoice.status == status)
-        
-        if po_reference:
-            query = query.where(Invoice.po_reference == po_reference)
-            count_query = count_query.where(Invoice.po_reference == po_reference)
-        
-        total_result = await self.db.execute(count_query)
-        total = total_result.scalar() or 0
-        
-        query = query.offset(skip).limit(limit).order_by(Invoice.created_at.desc())
-        result = await self.db.execute(query)
-        items = list(result.scalars().all())
-        
-        return items, total
-    
-    async def update_invoice(
+            query = query.filter(Invoice.status == status)
+        if purchase_order_id:
+            query = query.filter(Invoice.purchase_order_id == purchase_order_id)
+
+        return query.order_by(Invoice.created_at.desc()).offset(skip).limit(limit).all()
+
+    def get_total_count(
+        self,
+        supplier_id: Optional[str] = None,
+        status: Optional[str] = None,
+        purchase_order_id: Optional[UUID] = None,
+    ) -> int:
+        """Get total count of invoices with filters."""
+        query = self.db.query(Invoice)
+
+        if supplier_id:
+            query = query.filter(Invoice.supplier_id == supplier_id)
+        if status:
+            query = query.filter(Invoice.status == status)
+        if purchase_order_id:
+            query = query.filter(Invoice.purchase_order_id == purchase_order_id)
+
+        return query.count()
+
+    def create(self, invoice_data: InvoiceCreate) -> Invoice:
+        """Create new invoice with line items."""
+        # Calculate net amount from line items if not provided
+        net_amount = invoice_data.net_amount
+        if invoice_data.line_items:
+            net_amount = sum(
+                line.line_amount + line.tax_amount for line in invoice_data.line_items
+            )
+
+        invoice = Invoice(
+            invoice_number=invoice_data.invoice_number,
+            supplier_id=invoice_data.supplier_id,
+            supplier_name=invoice_data.supplier_name,
+            invoice_date=invoice_data.invoice_date,
+            due_date=invoice_data.due_date,
+            total_amount=invoice_data.total_amount,
+            tax_amount=invoice_data.tax_amount,
+            net_amount=net_amount,
+            currency=invoice_data.currency,
+            status=invoice_data.status,
+            notes=invoice_data.notes,
+            purchase_order_id=invoice_data.purchase_order_id,
+        )
+        self.db.add(invoice)
+        self.db.flush()
+
+        # Add line items
+        for line_data in invoice_data.line_items:
+            line = InvoiceLine(
+                invoice_id=invoice.id,
+                line_number=line_data.line_number,
+                item_code=line_data.item_code,
+                item_description=line_data.item_description,
+                quantity=line_data.quantity,
+                unit_price=line_data.unit_price,
+                line_amount=line_data.line_amount,
+                tax_amount=line_data.tax_amount,
+                uom=line_data.uom,
+            )
+            self.db.add(line)
+
+        self.db.commit()
+        self.db.refresh(invoice)
+        return self.get_by_id(invoice.id)
+
+    def update(
         self,
         invoice_id: UUID,
         invoice_data: InvoiceUpdate,
     ) -> Optional[Invoice]:
-        """Update an invoice."""
-        invoice = await self.get_invoice(invoice_id)
+        """Update existing invoice."""
+        invoice = self.get_by_id(invoice_id)
         if not invoice:
             return None
-        
-        update_data = invoice_data.model_dump(exclude_unset=True)
-        
-        if "lines" in update_data:
-            lines_data = update_data.pop("lines")
-            for line in invoice.lines:
-                await self.db.delete(line)
-            await self.db.flush()
-            
-            subtotal, tax_amount, total_amount = self._calculate_totals(lines_data)
-            update_data["subtotal"] = subtotal
-            update_data["tax_amount"] = tax_amount
-            update_data["total_amount"] = total_amount
-            
-            for idx, line_data in enumerate(lines_data):
-                line_total = self._calculate_line_total(line_data)
-                line = InvoiceLine(
-                    invoice_id=invoice.id,
-                    line_number=line_data.get("line_number", idx + 1),
-                    sku=line_data.get("sku"),
-                    description=line_data["description"],
-                    quantity=Decimal(str(line_data["quantity"])),
-                    unit_of_measure=line_data.get("unit_of_measure", "EA"),
-                    unit_price=Decimal(str(line_data["unit_price"])),
-                    tax_rate=Decimal(str(line_data.get("tax_rate", "0"))),
-                    line_total=line_total,
-                )
-                self.db.add(line)
-        
+
+        update_data = invoice_data.model_dump(exclude_unset=True, exclude={"line_items"})
+
         for field, value in update_data.items():
             setattr(invoice, field, value)
-        
-        await self.db.commit()
-        await self.db.refresh(invoice)
-        return invoice
-    
-    async def update_invoice_status(
-        self,
-        invoice_id: UUID,
-        status: InvoiceStatus,
-    ) -> Optional[Invoice]:
+
+        # Update line items if provided
+        if invoice_data.line_items is not None:
+            # Remove existing lines
+            self.db.query(InvoiceLine).filter(
+                InvoiceLine.invoice_id == invoice_id
+            ).delete()
+
+            # Add new lines
+            for line_data in invoice_data.line_items:
+                line = InvoiceLine(
+                    invoice_id=invoice_id,
+                    line_number=line_data.line_number,
+                    item_code=line_data.item_code,
+                    item_description=line_data.item_description,
+                    quantity=line_data.quantity,
+                    unit_price=line_data.unit_price,
+                    line_amount=line_data.line_amount,
+                    tax_amount=line_data.tax_amount,
+                    uom=line_data.uom,
+                )
+                self.db.add(line)
+
+            # Recalculate totals
+            invoice.net_amount = sum(
+                line.line_amount + line.tax_amount for line in invoice_data.line_items
+            )
+            invoice.total_amount = sum(
+                line.line_amount for line in invoice_data.line_items
+            )
+            invoice.tax_amount = sum(
+                line.tax_amount for line in invoice_data.line_items
+            )
+
+        self.db.commit()
+        self.db.refresh(invoice)
+        return self.get_by_id(invoice_id)
+
+    def update_status(self, invoice_id: UUID, status: str) -> Optional[Invoice]:
         """Update invoice status."""
-        invoice = await self.get_invoice(invoice_id)
+        invoice = self.get_by_id(invoice_id)
         if not invoice:
             return None
+
         invoice.status = status
-        await self.db.commit()
-        await self.db.refresh(invoice)
+        self.db.commit()
+        self.db.refresh(invoice)
         return invoice
-    
-    async def delete_invoice(self, invoice_id: UUID) -> bool:
-        """Delete an invoice."""
-        invoice = await self.get_invoice(invoice_id)
+
+    def delete(self, invoice_id: UUID) -> bool:
+        """Delete invoice."""
+        invoice = self.get_by_id(invoice_id)
         if not invoice:
             return False
-        await self.db.delete(invoice)
-        await self.db.commit()
+
+        self.db.delete(invoice)
+        self.db.commit()
         return True
+
+    def get_unmatched_invoices(self, supplier_id: Optional[str] = None) -> List[Invoice]:
+        """Get invoices that haven't been matched yet."""
+        query = (
+            self.db.query(Invoice)
+            .options(joinedload(Invoice.line_items))
+            .filter(Invoice.status == "pending")
+        )
+
+        if supplier_id:
+            query = query.filter(Invoice.supplier_id == supplier_id)
+
+        return query.all()

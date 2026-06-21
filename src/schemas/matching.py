@@ -1,133 +1,135 @@
 # src/schemas/matching.py
-from pydantic import BaseModel, Field
-from typing import Optional, List
+"""Matching schemas."""
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class MatchingResultBase(BaseModel):
-    """Base schema for Matching Result."""
-    invoice_id: Optional[str] = None
-    dn_id: Optional[str] = None
-    po_id: Optional[str] = None
+class MatchingLineBase(BaseModel):
+    """Base matching line schema."""
+    line_number: int
+    po_line_id: Optional[UUID] = None
+    invoice_line_id: Optional[UUID] = None
+    dn_line_id: Optional[UUID] = None
+    item_code: Optional[str] = None
+    item_description: Optional[str] = None
+    po_quantity: Optional[Decimal] = None
+    invoice_quantity: Optional[Decimal] = None
+    dn_quantity: Optional[Decimal] = None
+    quantity_variance: Decimal = Field(default=Decimal("0"))
+    po_amount: Optional[Decimal] = None
+    invoice_amount: Optional[Decimal] = None
+    dn_amount: Optional[Decimal] = None
+    amount_variance: Decimal = Field(default=Decimal("0"))
+    match_status: str = "pending"
+    match_type: Optional[str] = None
 
 
-class MatchingResultCreate(MatchingResultBase):
-    """Schema for creating Matching Result."""
+class MatchingLineCreate(MatchingLineBase):
+    """Matching line creation schema."""
     pass
 
 
-class MatchingResultUpdate(BaseModel):
-    """Schema for updating Matching Result."""
-    status: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class MatchingResultResponse(MatchingResultBase):
-    """Schema for Matching Result response."""
-    id: str
-    invoice_po_score: Optional[Decimal] = None
-    dn_po_score: Optional[Decimal] = None
-    invoice_dn_score: Optional[Decimal] = None
-    overall_score: Decimal
-    invoice_amount: Optional[Decimal] = None
-    po_amount: Optional[Decimal] = None
-    dn_amount: Optional[Decimal] = None
-    variance_amount: Decimal
-    variance_percentage: Decimal
-    status: str
+class MatchingLineUpdate(BaseModel):
+    """Matching line update schema."""
+    match_status: Optional[str] = None
     match_type: Optional[str] = None
-    notes: Optional[str] = None
+
+
+class MatchingLineInDB(MatchingLineBase):
+    """Matching line database schema."""
+    id: UUID
+    matching_record_id: UUID
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-class MatchDecisionBase(BaseModel):
-    """Base schema for Match Decision."""
-    decision_type: str
-    decision_notes: Optional[str] = None
+class MatchingLineResponse(MatchingLineBase):
+    """Matching line response schema."""
+    id: UUID
+    matching_record_id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class MatchDecisionCreate(MatchDecisionBase):
-    """Schema for creating Match Decision."""
-    matching_result_id: str
+class MatchingRecordBase(BaseModel):
+    """Base matching record schema."""
+    purchase_order_id: Optional[UUID] = None
+    invoice_id: Optional[UUID] = None
+    delivery_note_id: Optional[UUID] = None
+    match_type: str
+    match_status: str = "pending"
+    decision: str = "HUMAN_REVIEW"
+    decision_reason: Optional[str] = None
+    line_weight: Decimal = Field(default=Decimal("70"))
+    amount_weight: Decimal = Field(default=Decimal("20"))
+    date_weight: Decimal = Field(default=Decimal("10"))
+    match_metadata: Optional[Dict[str, Any]] = None
 
 
-class MatchDecisionUpdate(BaseModel):
-    """Schema for updating Match Decision."""
-    decision_notes: Optional[str] = None
+class MatchingRecordCreate(MatchingRecordBase):
+    """Matching record creation schema."""
+    line_matches: List[MatchingLineCreate] = []
 
 
-class MatchDecisionResponse(MatchDecisionBase):
-    """Schema for Match Decision response."""
-    id: str
-    matching_result_id: str
-    decided_by: Optional[str] = None
-    previous_status: Optional[str] = None
-    new_status: str
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class BalanceLedgerBase(BaseModel):
-    """Base schema for Balance Ledger."""
-    invoice_id: Optional[str] = None
-    dn_id: Optional[str] = None
-    po_id: Optional[str] = None
-    matching_result_id: Optional[str] = None
-    document_type: str
-    document_number: str
-    original_amount: Decimal
-    currency: str = "USD"
-    notes: Optional[str] = None
-
-
-class BalanceLedgerCreate(BalanceLedgerBase):
-    """Schema for creating Balance Ledger."""
-    matched_amount: Optional[Decimal] = None
-
-
-class BalanceEntryCreate(BaseModel):
-    """Schema for creating a balance entry."""
-    document_type: str = Field(..., description="Type: invoice, dn, or po")
-    document_id: str
-    document_number: str
-    amount: Decimal
-    currency: str = "USD"
-
-
-class BalanceLedgerResponse(BalanceLedgerBase):
-    """Schema for Balance Ledger response."""
-    id: str
-    matched_amount: Decimal
-    remaining_balance: Decimal
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class MatchRequest(BaseModel):
-    """Schema for requesting a match operation."""
-    invoice_id: Optional[str] = None
-    dn_id: Optional[str] = None
-    po_id: Optional[str] = None
-    match_type: str = Field(
-        default="auto",
-        description="Type: auto, invoice_po, dn_po, invoice_dn, three_way"
-    )
-
-
-class MatchResponse(BaseModel):
-    """Schema for match operation response."""
-    success: bool
-    matching_result: Optional[MatchingResultResponse] = None
-    message: str
+class MatchingRecordUpdate(BaseModel):
+    """Matching record update schema."""
+    match_status: Optional[str] = None
     decision: Optional[str] = None
+    decision_reason: Optional[str] = None
+
+
+class MatchingRecordInDB(MatchingRecordBase):
+    """Matching record database schema."""
+    id: UUID
+    line_level_score: Decimal
+    amount_score: Decimal
+    date_score: Decimal
+    overall_score: Decimal
+    po_amount: Optional[Decimal] = None
+    invoice_amount: Optional[Decimal] = None
+    delivery_note_amount: Optional[Decimal] = None
+    variance_amount: Decimal
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MatchingRecordResponse(MatchingRecordBase):
+    """Matching record response schema."""
+    id: UUID
+    line_level_score: Decimal
+    amount_score: Decimal
+    date_score: Decimal
+    overall_score: Decimal
+    po_amount: Optional[Decimal] = None
+    invoice_amount: Optional[Decimal] = None
+    delivery_note_amount: Optional[Decimal] = None
+    variance_amount: Decimal
+    line_matches: List[MatchingLineResponse] = []
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MatchingRecordListResponse(BaseModel):
+    """Matching record list response schema."""
+    items: List[MatchingRecordResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class MatchingResultResponse(BaseModel):
+    """Matching result response schema."""
+    confirmed: List[MatchingRecordResponse]
+    pending: List[MatchingRecordResponse]
+    rejected: List[MatchingRecordResponse]
+    total_processed: int

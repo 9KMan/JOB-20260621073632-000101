@@ -1,93 +1,112 @@
 # src/schemas/purchase_order.py
-from pydantic import BaseModel, Field
-from typing import Optional, List
+"""Purchase Order schemas."""
 from datetime import date, datetime
 from decimal import Decimal
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PurchaseOrderLineBase(BaseModel):
-    """Base schema for PO line."""
-    line_number: int = Field(..., ge=1)
-    product_code: str = Field(..., max_length=50)
-    product_name: str = Field(..., max_length=255)
-    description: Optional[str] = Field(None, max_length=500)
-    quantity: Decimal = Field(..., gt=0)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0"))
-    expected_delivery_date: Optional[date] = None
-    notes: Optional[str] = Field(None, max_length=500)
+    """Base purchase order line schema."""
+    line_number: int
+    item_code: str
+    item_description: str
+    quantity: Decimal = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    line_amount: Decimal = Field(ge=0)
+    uom: Optional[str] = None
 
 
 class PurchaseOrderLineCreate(PurchaseOrderLineBase):
-    """Schema for creating PO line."""
-    tax_amount: Optional[Decimal] = None
+    """Purchase order line creation schema."""
+    pass
 
 
 class PurchaseOrderLineUpdate(BaseModel):
-    """Schema for updating PO line."""
-    line_number: Optional[int] = Field(None, ge=1)
-    product_code: Optional[str] = Field(None, max_length=50)
-    product_name: Optional[str] = Field(None, max_length=255)
-    description: Optional[str] = Field(None, max_length=500)
-    quantity: Optional[Decimal] = Field(None, gt=0)
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=0)
-    tax_rate: Optional[Decimal] = None
-    expected_delivery_date: Optional[date] = None
-    notes: Optional[str] = Field(None, max_length=500)
+    """Purchase order line update schema."""
+    line_number: Optional[int] = None
+    item_code: Optional[str] = None
+    item_description: Optional[str] = None
+    quantity: Optional[Decimal] = Field(default=None, gt=0)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0)
+    line_amount: Optional[Decimal] = Field(default=None, ge=0)
+    uom: Optional[str] = None
+
+
+class PurchaseOrderLineInDB(PurchaseOrderLineBase):
+    """Purchase order line database schema."""
+    id: UUID
+    purchase_order_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseOrderLineResponse(PurchaseOrderLineBase):
-    """Schema for PO line response."""
-    id: str
-    purchase_order_id: str
-    line_amount: Decimal
-    tax_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
+    """Purchase order line response schema."""
+    id: UUID
+    purchase_order_id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseOrderBase(BaseModel):
-    """Base schema for Purchase Order."""
-    po_number: str = Field(..., max_length=50)
-    supplier_id: str = Field(..., max_length=36)
-    supplier_name: str = Field(..., max_length=255)
-    supplier_code: Optional[str] = Field(None, max_length=50)
-    order_date: date
+    """Base purchase order schema."""
+    po_number: str = Field(max_length=100)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    po_date: date
     expected_delivery_date: Optional[date] = None
+    total_amount: Decimal = Field(gt=0)
     currency: str = Field(default="USD", max_length=3)
-    notes: Optional[str] = Field(None, max_length=1000)
-    metadata: Optional[str] = Field(None, max_length=5000)
+    status: str = Field(default="open", max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=1000)
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for creating Purchase Order."""
-    lines: List[PurchaseOrderLineCreate] = Field(default_factory=list)
+    """Purchase order creation schema."""
+    line_items: List[PurchaseOrderLineCreate] = []
 
 
 class PurchaseOrderUpdate(BaseModel):
-    """Schema for updating Purchase Order."""
-    supplier_name: Optional[str] = Field(None, max_length=255)
-    supplier_code: Optional[str] = Field(None, max_length=50)
+    """Purchase order update schema."""
+    po_number: Optional[str] = Field(default=None, max_length=100)
+    supplier_id: Optional[str] = Field(default=None, max_length=100)
+    supplier_name: Optional[str] = Field(default=None, max_length=255)
+    po_date: Optional[date] = None
     expected_delivery_date: Optional[date] = None
-    status: Optional[str] = None
-    notes: Optional[str] = Field(None, max_length=1000)
-    metadata: Optional[str] = Field(None, max_length=5000)
+    total_amount: Optional[Decimal] = Field(default=None, gt=0)
+    currency: Optional[str] = Field(default=None, max_length=3)
+    status: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    line_items: Optional[List[PurchaseOrderLineCreate]] = None
+
+
+class PurchaseOrderInDB(PurchaseOrderBase):
+    """Purchase order database schema."""
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for Purchase Order response."""
-    id: str
-    status: str
-    total_amount: Decimal
-    tax_amount: Decimal
+    """Purchase order response schema."""
+    id: UUID
+    line_items: List[PurchaseOrderLineResponse] = []
     created_at: datetime
     updated_at: datetime
-    lines: List[PurchaseOrderLineResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PurchaseOrderListResponse(BaseModel):
+    """Purchase order list response schema."""
+    items: List[PurchaseOrderResponse]
+    total: int
+    page: int
+    page_size: int

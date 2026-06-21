@@ -1,34 +1,105 @@
 # src/schemas/__init__.py
-from src.schemas.user import UserCreate, UserUpdate, UserResponse, UserLogin
+"""Pydantic schemas package."""
+from src.schemas.user import UserCreate, UserUpdate, UserInDB, UserResponse
 from src.schemas.purchase_order import (
-    PurchaseOrderCreate, PurchaseOrderUpdate, PurchaseOrderResponse,
-    PurchaseOrderLineCreate, PurchaseOrderLineUpdate, PurchaseOrderLineResponse
+    PurchaseOrderCreate,
+    PurchaseOrderUpdate,
+    PurchaseOrderInDB,
+    PurchaseOrderResponse,
+    PurchaseOrderLineCreate,
+    PurchaseOrderLineUpdate,
+    PurchaseOrderLineInDB,
+    PurchaseOrderLineResponse,
 )
 from src.schemas.invoice import (
-    InvoiceCreate, InvoiceUpdate, InvoiceResponse,
-    InvoiceLineCreate, InvoiceLineUpdate, InvoiceLineResponse
+    InvoiceCreate,
+    InvoiceUpdate,
+    InvoiceInDB,
+    InvoiceResponse,
+    InvoiceLineCreate,
+    InvoiceLineUpdate,
+    InvoiceLineInDB,
+    InvoiceLineResponse,
 )
 from src.schemas.delivery_note import (
-    DeliveryNoteCreate, DeliveryNoteUpdate, DeliveryNoteResponse,
-    DeliveryNoteLineCreate, DeliveryNoteLineUpdate, DeliveryNoteLineResponse
+    DeliveryNoteCreate,
+    DeliveryNoteUpdate,
+    DeliveryNoteInDB,
+    DeliveryNoteResponse,
+    DeliveryNoteLineCreate,
+    DeliveryNoteLineUpdate,
+    DeliveryNoteLineInDB,
+    DeliveryNoteLineResponse,
 )
 from src.schemas.matching import (
-    MatchingResultCreate, MatchingResultUpdate, MatchingResultResponse,
-    MatchDecisionCreate, MatchDecisionUpdate, MatchDecisionResponse,
-    BalanceLedgerCreate, BalanceLedgerResponse, BalanceEntryCreate
+    MatchingRecordCreate,
+    MatchingRecordUpdate,
+    MatchingRecordInDB,
+    MatchingRecordResponse,
+    MatchingLineCreate,
+    MatchingLineUpdate,
+    MatchingLineInDB,
+    MatchingLineResponse,
 )
-from src.schemas.common import PaginatedResponse, ErrorResponse, SuccessResponse
+from src.schemas.balance_ledger import (
+    BalanceLedgerCreate,
+    BalanceLedgerUpdate,
+    BalanceLedgerInDB,
+    BalanceLedgerResponse,
+)
+from src.schemas.common import Token, TokenData, Message, PaginationParams, PaginatedResponse
 
 __all__ = [
-    "UserCreate", "UserUpdate", "UserResponse", "UserLogin",
-    "PurchaseOrderCreate", "PurchaseOrderUpdate", "PurchaseOrderResponse",
-    "PurchaseOrderLineCreate", "PurchaseOrderLineUpdate", "PurchaseOrderLineResponse",
-    "InvoiceCreate", "InvoiceUpdate", "InvoiceResponse",
-    "InvoiceLineCreate", "InvoiceLineUpdate", "InvoiceLineResponse",
-    "DeliveryNoteCreate", "DeliveryNoteUpdate", "DeliveryNoteResponse",
-    "DeliveryNoteLineCreate", "DeliveryNoteLineUpdate", "DeliveryNoteLineResponse",
-    "MatchingResultCreate", "MatchingResultUpdate", "MatchingResultResponse",
-    "MatchDecisionCreate", "MatchDecisionUpdate", "MatchDecisionResponse",
-    "BalanceLedgerCreate", "BalanceLedgerResponse", "BalanceEntryCreate",
-    "PaginatedResponse", "ErrorResponse", "SuccessResponse",
+    # User
+    "UserCreate",
+    "UserUpdate",
+    "UserInDB",
+    "UserResponse",
+    # Purchase Order
+    "PurchaseOrderCreate",
+    "PurchaseOrderUpdate",
+    "PurchaseOrderInDB",
+    "PurchaseOrderResponse",
+    "PurchaseOrderLineCreate",
+    "PurchaseOrderLineUpdate",
+    "PurchaseOrderLineInDB",
+    "PurchaseOrderLineResponse",
+    # Invoice
+    "InvoiceCreate",
+    "InvoiceUpdate",
+    "InvoiceInDB",
+    "InvoiceResponse",
+    "InvoiceLineCreate",
+    "InvoiceLineUpdate",
+    "InvoiceLineInDB",
+    "InvoiceLineResponse",
+    # Delivery Note
+    "DeliveryNoteCreate",
+    "DeliveryNoteUpdate",
+    "DeliveryNoteInDB",
+    "DeliveryNoteResponse",
+    "DeliveryNoteLineCreate",
+    "DeliveryNoteLineUpdate",
+    "DeliveryNoteLineInDB",
+    "DeliveryNoteLineResponse",
+    # Matching
+    "MatchingRecordCreate",
+    "MatchingRecordUpdate",
+    "MatchingRecordInDB",
+    "MatchingRecordResponse",
+    "MatchingLineCreate",
+    "MatchingLineUpdate",
+    "MatchingLineInDB",
+    "MatchingLineResponse",
+    # Balance Ledger
+    "BalanceLedgerCreate",
+    "BalanceLedgerUpdate",
+    "BalanceLedgerInDB",
+    "BalanceLedgerResponse",
+    # Common
+    "Token",
+    "TokenData",
+    "Message",
+    "PaginationParams",
+    "PaginatedResponse",
 ]

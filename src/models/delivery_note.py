@@ -1,43 +1,44 @@
 # src/models/delivery_note.py
-from sqlalchemy import Column, String, Numeric, Integer, ForeignKey, Date, Enum as SQLEnum
+"""Delivery Note model."""
+from decimal import Decimal
+from typing import List, TYPE_CHECKING
+
+from sqlalchemy import Column, String, Numeric, Date, ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-import enum
 
 from src.models.base import BaseModel
 
-
-class DeliveryNoteStatus(str, enum.Enum):
-    """Delivery Note status enumeration."""
-    DRAFT = "draft"
-    RECEIVED = "received"
-    MATCHED = "matched"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
+if TYPE_CHECKING:
+    from src.models.purchase_order import PurchaseOrder
+    from src.models.matching import MatchingRecord
 
 
 class DeliveryNote(BaseModel):
-    """Delivery Note model - one of the documents in 3-way matching."""
+    """Delivery Note model representing delivery documents."""
 
     __tablename__ = "delivery_notes"
 
-    dn_number = Column(String(50), unique=True, nullable=False, index=True)
-    supplier_id = Column(String(36), nullable=False, index=True)
+    dn_number = Column(String(100), unique=True, nullable=False, index=True)
+    purchase_order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    supplier_id = Column(String(100), nullable=False, index=True)
     supplier_name = Column(String(255), nullable=False)
-    supplier_code = Column(String(50), nullable=True)
-    po_reference = Column(String(50), nullable=True, index=True)
-    delivery_date = Column(Date, nullable=False)
+    dn_date = Column(Date, nullable=False)
     received_date = Column(Date, nullable=True)
-    status = Column(SQLEnum(DeliveryNoteStatus), default=DeliveryNoteStatus.DRAFT, nullable=False, index=True)
+    total_amount = Column(Numeric(15, 2), nullable=False)
     currency = Column(String(3), default="USD", nullable=False)
-    total_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    status = Column(String(50), default="pending", nullable=False, index=True)
     notes = Column(String(1000), nullable=True)
-    metadata = Column(String(5000), nullable=True)
 
     # Relationships
-    lines = relationship("DeliveryNoteLine", back_populates="delivery_note", cascade="all, delete-orphan")
-    matching_results = relationship("MatchingResult", back_populates="delivery_note")
+    purchase_order = relationship("PurchaseOrder", back_populates="delivery_notes")
+    line_items = relationship("DeliveryNoteLine", back_populates="delivery_note", cascade="all, delete-orphan")
+    matching_records = relationship("MatchingRecord", back_populates="delivery_note")
 
 
 class DeliveryNoteLine(BaseModel):
@@ -45,17 +46,18 @@ class DeliveryNoteLine(BaseModel):
 
     __tablename__ = "delivery_note_lines"
 
-    delivery_note_id = Column(String(36), ForeignKey("delivery_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    delivery_note_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     line_number = Column(Integer, nullable=False)
-    product_code = Column(String(50), nullable=True, index=True)
-    description = Column(String(500), nullable=True)
-    quantity_delivered = Column(Numeric(15, 3), nullable=False)
-    quantity_accepted = Column(Numeric(15, 3), nullable=True)
-    quantity_rejected = Column(Numeric(15, 3), nullable=True)
-    unit_of_measure = Column(String(20), default="EA", nullable=False)
-    po_line_reference = Column(String(36), ForeignKey("purchase_order_lines.id"), nullable=True)
-    notes = Column(String(500), nullable=True)
+    item_code = Column(String(100), nullable=True)
+    item_description = Column(String(500), nullable=False)
+    quantity = Column(Numeric(15, 3), nullable=False)
+    unit_price = Column(Numeric(15, 2), nullable=False)
+    line_amount = Column(Numeric(15, 2), nullable=False)
+    uom = Column(String(20), nullable=True)
 
     # Relationships
-    delivery_note = relationship("DeliveryNote", back_populates="lines")
-    matched_po_line = relationship("PurchaseOrderLine", foreign_keys=[po_line_reference])
+    delivery_note = relationship("DeliveryNote", back_populates="line_items")

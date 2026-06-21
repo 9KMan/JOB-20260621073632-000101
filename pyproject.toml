@@ -1,92 +1,51 @@
 # pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "ap-automation-core"
-version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+name = "finaro-ap-automation"
+version = "1.0.0"
+description = "FinaRo AP Automation Core Engine - 3-Way Matching Engine"
+authors = [
+    {name = "FinaRo Team", email = "dev@finaro.com"}
+]
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [
-    { name = "FinaRo", email = "dev@finaro.com" }
-]
-keywords = ["ap", "automation", "invoice-matching", "fastapi", "postgresql"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Framework :: FastAPI",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
-]
-
 dependencies = [
-    "fastapi>=0.110.0",
-    "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.25",
-    "asyncpg>=0.29.0",
-    "alembic>=1.13.1",
-    "pydantic>=2.6.0",
-    "pydantic-settings>=2.2.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlalchemy>=2.0.25",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.9",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
-    "greenlet>=3.0.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.1.0",
+    "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "httpx>=0.26.0",
     "pytest-cov>=4.1.0",
-    "httpx>=0.27.0",
-    "ruff>=0.3.0",
-    "mypy>=1.8.0",
-    "types-python-dateutil>=2.8.0",
 ]
-
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/ap_automation"]
-
-[tool.ruff]
-target-version = "py311"
-line-length = 100
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "C",   # flake8-comprehensions
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-]
-ignore = [
-    "E501",  # line too long (handled by formatter)
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
-]
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
 
 [tool.pytest.ini_options]
-minversion = "8.0"
-addopts = "-ra -q --strict-markers"
-testpaths = ["tests"]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
