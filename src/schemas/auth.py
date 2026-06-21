@@ -4,74 +4,58 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-
-class LoginRequest(BaseModel):
-    """Login request schema."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    email: EmailStr
-    password: str = Field(..., min_length=8)
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 
 
 class Token(BaseModel):
-    """JWT token response."""
-
+    """JWT Token response."""
     access_token: str
     token_type: str = "bearer"
-    expires_in: int
 
 
-class TokenData(BaseModel):
-    """Token payload data."""
+class TokenPayload(BaseModel):
+    """JWT Token payload."""
+    sub: str
+    exp: datetime
+    iat: Optional[datetime] = None
 
-    sub: str | None = None
-    exp: datetime | None = None
-    permissions: list[str] = Field(default_factory=list)
 
-
-class UserCreate(BaseModel):
-    """Schema for creating a new user."""
-
+class UserBase(BaseModel):
+    """Base user schema."""
     email: EmailStr
+    full_name: Optional[str] = None
+
+
+class UserCreate(UserBase):
+    """Schema for creating a user."""
     password: str = Field(..., min_length=8)
-    full_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(default="user", max_length=50)
 
 
 class UserUpdate(BaseModel):
     """Schema for updating a user."""
-
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    role: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = None
+    password: Optional[str] = Field(None, min_length=8)
     is_active: Optional[bool] = None
 
 
-class UserResponse(BaseModel):
-    """User response schema."""
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
+class UserResponse(UserBase):
+    """Schema for user response."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
-    email: str
-    full_name: str
-    role: str
     is_active: bool
     is_superuser: bool
     created_at: datetime
     updated_at: datetime
 
 
-class UserMeResponse(BaseModel):
-    """Current user response schema."""
+class UserInDB(UserResponse):
+    """User with hashed password."""
+    hashed_password: str
 
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    id: UUID
-    email: str
-    full_name: str
-    role: str
-    is_active: bool
+class LoginRequest(BaseModel):
+    """Login request schema."""
+    username: EmailStr
+    password: str

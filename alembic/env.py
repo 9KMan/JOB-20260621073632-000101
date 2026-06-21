@@ -1,16 +1,21 @@
 // alembic/env.py
 import asyncio
 from logging.config import fileConfig
-from typing import Any
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
+
 from src.config import settings
 from src.models.base import Base
-from src.models import *  # noqa: F401, F403
+from src.models.user import User
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from src.models.invoice import Invoice, InvoiceLine
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from src.models.matching import MatchRecord, MatchDecision
+from src.models.balance import BalanceLedger
 
 config = context.config
 
@@ -19,10 +24,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-config.set_main_option("sqlalchemy.url", settings.database.url)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -34,14 +39,15 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
         context.run_migrations()
 
+
 async def run_async_migrations() -> None:
-    """Run migrations in 'online' mode with async engine."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -53,9 +59,10 @@ async def run_async_migrations() -> None:
 
     await connectable.dispose()
 
+
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
     asyncio.run(run_async_migrations())
+
 
 if context.is_offline_mode():
     run_migrations_offline()
