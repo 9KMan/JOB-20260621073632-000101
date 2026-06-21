@@ -1,26 +1,56 @@
 // src/models/base.py
-from datetime import datetime
-from uuid import uuid4
-from sqlalchemy import Column, DateTime, String
+"""
+Base model classes with common fields
+"""
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import Column, String, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import declared_attr
 
-from src.database import Base
+from src.core.database import Base
 
 
-class BaseModel(Base):
-    """Base model with common fields for all entities."""
-    
+class UUIDModel(Base):
+    """Base model with UUID primary key"""
     __abstract__ = True
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    created_by = Column(UUID(as_uuid=True), nullable=True)
-    updated_by = Column(UUID(as_uuid=True), nullable=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True
+    )
+
+
+class TimestampMixin:
+    """Mixin to add created_at and updated_at timestamps"""
     
-    def to_dict(self):
-        """Convert model to dictionary."""
-        return {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
-        }
+    @declared_attr
+    def created_at(cls):
+        return Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            nullable=False
+        )
+    
+    @declared_attr
+    def updated_at(cls):
+        return Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            onupdate=lambda: datetime.now(timezone.utc),
+            nullable=False
+        )
+
+
+class SoftDeleteMixin:
+    """Mixin for soft delete functionality"""
+    
+    @declared_attr
+    def deleted_at(cls):
+        return Column(DateTime(timezone=True), nullable=True)
+    
+    @declared_attr
+    def is_deleted(cls):
+        return Column(Boolean, default=False, nullable=False)

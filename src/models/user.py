@@ -1,13 +1,15 @@
 // src/models/user.py
+"""
+User model for authentication
+"""
 from sqlalchemy import Column, String, Boolean
 from sqlalchemy.orm import relationship
 
-from src.models.base import BaseModel
+from src.models.base import UUIDModel, TimestampModel, SoftDeleteModel
 
 
-class User(BaseModel):
-    """User model for authentication and authorization."""
-    
+class User(UUIDModel, TimestampModel, SoftDeleteModel):
+    """User model for authentication and authorization"""
     __tablename__ = "users"
     
     email = Column(String(255), unique=True, nullable=False, index=True)
@@ -18,10 +20,26 @@ class User(BaseModel):
     is_superuser = Column(Boolean, default=False, nullable=False)
     
     # Relationships
-    purchase_orders = relationship("PurchaseOrder", back_populates="created_by_user")
-    invoices = relationship("Invoice", back_populates="created_by_user")
-    delivery_notes = relationship("DeliveryNote", back_populates="created_by_user")
-    matches = relationship("Match", back_populates="reviewed_by_user")
+    created_purchase_orders = relationship(
+        "PurchaseOrder",
+        back_populates="created_by_user",
+        foreign_keys="PurchaseOrder.created_by"
+    )
+    created_invoices = relationship(
+        "Invoice",
+        back_populates="created_by_user",
+        foreign_keys="Invoice.created_by"
+    )
+    created_delivery_notes = relationship(
+        "DeliveryNote",
+        back_populates="created_by_user",
+        foreign_keys="DeliveryNote.created_by"
+    )
+    confirmed_matches = relationship(
+        "MatchRecord",
+        back_populates="confirmed_by_user",
+        foreign_keys="MatchRecord.confirmed_by"
+    )
     
     def __repr__(self):
-        return f"<User {self.username}>"
+        return f"<User {self.email}>"

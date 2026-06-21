@@ -1,4 +1,4 @@
-// docker-compose.yml
+# docker-compose.yml
 version: '3.8'
 
 services:
@@ -6,102 +6,62 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
+    container_name: finaro-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appassword@postgres:5432/apautomation
-      - PGBOUNCER_HOST=pgbouncer
-      - PGBOUNCER_PORT=5432
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=75
-      - THRESHOLD_LOW=50
-      - TOLERANCE_PRICE=5.0
-      - TOLERANCE_QTY=10.0
-      - LOG_LEVEL=INFO
-      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://finaro:finaro123@db:5432/finaro_db
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      pgbouncer:
-        condition: service_started
     volumes:
-      - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - ./src:/app/src
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
-      - ap-network
+      - finaro-network
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap-automation-postgres
+  db:
+    image: postgres:16-alpine
+    container_name: finaro-db
     environment:
-      - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appassword
-      - POSTGRES_DB=apautomation
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
+      - POSTGRES_USER=finaro
+      - POSTGRES_PASSWORD=finaro123
+      - POSTGRES_DB=finaro_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro_db"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
     networks:
-      - ap-network
+      - finaro-network
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finaro-migrate
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=apautomation
-      - DATABASE_USER=apuser
-      - DATABASE_PASSWORD=appassword
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=5
-      - RESERVE_POOL_TIMEOUT=5
-      - LOG_CONNECTIONS=0
-      - LOG_DISCONNECTIONS=0
-      - LOG_STATEMENT=never
-      - SERVER_RESET_QUERY=DISCARD ALL
-    ports:
-      - "6432:5432"
+      - DATABASE_URL=postgresql://finaro:finaro123@db:5432/finaro_db
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
+    command: alembic upgrade head
     networks:
-      - ap-network
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ap-automation-pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-      - PGADMIN_LISTEN_PORT=5050
-    ports:
-      - "5050:5050"
-    depends_on:
-      - postgres
-    profiles:
-      - debug
-    networks:
-      - ap-network
+      - finaro-network
 
 volumes:
   postgres_data:
-    driver: local
 
 networks:
-  ap-network:
+  finaro-network:
     driver: bridge

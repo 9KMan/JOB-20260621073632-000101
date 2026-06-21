@@ -1,75 +1,64 @@
-# src/schemas/user.py
-"""User Pydantic schemas."""
-from typing import Optional
-from uuid import UUID
-
+// src/schemas/user.py
+"""
+User Pydantic schemas
+"""
 from pydantic import BaseModel, EmailStr, Field
-
-
-class Token(BaseModel):
-    """JWT Token schema."""
-    
-    access_token: str = Field(..., description="JWT access token")
-    token_type: str = Field(default="bearer", description="Token type")
-
-
-class TokenData(BaseModel):
-    """Token data schema."""
-    
-    username: Optional[str] = Field(None, description="Username from token")
+from typing import Optional
+from datetime import datetime
+from uuid import UUID
 
 
 class UserBase(BaseModel):
-    """Base user schema."""
-    
-    username: str = Field(..., min_length=3, max_length=50, description="Username")
-    email: EmailStr = Field(..., description="Email address")
-    full_name: Optional[str] = Field(None, max_length=255, description="Full name")
+    """Base user schema"""
+    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=100)
+    full_name: Optional[str] = None
 
 
 class UserCreate(UserBase):
-    """User creation schema."""
-    
-    password: str = Field(..., min_length=8, description="Password")
-    is_superuser: bool = Field(default=False, description="Is superuser flag")
+    """Schema for creating a user"""
+    password: str = Field(..., min_length=8)
 
 
 class UserUpdate(BaseModel):
-    """User update schema."""
-    
-    email: Optional[EmailStr] = Field(None, description="Email address")
-    full_name: Optional[str] = Field(None, max_length=255, description="Full name")
-    password: Optional[str] = Field(None, min_length=8, description="Password")
-    is_active: Optional[bool] = Field(None, description="Is active flag")
+    """Schema for updating a user"""
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, min_length=3, max_length=100)
+    full_name: Optional[str] = None
+    password: Optional[str] = Field(None, min_length=8)
+    is_active: Optional[bool] = None
 
 
 class UserResponse(UserBase):
-    """User response schema."""
-    
+    """User response schema"""
     id: UUID
     is_active: bool
     is_superuser: bool
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
-class UserInDB(UserBase):
-    """User in database schema."""
-    
-    id: UUID
+class UserInDB(UserResponse):
+    """User schema with hashed password"""
     hashed_password: str
-    is_active: bool
-    is_superuser: bool
-    created_at: str
-    updated_at: str
-    
-    model_config = {"from_attributes": True}
+
+
+class Token(BaseModel):
+    """Token response schema"""
+    access_token: str
+    token_type: str = "bearer"
+
+
+class TokenPayload(BaseModel):
+    """Token payload schema"""
+    sub: Optional[str] = None
+    exp: Optional[datetime] = None
 
 
 class LoginRequest(BaseModel):
-    """Login request schema."""
-    
-    username: str = Field(..., description="Username")
-    password: str = Field(..., description="Password")
+    """Login request schema"""
+    username: str
+    password: str

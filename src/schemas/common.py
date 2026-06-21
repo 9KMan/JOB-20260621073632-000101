@@ -1,36 +1,53 @@
 // src/schemas/common.py
-"""Common schema definitions."""
-from typing import Any, Generic, TypeVar
+"""
+Common Pydantic schemas for API responses
+"""
+from pydantic import BaseModel, Field
+from typing import Optional, Generic, TypeVar, List
+from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
 
 T = TypeVar("T")
 
 
-class PageParams(BaseModel):
-    """Pagination parameters."""
-    page: int = Field(default=1, ge=1, description="Page number")
-    page_size: int = Field(default=20, ge=1, le=100, description="Items per page")
+class PaginationParams(BaseModel):
+    """Pagination parameters"""
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    """Paginated response wrapper."""
-    items: list[T]
+    """Paginated response wrapper"""
+    items: List[T]
     total: int
     page: int
     page_size: int
     total_pages: int
 
 
-class BaseSchema(BaseModel):
-    """Base schema with common configuration."""
-    model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-    )
+class SuccessResponse(BaseModel):
+    """Generic success response"""
+    success: bool = True
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    """Error response"""
+    success: bool = False
+    error: str
+    detail: Optional[str] = None
+
+
+class TimestampMixin(BaseModel):
+    """Mixin for timestamp fields"""
+    created_at: datetime
+    updated_at: datetime
 
 
 class UUIDMixin(BaseModel):
-    """Mixin for UUID field."""
+    """Mixin for UUID id field"""
     id: UUID
+    
+    class Config:
+        from_attributes = True

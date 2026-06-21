@@ -1,85 +1,126 @@
 // src/models/invoice.py
-from sqlalchemy import Column, String, Numeric, Date, Integer, Enum, ForeignKey, Text
+"""
+Invoice model
+One side of the 3-way match
+"""
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-import enum
+from decimal import Decimal
 
-from src.models.base import BaseModel
-
-
-class InvoiceStatus(str, enum.Enum):
-    """Invoice status enumeration."""
-    DRAFT = "DRAFT"
-    PENDING = "PENDING"
-    MATCHED = "MATCHED"
-    PARTIALLY_MATCHED = "PARTIALLY_MATCHED"
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
-    DISPUTED = "DISPUTED"
-    PAID = "PAID"
+from src.models.base import UUIDModel, TimestampModel, SoftDeleteModel
 
 
-class Invoice(BaseModel):
-    """Invoice model."""
-    
+class Invoice(UUIDModel, TimestampModel, SoftDeleteModel):
+    """Invoice model"""
     __tablename__ = "invoices"
     
-    invoice_number = Column(String(100), unique=True, nullable=False, index=True)
+    # Business identifiers
+    invoice_number = Column(String(50), unique=True, nullable=False, index=True)
     supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     supplier_name = Column(String(255), nullable=False)
     supplier_code = Column(String(50), nullable=True)
     
-    invoice_date = Column(Date, nullable=False)
-    due_date = Column(Date, nullable=True)
+    # Reference to PO (set during matching)
+    purchase_order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id"),
+        nullable=True,
+        index=True
+    )
     
-    subtotal = Column(Numeric(15, 2), nullable=False, default=0)
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=0)
-    total_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    # Dates
+    invoice_date = Column(DateTime(timezone=True), nullable=False)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    
+    # Amounts
+    subtotal = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
+    tax_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    total_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
+    paid_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
     currency = Column(String(3), default="USD", nullable=False)
     
-    status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT, nullable=False, index=True)
+    # Status tracking
+    STATUS_PENDING = "pending"
+    STATUS_MATCHED = "matched"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_PAID = "paid"
+    STATUS_DISPUTED = "disputed"
     
-    matched_po_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(50), default=STATUS_PENDING, nullable=False, index=True)
     
+    # Payment info
+    payment_terms = Column(String(100), nullable=True)
+    payment_reference = Column(String(100), nullable=True)
+    
+    # Metadata
     notes = Column(Text, nullable=True)
-    payment_terms = Column(String(255), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    
+    # Line items
+    line_items = relationship(
+        "InvoiceLine",
+        back_populates="invoice",
+        cascade="all, delete-orphan"
+    )
     
     # Relationships
-    line_items = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan")
-    matched_po = relationship("PurchaseOrder", back_populates="invoices")
-    matches = relationship("Match", back_populates="invoice")
-    balance_entries = relationship("BalanceEntry", back_populates="invoice")
+    invoice = relationship(
+        "PurchaseOrder",
+        back_populates="invoices"
+    )
+    created_by_user = relationship(
+        "User",
+        back_populates="created_invoices",
+        foreign_keys=[created_by]
+    )
+    match_records = relationship(
+        "MatchRecord",
+        back_populates="invoice"
+    )
+    balance_records = relationship(
+        "BalanceLedger",
+        back_populates="invoice"
+    )
     
     def __repr__(self):
         return f"<Invoice {self.invoice_number}>"
 
 
-class InvoiceLine(BaseModel):
-    """Invoice Line Item model."""
-    
+class InvoiceLine(UUIDModel, TimestampModel):
+    """Line items for Invoice"""
     __tablename__ = "invoice_lines"
     
-    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
-    matched_po_line_id = Column(UUID(as_uuid=True), ForeignKey("purchase_order_lines.id", ondelete="SET NULL"), nullable=True, index=True)
-    matched_dn_line_id = Column(UUID(as_uuid=True), ForeignKey("delivery_note_lines.id", ondelete="SET NULL"), nullable=True, index=True)
+    invoice_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     
     line_number = Column(Integer, nullable=False)
     item_code = Column(String(100), nullable=True)
     description = Column(String(500), nullable=False)
-    
-    quantity = Column(Numeric(15, 4), nullable=False)
+    quantity = Column(Numeric(15, 3), nullable=False, default=Decimal("0"))
     unit_of_measure = Column(String(20), default="EA", nullable=False)
+    unit_price = Column(Numeric(15, 4), nullable=False, default=Decimal("0"))
+    line_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0"))
+    tax_rate = Column(Numeric(5, 4), default=Decimal("0"), nullable=False)
+    tax_amount = Column(Numeric(15, 2), default=Decimal("0"), nullable=False)
     
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    line_total = Column(Numeric(15, 2), nullable=False)
+    # Link to PO line (optional, set during matching)
+    purchase_order_line_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id"),
+        nullable=True
+    )
     
-    tax_rate = Column(Numeric(5, 4), default=0, nullable=False)
-    tax_amount = Column(Numeric(15, 2), default=0, nullable=False)
-    
-    # Relationships
-    invoice = relationship("Invoice", back_populates="line_items")
-    matched_po_line = relationship("PurchaseOrderLine", back_populates="invoice_lines")
-    matched_dn_line = relationship("DeliveryNoteLine", back_populates="invoice_lines")
+    # Relationship
+    invoice = relationship(
+        "Invoice",
+        back_populates="line_items"
+    )
     
     def __repr__(self):
-        return f"<InvoiceLine {self.line_number}>"
+        return f"<InvoiceLine {self.line_number} - {self.description}>"
