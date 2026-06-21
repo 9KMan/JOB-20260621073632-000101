@@ -1,47 +1,73 @@
 // models/enums.py
-"""Enum definitions for the AP Automation Engine."""
+"""Enumerations for status fields and decision types."""
 
-import enum
+from enum import Enum
 
 
-class DocumentStatus(str, enum.Enum):
-    """Status for documents (invoices, POs, delivery notes)."""
+class InvoiceStatus(str, Enum):
+    """Status values for invoices."""
 
     DRAFT = "draft"
-    PENDING = "pending"
-    SUBMITTED = "submitted"
-    PROCESSING = "processing"
+    PENDING_MATCH = "pending_match"
     MATCHED = "matched"
+    UNDER_REVIEW = "under_review"
     APPROVED = "approved"
-    REJECTED = "rejected"
     EXCEPTION = "exception"
+    REJECTED = "rejected"
+    PAID = "paid"
     CANCELLED = "cancelled"
+
+
+class PurchaseOrderStatus(str, Enum):
+    """Status values for purchase orders."""
+
+    DRAFT = "draft"
+    SENT = "sent"
+    CONFIRMED = "confirmed"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
     CLOSED = "closed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
-class MatchStatus(str, enum.Enum):
-    """Status for matching operations."""
+class DeliveryNoteStatus(str, Enum):
+    """Status values for delivery notes."""
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    UNMATCHED = "unmatched"
-    FAILED = "failed"
+    DRAFT = "draft"
+    ISSUED = "issued"
+    RECEIVED = "received"
+    VERIFIED = "verified"
     CANCELLED = "cancelled"
 
 
-class DecisionType(str, enum.Enum):
-    """Decision types for matching results."""
+class MatchDecision(str, Enum):
+    """Matching engine decision outcomes."""
 
     AUTO_APPROVED = "auto_approved"
-    REVIEW = "review"
+    ONE_CLICK_REVIEW = "one_click_review"
     EXCEPTION = "exception"
-    MANUAL_OVERRIDE = "manual_override"
+    REJECTED = "rejected"
+    MANUAL_REVIEW = "manual_review"
 
 
-class ExceptionStatus(str, enum.Enum):
-    """Status for exceptions."""
+class ExceptionType(str, Enum):
+    """Types of matching exceptions."""
+
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    MULTIPLE_POS = "multiple_pos"
+    DATE_OUT_OF_RANGE = "date_out_of_range"
+    SUPPLIER_MISMATCH = "supplier_mismatch"
+    PARTIAL_MATCH = "partial_match"
+    NO_MATCH = "no_match"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    AMOUNT_EXCEEDS_PO = "amount_exceeds_po"
+
+
+class ExceptionStatus(str, Enum):
+    """Status of exceptions in the exception queue."""
 
     OPEN = "open"
     UNDER_REVIEW = "under_review"
@@ -50,25 +76,19 @@ class ExceptionStatus(str, enum.Enum):
     ESCALATED = "escalated"
 
 
-class ExceptionReason(str, enum.Enum):
-    """Reasons for exceptions."""
+class LineMatchStatus(str, Enum):
+    """Status of individual line matching results."""
 
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY_NOTE = "missing_delivery_note"
-    DUPLICATE_INVOICE = "duplicate_invoice"
+    PENDING = "pending"
+    MATCHED = "matched"
     PARTIAL_MATCH = "partial_match"
-    EXCEEDS_PO_AMOUNT = "exceeds_po_amount"
-    UNRECOGNIZED_VENDOR = "unrecognized_vendor"
-    INVALID_DATE = "invalid_date"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    TAX_MISMATCH = "tax_mismatch"
-    OTHER = "other"
+    OVER_DELIVERED = "over_delivered"
+    UNDER_DELIVERED = "under_delivered"
+    NO_MATCH = "no_match"
 
 
-class MatchConfidence(str, enum.Enum):
-    """Match confidence levels."""
+class MatchConfidence(str, Enum):
+    """Confidence levels for match decisions."""
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -76,18 +96,8 @@ class MatchConfidence(str, enum.Enum):
     NONE = "none"
 
 
-class LineItemStatus(str, enum.Enum):
-    """Status for line items within documents."""
-
-    OPEN = "open"
-    PARTIALLY_INVOICED = "partially_invoiced"
-    FULLY_INVOICED = "fully_invoiced"
-    OVER_INVOICED = "over_invoiced"
-    CLOSED = "closed"
-
-
-class LearningStatus(str, enum.Enum):
-    """Status for cross-reference learning records."""
+class LearningStatus(str, Enum):
+    """Status for learning loop cross-references."""
 
     ACTIVE = "active"
     PROMOTED = "promoted"

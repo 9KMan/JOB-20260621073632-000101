@@ -1,12 +1,12 @@
 // models/balance_ledger.py
-"""Balance Ledger model for tracking PO-to-Invoice balances."""
+"""BalanceLedger SQLAlchemy model for tracking PO line balances."""
 
-import uuid
+from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
-    DateTime,
+    Date,
     ForeignKey,
     Index,
     Numeric,
@@ -16,120 +16,145 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, CustomMixin
-from models.enums import LineItemStatus
+from models.base import Base, TimestampMixin, UUIDPrimaryKey
 
 if TYPE_CHECKING:
-    from models.invoice import InvoiceLine
     from models.purchase_order import PurchaseOrderLine
 
 
-class BalanceLedger(Base, CustomMixin):
-    """Balance Ledger for tracking amounts against PO lines.
+class BalanceLedger(Base, UUIDPrimaryKey, TimestampMixin):
+    """Balance Ledger model for tracking PO line invoicing balances.
 
-    This table maintains running balances of:
-    - Ordered vs Invoiced amounts per PO line
-    - Ordered vs Delivered amounts per PO line
-    - Delivered vs Invoiced amounts
-
-    Attributes:
-        po_line_id: Reference to PO line.
-        invoice_line_id: Reference to invoice line (optional).
-        transaction_type: Type of transaction (PO, INV, DN, ADJ).
-        transaction_id: ID of the transaction document.
-        transaction_date: Date of the transaction.
-        quantity: Quantity in this transaction.
-        unit_price: Unit price.
-        amount: Transaction amount (quantity * unit_price).
-        running_balance_qty: Running balance of quantity.
-        running_balance_amt: Running balance of amount.
-        status: Current status of the balance record.
-        description: Transaction description.
+    This table provides an immutable audit trail of all invoice
+    applications against purchase order lines.
     """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
+        Index("ix_bl_po_line_id", "purchase_order_line_id"),
+        Index("ix_bl_transaction_type", "transaction_type"),
+        Index("ix_bl_posted_date", "posted_date"),
         UniqueConstraint(
-            "po_line_id",
-            "transaction_type",
+            "purchase_order_line_id",
             "transaction_id",
-            name="uq_balance_transaction",
+            "transaction_type",
+            name="uq_bl_po_line_transaction",
         ),
-        Index("ix_balance_po_line_id", "po_line_id"),
-        Index("ix_balance_invoice_line_id", "invoice_line_id"),
-        Index("ix_balance_status", "status"),
-        Index("ix_balance_created_at", "created_at"),
-        {"schema": None},
     )
 
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    # Reference to PO Line
+    purchase_order_line_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
+
+    # Transaction Reference
     transaction_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
     )
-    transaction_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    transaction_id: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    # Balance Tracking
+    posted_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+    )
+
+    # Amounts
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
     )
-    transaction_date: Mapped[Decimal] = mapped_column(
-        Numeric(12, 4),
+    applied_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
     )
-    quantity: Mapped[Decimal] = mapped_column(
-        Numeric(12, 4),
-        default=Decimal("0.0000"),
+    balance_remaining: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
     )
-    unit_price: Mapped[Decimal] = mapped_column(
+
+    # Quantity Tracking
+    original_quantity: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
-        default=Decimal("0.0000"),
         nullable=False,
     )
-    amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
+    applied_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
     )
-    running_balance_qty: Mapped[Decimal] = mapped_column(
-        Numeric(12, 4),
-        default=Decimal("0.0000"),
+    quantity_remaining: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
     )
-    running_balance_amt: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
+
+    # Status
     status: Mapped[str] = mapped_column(
         String(20),
-        default=LineItemStatus.OPEN.value,
         nullable=False,
+        default="active",
     )
-    description: Mapped[str | None] = mapped_column(
+
+    # Notes
+    notes: Mapped[Optional[str]] = mapped_column(
         String(500),
         nullable=True,
     )
 
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
+    purchase_order_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
-        back_populates="balance_records",
-    )
-    invoice_line: Mapped["InvoiceLine | None"] = relationship(
-        "InvoiceLine",
-        foreign_keys=[invoice_line_id],
+        back_populates="balance_ledger",
     )
 
     def __repr__(self) -> str:
-        return f"<BalanceLedger {self.transaction_type} - {self.amount}>"
+        return (
+            f"<BalanceLedger {self.transaction_type} "
+            f"applied={self.applied_amount} "
+            f"remaining={self.balance_remaining}>"
+        )
+
+    @classmethod
+    def create_invoice_entry(
+        cls,
+        po_line_id: str,
+        invoice_id: str,
+        amount: Decimal,
+        quantity: Decimal,
+        original_balance: Decimal,
+        original_qty: Decimal,
+    ) -> "BalanceLedger":
+        """Factory method to create an invoice ledger entry.
+
+        Args:
+            po_line_id: Purchase order line ID
+            invoice_id: Invoice ID reference
+            amount: Invoice amount applied
+            quantity: Invoice quantity applied
+            original_balance: Previous balance amount
+            original_qty: Previous balance quantity
+
+        Returns:
+            New BalanceLedger instance
+        """
+        return cls(
+            purchase_order_line_id=po_line_id,
+            transaction_type="invoice",
+            transaction_id=invoice_id,
+            posted_date=date.today(),
+            original_amount=original_balance,
+            applied_amount=amount,
+            balance_remaining=original_balance - amount,
+            original_quantity=original_qty,
+            applied_quantity=quantity,
+            quantity_remaining=original_qty - quantity,
+            status="active",
+        )

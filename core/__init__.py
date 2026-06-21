@@ -1,10 +1,15 @@
 // core/__init__.py
-"""Core module for AP Automation Engine.
+"""Core package for AP Automation Engine.
 
-This module contains the core configuration, database, and security utilities
+This package contains configuration, database, and security utilities
 that are shared across the application.
 """
 
 from core.config import settings
+from core.database import get_db, DatabaseManager
 
-__all__ = ["settings"]
+__all__ = [
+    "settings",
+    "get_db",
+    "DatabaseManager",
+]

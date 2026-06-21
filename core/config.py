@@ -1,13 +1,14 @@
 // core/config.py
 """Application configuration using pydantic-settings.
 
-All configuration is loaded from environment variables.
+All configuration is loaded from environment variables with type validation
+and sensible defaults for local development.
 """
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,132 +23,119 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "AP Automation Engine"
-    app_version: str = "0.1.0"
-    debug: bool = Field(default=False, validation_alias="DEBUG")
-    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    APP_NAME: str = "AP Automation Engine"
+    APP_VERSION: str = "0.1.0"
+    DEBUG: bool = Field(default=False, validation_alias="DEBUG")
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     # Database
-    database_url: PostgresDsn = Field(
+    DATABASE_URL: str = Field(
         default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
         validation_alias="DATABASE_URL",
     )
-    database_host: str = Field(default="localhost", validation_alias="DATABASE_HOST")
-    database_port: int = Field(default=5432, validation_alias="DATABASE_PORT")
-    database_name: str = Field(default="apautomation", validation_alias="DATABASE_NAME")
-    database_user: str = Field(default="apuser", validation_alias="DATABASE_USER")
-    database_password: str = Field(default="appassword", validation_alias="DATABASE_PASSWORD")
+    PGBOUNCER_HOST: str = Field(default="localhost", validation_alias="PGBOUNCER_HOST")
+    DB_ECHO: bool = Field(default=False, validation_alias="DB_ECHO")
+    DB_POOL_SIZE: int = Field(default=20, ge=1, le=100)
+    DB_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
+    DB_POOL_TIMEOUT: int = Field(default=30, ge=1)
 
-    # Sync database URL for Alembic migrations
-    database_sync_url: PostgresDsn = Field(
-        default="postgresql://apuser:appassword@localhost:5432/apautomation",
-        validation_alias="DATABASE_SYNC_URL",
-    )
-
-    # PGBouncer
-    pgbouncer_host: str = Field(default="localhost", validation_alias="PGBOUNCER_HOST")
-    pgbouncer_port: int = Field(default=5432, validation_alias="PGBOUNCER_PORT")
-
-    # JWT Authentication
-    jwt_secret_key: str = Field(
-        default="change-me-in-production",
+    # Authentication
+    JWT_SECRET_KEY: str = Field(
+        default="changeme-in-production-use-strong-secret-key-32-chars",
         validation_alias="JWT_SECRET_KEY",
     )
-    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    jwt_access_token_expire_minutes: int = Field(
-        default=30,
-        validation_alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
-    )
+    JWT_ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1, le=1440)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=30)
 
-    # Matching Thresholds (scores 0-100)
-    threshold_high: int = Field(
-        default=90,
+    # Matching Engine Thresholds
+    THRESHOLD_HIGH: float = Field(
+        default=95.0,
+        ge=0,
+        le=100,
         validation_alias="THRESHOLD_HIGH",
+        description="Auto-approve threshold (percentage)",
+    )
+    THRESHOLD_MID: float = Field(
+        default=75.0,
         ge=0,
         le=100,
-        description="Auto-approve threshold",
-    )
-    threshold_mid: int = Field(
-        default=70,
         validation_alias="THRESHOLD_MID",
-        ge=0,
-        le=100,
-        description="1-click review threshold",
+        description="1-click review threshold (percentage)",
     )
-    threshold_low: int = Field(
-        default=50,
-        validation_alias="THRESHOLD_LOW",
+    THRESHOLD_LOW: float = Field(
+        default=50.0,
         ge=0,
         le=100,
-        description="Exception threshold",
+        validation_alias="THRESHOLD_LOW",
+        description="Exception threshold (percentage)",
     )
 
-    # Tolerance Settings (percentages)
-    tolerance_price: float = Field(
+    # Matching Tolerances
+    TOLERANCE_PRICE: float = Field(
         default=5.0,
-        validation_alias="TOLERANCE_PRICE",
         ge=0,
         le=100,
+        validation_alias="TOLERANCE_PRICE",
         description="Price match tolerance percentage",
     )
-    tolerance_qty: float = Field(
+    TOLERANCE_QTY: float = Field(
         default=10.0,
-        validation_alias="TOLERANCE_QTY",
         ge=0,
         le=100,
+        validation_alias="TOLERANCE_QTY",
         description="Quantity match tolerance percentage",
     )
 
-    # CORS
-    cors_origins: list[str] = Field(
-        default=["http://localhost:3000"],
+    # API
+    API_V1_PREFIX: str = "/api/v1"
+    CORS_ORIGINS: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8080"],
         validation_alias="CORS_ORIGINS",
     )
 
-    # API
-    api_v1_prefix: str = "/api/v1"
-    api_port: int = Field(default=8000, validation_alias="API_PORT")
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format."""
+        if not v.startswith("postgresql"):
+            raise ValueError("DATABASE_URL must start with 'postgresql'")
+        return v
 
     @property
-    def database_async_url(self) -> str:
-        """Get async database URL."""
-        return str(self.database_url)
+    def database_host(self) -> str:
+        """Extract database host from DATABASE_URL."""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(self.DATABASE_URL)
+        return parsed.hostname or "localhost"
 
     @property
-    def cors_origins_list(self) -> list[str]:
-        """Parse CORS origins from comma-separated string or list."""
-        if not self.cors_origins:
-            return []
-        if isinstance(self.cors_origins, list):
-            return self.cors_origins
-        return [origin.strip() for origin in self.cors_origins[0].split(",") if origin.strip()]
+    def database_port(self) -> int:
+        """Extract database port from DATABASE_URL."""
+        from urllib.parse import urlparse
 
-    def get_threshold_level(self, score: float) -> str:
-        """Determine threshold level based on score.
+        parsed = urlparse(self.DATABASE_URL)
+        return parsed.port or 5432
 
-        Args:
-            score: Match score (0-100)
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return self.DEBUG is False
 
-        Returns:
-            Threshold level: 'high', 'mid', or 'low'
-        """
-        if score >= self.threshold_high:
-            return "high"
-        elif score >= self.threshold_mid:
-            return "mid"
-        elif score >= self.threshold_low:
-            return "low"
-        return "exception"
+    def is_development(self) -> bool:
+        """Check if running in development mode."""
+        return self.DEBUG is True
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings instance (singleton pattern).
+
+    Returns:
+        Settings: Cached application settings instance.
+    """
     return Settings()
 
 
 # Global settings instance
 settings = get_settings()
-
-# Type aliases
-AppSettings = Annotated[Settings, "Application settings"]
