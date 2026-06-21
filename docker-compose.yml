@@ -4,60 +4,78 @@ version: "3.9"
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: ap_postgres
+    container_name: ap-automation-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
       POSTGRES_DB: ${POSTGRES_DB:-apautomation}
-    ports:
-      - "5432:5432"
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ap-network
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
-    container_name: ap_pgbouncer
+    container_name: ap-automation-pgbouncer
     environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
       POOL_MODE: transaction
-      MAX_CLIENT_CONN: 100
-      DEFAULT_POOL_SIZE: 20
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      RESERVE_POOL_SIZE: "5"
+      RESERVE_POOL_TIMEOUT: "3"
     ports:
       - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ap-network
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap_api
+    container_name: ap-automation-api
     environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 5432
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-changeme-in-production}
-      JWT_ALGORITHM: HS256
-      THRESHOLD_HIGH: ${THRESHOLD_HIGH:-0.95}
-      THRESHOLD_MID: ${THRESHOLD_MID:-0.80}
-      THRESHOLD_LOW: ${THRESHOLD_LOW:-0.60}
-      TOLERANCE_PRICE: ${TOLERANCE_PRICE:-0.02}
-      TOLERANCE_QTY: ${TOLERANCE_QTY:-0.10}
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
+      DATABASE_POOL_SIZE: "20"
+      DATABASE_MAX_OVERFLOW: "10"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-use-secure-random-key}
+      JWT_ALGORITHM: "HS256"
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+      THRESHOLD_HIGH: "90"
+      THRESHOLD_MID: "70"
+      THRESHOLD_LOW: "50"
+      TOLERANCE_PRICE: "5.0"
+      TOLERANCE_QTY: "5.0"
+      CORS_ORIGINS: "*"
+      LOG_LEVEL: "INFO"
     ports:
       - "8000:8000"
     depends_on:
       pgbouncer:
         condition: service_started
-      postgres:
-        condition: service_healthy
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ap-network
 
 volumes:
   postgres_data:
+
+networks:
+  ap-network:
+    driver: bridge

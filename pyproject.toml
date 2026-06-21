@@ -1,36 +1,50 @@
 # pyproject.toml
 [project]
-name = "ap-automation-core"
+name = "ap-automation-engine"
 version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+description = "AP Automation Core Engine for FinaRo — Invoice/PO/DN Matching"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-    { name = "FinaRo", email = "dev@finaro.example" }
+    { name = "FinaRo", email = "dev@finaro.com" }
 ]
+keywords = ["ap", "automation", "invoice", "matching", "erp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
+    "alembic>=1.13.1",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
     "greenlet>=3.0.0",
+    "psycopg2-binary>=2.9.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.1.0",
     "pytest-asyncio>=0.23.0",
-    "httpx>=0.27.0",
     "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
+    "types-psycopg2>=2.9.0",
+    "types-python-jose>=3.3.0",
 ]
 
 [build-system]
@@ -43,16 +57,46 @@ packages = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line-too-long (handled by formatter)
+    "B008",  # do-not-perform-calls-in-default-arguments
+    "C901",  # too-complex
+]
 
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
-ignore = ["E501"]
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+exclude = ["migrations", ".venv"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["core", "models", "services", "api"]
+omit = ["tests/*", "migrations/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

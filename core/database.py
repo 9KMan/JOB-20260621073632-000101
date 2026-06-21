@@ -1,85 +1,101 @@
 # core/database.py
 """Async SQLAlchemy database session management."""
-
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
-from core.config import settings
+from core.config import get_settings
 
+settings = get_settings()
 
-def _get_effective_database_url() -> str:
-    """Get the effective database URL, respecting PGBouncer override."""
-    if settings.database.pgbouncer_host:
-        # Reconstruct URL with PGBouncer host/port
-        base_url = settings.database.database_url
-        # Extract parts from the URL
-        if "://" in base_url:
-            protocol, rest = base_url.split("://", 1)
-            if "@" in rest:
-                credentials_host, db_name = rest.rsplit("@", 1)
-                host_port, _ = credentials_host.split("/", 1) if "/" in credentials_host else (credentials_host, "")
-                if "/" in host_port:
-                    credentials, host = host_port.split("@", 1)
-                else:
-                    credentials = ""
-                    host = host_port
-                return f"{protocol}://{credentials}@{settings.database.pgbouncer_host}:{settings.database.pgbouncer_port}/{db_name.split('/')[-1]}"
-    return settings.database.database_url
+# Create async engine with connection pooling
+_engine: AsyncEngine | None = None
+_async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-engine = create_async_engine(
-    _get_effective_database_url(),
-    echo=settings.database.echo_sql,
-    poolclass=AsyncAdaptedQueuePool,
-    pool_size=settings.database.pool_size,
-    max_overflow=settings.database.max_overflow,
-    pool_timeout=settings.database.pool_timeout,
-    pool_pre_ping=True,
-)
+def get_engine() -> AsyncEngine:
+    """Get or create the async database engine."""
+    global _engine
+    if _engine is None:
+        pool_class = NullPool if settings.DEBUG else AsyncAdaptedQueuePool
+        _engine = create_async_engine(
+            settings.DATABASE_URL.unicode_string(),
+            pool_size=settings.DATABASE_POOL_SIZE,
+            max_overflow=settings.DATABASE_MAX_OVERFLOW,
+            pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+            pool_recycle=settings.DATABASE_POOL_RECYCLE,
+            poolclass=pool_class,
+            echo=settings.DEBUG,
+            future=True,
+        )
+    return _engine
 
-async_session_maker = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Get or create the async session factory."""
+    global _async_session_factory
+    if _async_session_factory is None:
+        _async_session_factory = async_sessionmaker(
+            bind=get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+    return _async_session_factory
+
+
+AsyncSessionLocal = get_session_factory()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for FastAPI to get async database session."""
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    session: AsyncSession = AsyncSessionLocal()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
 
 
 @asynccontextmanager
 async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database session (for non-FastAPI use)."""
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    """Context manager for database session (non-dependency usage)."""
+    session: AsyncSession = AsyncSessionLocal()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
 
 
-DbSession = Annotated[AsyncSession, Depends(get_db)]
+async def init_db() -> None:
+    """Initialize database (create tables, etc.)."""
+    from models.base import Base
+    from models import __all__ as model_modules  # noqa: F401
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    """Close database connections."""
+    global _engine, _async_session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _async_session_factory = None
