@@ -1,1 +1,1 @@
-// src/app/__init__.py
+# src/app/__init__.py
