@@ -1,16 +1,21 @@
 # src/models/__init__.py
-"""Database models."""
-
-from src.models.base import BaseModel
+from src.models.base import BaseModel, UUIDMixin, TimestampMixin
 from src.models.user import User
 from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from src.models.invoice import Invoice, InvoiceLine
 from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from src.models.match import Match, MatchDecision, MatchStatus
-from src.models.balance import Balance, BalanceType
+from src.models.matching import (
+    MatchingResult,
+    MatchingLine,
+    MatchStatus,
+    DecisionStatus,
+    BalanceLedger,
+)
 
 __all__ = [
     "BaseModel",
+    "UUIDMixin",
+    "TimestampMixin",
     "User",
     "PurchaseOrder",
     "PurchaseOrderLine",
@@ -18,9 +23,9 @@ __all__ = [
     "InvoiceLine",
     "DeliveryNote",
     "DeliveryNoteLine",
-    "Match",
-    "MatchDecision",
+    "MatchingResult",
+    "MatchingLine",
     "MatchStatus",
-    "Balance",
-    "BalanceType",
+    "DecisionStatus",
+    "BalanceLedger",
 ]

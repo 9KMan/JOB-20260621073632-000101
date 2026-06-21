@@ -1,120 +1,46 @@
-// docker-compose.yml
-version: "3.9"
+# docker-compose.yml
+version: '3.8'
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-automation-api
+    build: .
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
-      - DATABASE_USER=${POSTGRES_USER:-apuser}
-      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-appassword}
-      - PGBOUNCER_HOST=${PGBOUNCER_HOST:-pgbouncer}
-      - PGBOUNCER_PORT=${PGBOUNCER_PORT:-5432}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-90}
-      - THRESHOLD_MID=${THRESHOLD_MID:-70}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/finaro_ap
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=true
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - ap-network
-    restart: unless-stopped
+    volumes:
+      - .:/app
+    command: uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-apuser}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
-      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finaro_ap
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    networks:
-      - ap-network
-    restart: unless-stopped
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
+  migrate:
+    build: .
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=5
-      - RESERVE_POOL_TIMEOUT=5
-      - MAX_DB_CONNECTIONS=100
-      - USER=${POSTGRES_USER:-apuser}
-      - PASSWORD=${POSTGRES_PASSWORD:-appassword}
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/finaro_ap
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pgbouncer -V"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    networks:
-      - ap-network
-    restart: unless-stopped
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ap-automation-pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-      - PGADMIN_LISTEN_PORT=5050
-    ports:
-      - "${PGADMIN_PORT:-5050}:5050"
-    depends_on:
-      - postgres
-    networks:
-      - ap-network
-    restart: unless-stopped
-    profiles:
-      - devtools
+    command: alembic upgrade head
 
 volumes:
   postgres_data:
-    driver: local
-
-networks:
-  ap-network:
-    driver: bridge

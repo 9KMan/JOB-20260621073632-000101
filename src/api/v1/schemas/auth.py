@@ -1,63 +1,75 @@
 # src/api/v1/schemas/auth.py
-"""Authentication schemas."""
-
 from datetime import datetime
 from typing import Optional
-from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
-
-
-class UserBase(BaseModel):
-    """Base user schema."""
-    email: EmailStr
-    username: str = Field(..., min_length=3, max_length=100)
-    full_name: Optional[str] = None
-
-
-class UserCreate(UserBase):
-    """User creation schema."""
-    password: str = Field(..., min_length=8, max_length=100)
-
-
-class UserUpdate(BaseModel):
-    """User update schema."""
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
-
-
-class UserResponse(UserBase):
-    """User response schema."""
-    id: UUID
-    is_active: bool
-    is_superuser: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 class Token(BaseModel):
-    """Token response schema."""
+    """JWT Token response schema."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
 class TokenPayload(BaseModel):
-    """Token payload schema."""
-    sub: Optional[str] = None
-    exp: Optional[datetime] = None
-    type: Optional[str] = None
+    """JWT Token payload schema."""
+    sub: str
+    exp: datetime
+    type: str
+
+
+class UserBase(BaseModel):
+    """Base user schema."""
+    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=255)
+    role: str = Field(default="user", max_length=50)
+
+
+class UserCreate(UserBase):
+    """Schema for creating a new user."""
+    password: str = Field(..., min_length=8, max_length=100)
+
+
+class UserUpdate(BaseModel):
+    """Schema for updating a user."""
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, min_length=3, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=255)
+    role: Optional[str] = Field(None, max_length=50)
+    is_active: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=8, max_length=100)
+
+
+class UserInDB(UserBase):
+    """Schema for user stored in database."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    is_active: bool
+    is_superuser: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserResponse(UserBase):
+    """Schema for user response."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    is_active: bool
+    is_superuser: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class LoginRequest(BaseModel):
-    """Login request schema."""
+    """Schema for login request."""
     username: str
     password: str
 
 
 class RefreshTokenRequest(BaseModel):
-    """Refresh token request schema."""
+    """Schema for refresh token request."""
     refresh_token: str
