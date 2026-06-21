@@ -1,5 +1,5 @@
-// docker-compose.yml
-version: "3.9"
+# docker-compose.yml
+version: '3.9'
 
 services:
   api:
@@ -8,57 +8,43 @@ services:
       dockerfile: Dockerfile
     container_name: ap-automation-api
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${DATABASE_NAME:-apautomation}
-      - DATABASE_USER=${DATABASE_USER:-postgres}
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
-      - PGBOUNCER_HOST=pgbouncer
-      - PGBOUNCER_PORT=5432
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme-in-production}
       - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-95}
-      - THRESHOLD_MID=${THRESHOLD_MID:-75}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - THRESHOLD_HIGH=95
+      - THRESHOLD_MID=70
+      - THRESHOLD_LOW=40
+      - TOLERANCE_PRICE=5
+      - TOLERANCE_QTY=10
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
+    volumes:
+      - ./src:/app/src
     networks:
       - ap-network
+    restart: unless-stopped
 
   postgres:
     image: postgres:15-alpine
     container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=${DATABASE_USER:-postgres}
-      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-postgres}
-      - POSTGRES_DB=${DATABASE_NAME:-apautomation}
+      - POSTGRES_USER=apuser
+      - POSTGRES_PASSWORD=appass
+      - POSTGRES_DB=apautomation
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${DATABASE_NAME:-apautomation}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    restart: unless-stopped
     networks:
       - ap-network
 
@@ -68,50 +54,25 @@ services:
     environment:
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_NAME=${DATABASE_NAME:-apautomation}
-      - DATABASE_USER=${DATABASE_USER:-postgres}
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_NAME=apautomation
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=10
     ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+      - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h pgbouncer -p 5432 || exit 1"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - ap-network
-
-  migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-automation-migrate
-    command: ["alembic", "upgrade", "head"]
-    environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${DATABASE_NAME:-apautomation}
-      - DATABASE_USER=${DATABASE_USER:-postgres}
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - ap-network
 
 volumes:
   postgres_data:
-    driver: local
 
 networks:
   ap-network:

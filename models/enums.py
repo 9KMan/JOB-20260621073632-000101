@@ -1,110 +1,112 @@
-// models/enums.py
-"""Enum definitions for database models.
-
-This module defines all enumeration types used across the application
-for status fields and decision types.
-"""
-
-from enum import Enum
+# models/enums.py
+"""SQLAlchemy and Pydantic enum definitions."""
+import enum
 
 
-class InvoiceStatus(str, Enum):
-    """Invoice processing status values."""
+class InvoiceStatus(str, enum.Enum):
+    """Invoice status enumeration."""
 
     DRAFT = "draft"
-    RECEIVED = "received"
-    PROCESSING = "processing"
+    PENDING = "pending"
+    MATCHING = "matching"
     MATCHED = "matched"
-    APPROVED = "approved"
     EXCEPTION = "exception"
+    APPROVED = "approved"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class POStatus(str, Enum):
-    """Purchase order status values."""
+class PurchaseOrderStatus(str, enum.Enum):
+    """Purchase order status enumeration."""
 
     DRAFT = "draft"
-    SENT = "sent"
-    ACKNOWLEDGED = "acknowledged"
+    ACTIVE = "active"
     PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Delivery note status values."""
+class DeliveryNoteStatus(str, enum.Enum):
+    """Delivery note status enumeration."""
 
     DRAFT = "draft"
-    ISSUED = "issued"
-    RECEIVED = "received"
-    PARTIALLY_PROCESSED = "partially_processed"
-    PROCESSED = "processed"
+    CONFIRMED = "confirmed"
+    PARTIALLY_MATCHED = "partially_matched"
+    MATCHED = "matched"
     CANCELLED = "cancelled"
 
 
-class MatchDecision(str, Enum):
-    """Matching engine decision types."""
+class MatchDecision(str, enum.Enum):
+    """Matching decision types."""
 
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVE = "one_click_approve"
-    ONE_CLICK_REJECT = "one_click_reject"
+    AUTO_APPROVE = "auto_approve"
+    REVIEW = "review"
     EXCEPTION = "exception"
-    PENDING_REVIEW = "pending_review"
-    NO_MATCH = "no_match"
+    REJECT = "reject"
 
 
-class MatchConfidence(str, Enum):
-    """Match confidence level indicators."""
+class MatchStatus(str, enum.Enum):
+    """Match record status."""
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    DISMISSED = "dismissed"
 
 
-class ExceptionType(str, Enum):
-    """Types of matching exceptions."""
+class ExceptionType(str, enum.Enum):
+    """Exception types for matching exceptions."""
 
     PRICE_VARIANCE = "price_variance"
     QUANTITY_VARIANCE = "quantity_variance"
     MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
+    MISSING_INVOICE = "missing_invoice"
     DUPLICATE_INVOICE = "duplicate_invoice"
+    UNMATCHED_LINES = "unmatched_lines"
     OVER_DELIVERY = "over_delivery"
     UNDER_DELIVERY = "under_delivery"
-    DATE_VARIANCE = "date_variance"
-    DUPLICATE_MATCH = "duplicate_match"
-    UNMATCHED_LINES = "unmatched_lines"
+    TAX_VARIANCE = "tax_variance"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    VENDOR_MISMATCH = "vendor_mismatch"
 
 
-class ExceptionStatus(str, Enum):
-    """Exception resolution status."""
+class ExceptionResolution(str, enum.Enum):
+    """Exception resolution types."""
 
-    OPEN = "open"
-    IN_REVIEW = "in_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
+    APPROVED_AS_IS = "approved_as_is"
+    ADJUSTED = "adjusted"
+    MANUAL_REVIEW = "manual_review"
     ESCALATED = "escalated"
+    DISMISSED = "dismissed"
+    REJECTED = "rejected"
 
 
-class LineStatus(str, Enum):
-    """Status for invoice/PO/delivery note lines."""
+class LineType(str, enum.Enum):
+    """Line item types."""
 
-    OPEN = "open"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    CLOSED = "closed"
-    EXCEPTION = "exception"
+    STANDARD = "standard"
+    SERVICE = "service"
+    MISCELLANEOUS = "miscellaneous"
+    DISCOUNT = "discount"
+    TAX = "tax"
+    SHIPPING = "shipping"
 
 
-class MatchType(str, Enum):
-    """Types of matches between documents."""
+class CrossRefConfidence(str, enum.Enum):
+    """Confidence levels for cross-reference learning."""
 
-    PO_ANCHORED = "po_anchored"
-    DN_ANCHORED = "dn_anchored"
-    INVOICE_ONLY = "invoice_only"
-    CROSS_REFERENCE = "cross_reference"
-    MANUAL = "manual"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CONFIRMED = "confirmed"
+
+
+class CrossRefStatus(str, enum.Enum):
+    """Cross-reference record status."""
+
+    ACTIVE = "active"
+    PROMOTED = "promoted"
+    DEMOTED = "demoted"
+    ARCHIVED = "archived"

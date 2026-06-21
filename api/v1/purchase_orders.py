@@ -1,205 +1,238 @@
 # api/v1/purchase_orders.py
-"""Purchase Order endpoints for ingestion and retrieval."""
-
-from typing import Annotated
-from uuid import UUID
+"""Purchase order endpoints for ingestion and retrieval."""
+import uuid
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from core.database import get_db_session
-from models import PurchaseOrder, POLine
 from api.schemas import (
-    BaseResponse,
-    PaginatedResponse,
     PurchaseOrderCreate,
     PurchaseOrderResponse,
+    PurchaseOrderListResponse,
+    PaginatedResponse,
+    PaginationMeta,
+    BalanceSummaryResponse,
 )
+from core.database import get_db
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from models.balance_ledger import BalanceSummary
+from models.enums import PurchaseOrderStatus
 
 router = APIRouter()
 
 
 @router.post(
     "/",
-    response_model=BaseResponse[PurchaseOrderResponse],
+    response_model=PurchaseOrderResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Ingest new purchase order",
-    description="Create a new purchase order from ERP system.",
+    summary="Create purchase order",
+    description="Ingest a new purchase order from ERP.",
 )
 async def create_purchase_order(
     po_data: PurchaseOrderCreate,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[PurchaseOrderResponse]:
-    """Ingest a new purchase order."""
+    db: AsyncSession = Depends(get_db),
+) -> PurchaseOrder:
+    """
+    Create a new purchase order with line items.
+    """
     # Check for duplicate PO number
-    existing = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.po_number == po_data.po_number)
+    stmt = select(PurchaseOrder).where(
+        PurchaseOrder.po_number == po_data.po_number,
+        PurchaseOrder.is_deleted == False,
     )
-    if existing.scalar_one_or_none():
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Purchase Order {po_data.po_number} already exists",
+            detail=f"Purchase order {po_data.po_number} already exists",
         )
-    
+
     # Create PO
     purchase_order = PurchaseOrder(
-        po_number=po_data.po_number,
         vendor_id=po_data.vendor_id,
         vendor_name=po_data.vendor_name,
-        order_date=po_data.order_date,
+        vendor_code=po_data.vendor_code,
+        po_number=po_data.po_number,
+        po_date=po_data.po_date,
         expected_delivery_date=po_data.expected_delivery_date,
-        currency=po_data.currency,
         subtotal=po_data.subtotal,
         tax_amount=po_data.tax_amount,
         total_amount=po_data.total_amount,
-        payment_terms=po_data.payment_terms,
-        shipping_address=po_data.shipping_address,
-        notes=po_data.notes,
+        currency=po_data.currency,
         source_system=po_data.source_system,
-        metadata_=po_data.metadata,
-        status="sent",
+        terms=po_data.terms,
+        notes=po_data.notes,
+        status=PurchaseOrderStatus.ACTIVE,
     )
+
     db.add(purchase_order)
     await db.flush()
-    
-    # Create line items
+
+    # Create PO lines
     for line_data in po_data.lines:
-        line = POLine(
-            purchase_order_id=purchase_order.id,
+        line = PurchaseOrderLine(
+            po_id=purchase_order.id,
             line_number=line_data.line_number,
             description=line_data.description,
-            quantity=line_data.quantity,
-            unit_of_measure=line_data.unit_of_measure,
+            product_code=line_data.product_code,
+            product_name=line_data.product_name,
+            quantity_ordered=line_data.quantity_ordered,
             unit_price=line_data.unit_price,
-            net_amount=line_data.net_amount,
-            tax_amount=line_data.tax_amount,
-            tax_rate=line_data.tax_rate,
-            promised_date=line_data.promised_date,
+            extended_amount=line_data.extended_amount,
+            tax_rate=line_data.tax_rate or 0,
+            tax_amount=line_data.tax_amount or 0,
         )
         db.add(line)
-    
+
     await db.commit()
     await db.refresh(purchase_order)
-    
-    # Load lines relationship
-    result = await db.execute(
-        select(PurchaseOrder)
-        .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.id == purchase_order.id)
-    )
-    purchase_order = result.scalar_one()
-    
-    return BaseResponse(
-        success=True,
-        data=PurchaseOrderResponse.model_validate(purchase_order),
-        message="Purchase order created successfully",
-    )
+
+    return purchase_order
 
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[PurchaseOrderResponse],
+    response_model=PaginatedResponse[PurchaseOrderListResponse],
     summary="List purchase orders",
-    description="Get paginated list of purchase orders with optional filters.",
+    description="Get a paginated list of purchase orders.",
 )
 async def list_purchase_orders(
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-    vendor_id: str | None = None,
-    status: str | None = None,
-    order_date_from: str | None = None,
-    order_date_to: str | None = None,
-) -> PaginatedResponse[PurchaseOrderResponse]:
-    """List purchase orders with pagination and filters."""
-    query = select(PurchaseOrder).options(selectinload(PurchaseOrder.lines))
-    count_query = select(func.count(PurchaseOrder.id))
-    
-    # Apply filters
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    vendor_id: Optional[uuid.UUID] = Query(None, description="Filter by vendor"),
+    status: Optional[PurchaseOrderStatus] = Query(None, description="Filter by status"),
+    start_date: Optional[str] = Query(None, description="Filter from date"),
+    end_date: Optional[str] = Query(None, description="Filter to date"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    List purchase orders with pagination and optional filters.
+    """
+    stmt = select(PurchaseOrder).where(PurchaseOrder.is_deleted == False)
+
     if vendor_id:
-        query = query.where(PurchaseOrder.vendor_id == vendor_id)
-        count_query = count_query.where(PurchaseOrder.vendor_id == vendor_id)
+        stmt = stmt.where(PurchaseOrder.vendor_id == vendor_id)
     if status:
-        query = query.where(PurchaseOrder.status == status)
-        count_query = count_query.where(PurchaseOrder.status == status)
-    
-    # Get total count
-    total = await db.scalar(count_query)
-    
-    # Apply pagination
+        stmt = stmt.where(PurchaseOrder.status == status)
+    if start_date:
+        stmt = stmt.where(PurchaseOrder.po_date >= start_date)
+    if end_date:
+        stmt = stmt.where(PurchaseOrder.po_date <= end_date)
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
     offset = (page - 1) * per_page
-    query = query.order_by(PurchaseOrder.created_at.desc()).offset(offset).limit(per_page)
-    
-    result = await db.execute(query)
+    stmt = stmt.order_by(PurchaseOrder.created_at.desc()).offset(offset).limit(per_page)
+
+    result = await db.execute(stmt)
     purchase_orders = result.scalars().all()
-    
-    pages = (total + per_page - 1) // per_page if total else 1
-    
-    return PaginatedResponse(
-        success=True,
-        data=[PurchaseOrderResponse.model_validate(po) for po in purchase_orders],
-        total=total or 0,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-    )
+
+    pages = (total + per_page - 1) // per_page if per_page > 0 else 0
+
+    return {
+        "data": purchase_orders,
+        "meta": PaginationMeta(
+            total=total,
+            page=page,
+            per_page=per_page,
+            pages=pages,
+            has_next=page < pages,
+            has_prev=page > 1,
+        ),
+    }
 
 
 @router.get(
     "/{po_id}",
-    response_model=BaseResponse[PurchaseOrderResponse],
-    summary="Get purchase order by ID",
+    response_model=PurchaseOrderResponse,
+    summary="Get purchase order",
+    description="Get a single purchase order by ID.",
 )
 async def get_purchase_order(
-    po_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[PurchaseOrderResponse]:
-    """Get a single purchase order by ID."""
-    result = await db.execute(
-        select(PurchaseOrder)
-        .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.id == po_id)
+    po_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> PurchaseOrder:
+    """
+    Get purchase order by ID with line items.
+    """
+    stmt = select(PurchaseOrder).where(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.is_deleted == False,
     )
+    result = await db.execute(stmt)
     purchase_order = result.scalar_one_or_none()
-    
+
     if not purchase_order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase order {po_id} not found",
         )
-    
-    return BaseResponse(
-        success=True,
-        data=PurchaseOrderResponse.model_validate(purchase_order),
-    )
+
+    return purchase_order
 
 
 @router.get(
-    "/by-number/{po_number}",
-    response_model=BaseResponse[PurchaseOrderResponse],
-    summary="Get purchase order by PO number",
+    "/{po_id}/lines/{line_id}/balance",
+    response_model=BalanceSummaryResponse,
+    summary="Get PO line balance",
+    description="Get the balance summary for a PO line.",
 )
-async def get_purchase_order_by_number(
-    po_number: str,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[PurchaseOrderResponse]:
-    """Get a purchase order by its PO number."""
-    result = await db.execute(
-        select(PurchaseOrder)
-        .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.po_number == po_number.upper())
+async def get_po_line_balance(
+    po_id: uuid.UUID,
+    line_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> BalanceSummary:
+    """
+    Get balance summary for a specific PO line.
+    """
+    # Verify PO exists
+    po_stmt = select(PurchaseOrder).where(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.is_deleted == False,
     )
-    purchase_order = result.scalar_one_or_none()
-    
-    if not purchase_order:
+    po_result = await db.execute(po_stmt)
+    if not po_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Purchase order {po_number} not found",
+            detail=f"Purchase order {po_id} not found",
         )
-    
-    return BaseResponse(
-        success=True,
-        data=PurchaseOrderResponse.model_validate(purchase_order),
-    )
+
+    # Get balance summary
+    stmt = select(BalanceSummary).where(BalanceSummary.po_line_id == line_id)
+    result = await db.execute(stmt)
+    balance = result.scalar_one_or_none()
+
+    if not balance:
+        # Return default balance if not found
+        line_stmt = select(PurchaseOrderLine).where(PurchaseOrderLine.id == line_id)
+        line_result = await db.execute(line_stmt)
+        line = line_result.scalar_one_or_none()
+
+        if not line:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"PO line {line_id} not found",
+            )
+
+        return BalanceSummary(
+            po_line_id=line_id,
+            quantity_ordered=line.quantity_ordered,
+            quantity_delivered=line.quantity_received,
+            quantity_invoiced=line.quantity_invoiced,
+            quantity_credited=0,
+            quantity_balance=line.quantity_ordered - line.quantity_invoiced,
+            amount_ordered=line.extended_amount,
+            amount_delivered=0,
+            amount_invoiced=0,
+            amount_credited=0,
+            amount_balance=line.extended_amount,
+            delivery_percentage=0,
+            invoice_percentage=0,
+        )
+
+    return balance
