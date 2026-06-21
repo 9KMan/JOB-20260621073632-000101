@@ -1,172 +1,155 @@
 // src/models/match.py
-"""Match model for 3-way matching results."""
-import uuid
-from datetime import datetime
+"""Match models."""
 from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, JSON, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Numeric, String, Text, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from src.models.base import BaseModel, TimestampMixin
 
 
-class Match(Base):
-    """Match entity representing the result of 3-way matching."""
+class MatchType(str, Enum):
+    """Match type enumeration."""
+    INVOICE_PO = "invoice_po"
+    DELIVERY_PO = "delivery_po"
+    INVOICE_DELIVERY = "invoice_delivery"
+    THREE_WAY = "three_way"
+
+
+class MatchStatus(str, Enum):
+    """Match status."""
+    PENDING = "pending"
+    AUTO_CONFIRMED = "auto_confirmed"
+    HUMAN_REVIEW = "human_review"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    DISPUTED = "disputed"
+
+
+class MatchResult(str, Enum):
+    """Match result."""
+    EXACT = "exact"
+    PARTIAL = "partial"
+    OVER = "over"
+    UNDER = "under"
+    NO_MATCH = "no_match"
+
+
+class MatchRecord(BaseModel, TimestampMixin):
+    """Match record between documents."""
     
-    __tablename__ = "matches"
+    __tablename__ = "match_records"
     
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    
-    # Document references
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    delivery_note_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    purchase_order_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    
-    # Match scores
-    line_level_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
-        nullable=False,
-    )
-    amount_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
-        nullable=False,
-    )
-    date_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
-        nullable=False,
-    )
-    overall_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=Decimal("0.0000"),
+    match_type: Mapped[MatchType] = mapped_column(
+        SQLEnum(MatchType, name="match_type", create_type=False),
         nullable=False,
     )
     
-    # Match details
-    match_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        index=True,
-    )  # INVOICE_PO, DN_PO, INVOICE_DN, FULL_3WAY
-    match_status: Mapped[str] = mapped_column(
-        String(20),
-        default="PENDING",
-        nullable=False,
-        index=True,
-    )  # CONFIRMED, PENDING, REJECTED
-    decision: Mapped[str] = mapped_column(
-        String(30),
-        default="HUMAN_REVIEW",
-        nullable=False,
-        index=True,
-    )  # AUTO_APPROVE, HUMAN_REVIEW, DISPUTE
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    purchase_order_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delivery_note_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     
-    # Amount comparison
-    invoice_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
+    line_match_details: Mapped[dict | None] = mapped_column(Text, nullable=True)
+    
+    quantity_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
     )
-    po_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
+    amount_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
     )
-    dn_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
+    date_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
     )
+    
+    total_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    match_result: Mapped[MatchResult] = mapped_column(
+        SQLEnum(MatchResult, name="match_result", create_type=False),
+        nullable=False,
+    )
+    status: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status", create_type=False),
+        default=MatchStatus.PENDING,
+        nullable=False,
+    )
+    
     variance_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         default=Decimal("0.00"),
         nullable=False,
     )
+    variance_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
     
-    # Line item details
-    line_matches: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
     
-    # Review
-    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+    invoice: Mapped["Invoice"] = relationship(foreign_keys=[invoice_id])
+    purchase_order: Mapped["PurchaseOrder"] = relationship(foreign_keys=[purchase_order_id])
+    delivery_note: Mapped["DeliveryNote"] = relationship(foreign_keys=[delivery_note_id])
+    confirmations: Mapped[list["MatchConfirmation"]] = relationship(
+        back_populates="match_record",
+        cascade="all, delete-orphan",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<MatchRecord {self.id}: {self.match_type} - {self.status}>"
+
+
+class MatchConfirmation(BaseModel, TimestampMixin):
+    """Match confirmation from human review."""
+    
+    __tablename__ = "match_confirmations"
+    
+    match_record_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("match_records.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    
+    user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
+    decision: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status_confirm", create_type=False),
         nullable=False,
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Relationships
-    invoice = relationship("Invoice", foreign_keys=[invoice_id])
-    delivery_note = relationship("DeliveryNote", foreign_keys=[delivery_note_id])
-    purchase_order = relationship("PurchaseOrder", foreign_keys=[purchase_order_id])
-    reviewed_by_user = relationship("User", foreign_keys=[reviewed_by])
-    
-    def __repr__(self) -> str:
-        return f"<Match(id={self.id}, match_type={self.match_type}, decision={self.decision})>"
-
-
-class MatchCrossReference(Base):
-    """Cross-reference table for human confirmations that feed into matching."""
-    
-    __tablename__ = "match_cross_references"
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    match_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matches.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    source_item_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    target_item_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    confirmed: Mapped[bool] = mapped_column(default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
+    match_record: Mapped["MatchRecord"] = relationship(
+        back_populates="confirmations",
     )
     
     def __repr__(self) -> str:
-        return f"<MatchCrossReference(id={self.id}, source={self.source_item_code}, target={self.target_item_code})>"
+        return f"<MatchConfirmation {self.id}: {self.decision}>"

@@ -1,84 +1,77 @@
 // src/schemas/purchase_order.py
-"""Purchase Order schemas."""
-from datetime import date, datetime
+"""Purchase order schemas."""
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.models.purchase_order import POStatus
+from src.schemas.common import BaseSchema, TimestampSchema
 
 
-class PurchaseOrderLineItemBase(BaseModel):
-    """Base line item schema."""
-    line_number: int = Field(..., ge=1)
-    item_code: str = Field(..., max_length=100)
-    description: str = Field(..., max_length=500)
-    quantity: Decimal = Field(..., gt=0)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0)
-    line_total: Decimal = Field(..., ge=0)
+class PurchaseOrderLineBase(BaseSchema):
+    """Base PO line schema."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str = Field(max_length=500)
+    quantity: Decimal = Field(gt=0)
+    unit_of_measure: str = "EA"
+    unit_price: Decimal = Field(ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
+    received_quantity: Decimal = Field(default=Decimal("0.00"), ge=0)
+    invoiced_quantity: Decimal = Field(default=Decimal("0.00"), ge=0)
 
 
-class PurchaseOrderLineItemCreate(PurchaseOrderLineItemBase):
-    """Schema for line item creation."""
+class PurchaseOrderLineCreate(PurchaseOrderLineBase):
+    """PO line creation schema."""
     pass
 
 
-class PurchaseOrderLineItemResponse(PurchaseOrderLineItemBase):
-    """Schema for line item response."""
+class PurchaseOrderLineResponse(PurchaseOrderLineBase, TimestampSchema):
+    """PO line response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
     purchase_order_id: UUID
-    
-    model_config = {"from_attributes": True}
+    line_total: Decimal
 
 
-class PurchaseOrderBase(BaseModel):
+class PurchaseOrderBase(BaseSchema):
     """Base purchase order schema."""
-    po_number: str = Field(..., max_length=50)
-    supplier_id: UUID
-    order_date: date
-    expected_delivery_date: Optional[date] = None
-    currency: str = Field(default="USD", max_length=3)
+    po_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
+    order_date: str
+    expected_delivery_date: Optional[str] = None
+    currency: str = "USD"
     notes: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for purchase order creation."""
-    line_items: list[PurchaseOrderLineItemCreate] = Field(default_factory=list)
+    """Purchase order creation schema."""
+    lines: list[PurchaseOrderLineCreate]
 
 
-class PurchaseOrderUpdate(BaseModel):
-    """Schema for purchase order update."""
-    po_number: Optional[str] = Field(None, max_length=50)
-    supplier_id: Optional[UUID] = None
-    order_date: Optional[date] = None
-    expected_delivery_date: Optional[date] = None
-    status: Optional[str] = Field(None, max_length=20)
-    currency: Optional[str] = Field(None, max_length=3)
+class PurchaseOrderUpdate(BaseSchema):
+    """Purchase order update schema."""
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
+    expected_delivery_date: Optional[str] = None
+    status: Optional[POStatus] = None
     notes: Optional[str] = None
-    line_items: Optional[list[PurchaseOrderLineItemCreate]] = None
+    lines: Optional[list[PurchaseOrderLineCreate]] = None
 
 
-class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for purchase order response."""
+class PurchaseOrderResponse(PurchaseOrderBase, TimestampSchema):
+    """Purchase order response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
-    status: str
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
-    is_deleted: bool
-    line_items: list[PurchaseOrderLineItemResponse] = []
-    
-    model_config = {"from_attributes": True}
-
-
-class PurchaseOrderListResponse(BaseModel):
-    """Schema for paginated purchase order list."""
-    items: list[PurchaseOrderResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+    status: POStatus
+    lines: list[PurchaseOrderLineResponse] = []

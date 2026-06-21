@@ -1,46 +1,47 @@
 // src/schemas/common.py
-"""Common Pydantic schemas."""
-from typing import Any, Generic, Optional, TypeVar
+"""Common schemas."""
 from datetime import datetime
+from typing import Any, Generic, TypeVar
+from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
-
-
-T = TypeVar("T")
-
-
-class PaginationParams(BaseModel):
-    """Pagination parameters."""
-    skip: int = Field(default=0, ge=0)
-    limit: int = Field(default=100, ge=1, le=1000)
+from pydantic import BaseModel, ConfigDict
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
-    """Paginated response wrapper."""
+class Token(BaseModel):
+    """Token schema."""
+    access_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    """Token data schema."""
+    user_id: UUID | None = None
+    email: str | None = None
+
+
+class PaginatedResponse(BaseModel, Generic[T := TypeVar("T")]):
+    """Paginated response."""
     items: list[T]
     total: int
-    skip: int
-    limit: int
-    has_more: bool
-
-
-class MessageResponse(BaseModel):
-    """Simple message response."""
-    message: str
-    success: bool = True
-
-
-class ErrorResponse(BaseModel):
-    """Error response."""
-    detail: str
-    code: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class BaseSchema(BaseModel):
-    """Base schema with common configuration."""
+    """Base schema configuration."""
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,
-        json_encoders={datetime: lambda v: v.isoformat()},
     )
+
+
+class TimestampSchema(BaseSchema):
+    """Schema with timestamps."""
+    created_at: datetime
+    updated_at: datetime
+
+
+class UUIDSchema(BaseSchema):
+    """Schema with UUID."""
+    id: UUID

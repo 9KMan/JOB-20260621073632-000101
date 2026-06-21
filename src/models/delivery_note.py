@@ -1,107 +1,86 @@
 // src/models/delivery_note.py
-"""Delivery Note model definition."""
-import uuid
-from datetime import date, datetime
+"""Delivery Note models."""
 from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Numeric, String, Text, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from src.models.base import BaseModel, TimestampMixin
 
 
-class DeliveryNote(Base):
-    """Delivery Note entity representing goods received."""
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status."""
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    PARTIALLY_MATCHED = "partially_matched"
+    MATCHED = "matched"
+    CANCELLED = "cancelled"
+
+
+class DeliveryNote(BaseModel, TimestampMixin):
+    """Delivery note model."""
     
     __tablename__ = "delivery_notes"
     
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    dn_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    purchase_order_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    delivery_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    received_by: Mapped[str] = mapped_column(String(100), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="RECEIVED", nullable=False, index=True)
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    dn_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    supplier_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    supplier_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     
-    # Relationships
-    supplier = relationship("Supplier", back_populates="delivery_notes")
-    purchase_order = relationship("PurchaseOrder", back_populates="delivery_notes")
-    line_items = relationship("DeliveryNoteLineItem", back_populates="delivery_note", cascade="all, delete-orphan")
+    po_reference: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
+    
+    delivery_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    received_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    
+    status: Mapped[DeliveryNoteStatus] = mapped_column(
+        SQLEnum(DeliveryNoteStatus, name="dn_status", create_type=False),
+        default=DeliveryNoteStatus.DRAFT,
+        nullable=False,
+    )
+    
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
+    
+    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
+        back_populates="delivery_note",
+        cascade="all, delete-orphan",
+    )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNote(id={self.id}, dn_number={self.dn_number})>"
+        return f"<DeliveryNote {self.dn_number}>"
 
 
-class DeliveryNoteLineItem(Base):
-    """Delivery Note Line Item entity."""
+class DeliveryNoteLine(BaseModel, TimestampMixin):
+    """Delivery note line item model."""
     
-    __tablename__ = "delivery_note_line_items"
+    __tablename__ = "delivery_note_lines"
     
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    delivery_note_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    delivery_note_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
-    )
-    line_number: Mapped[int] = mapped_column(nullable=False)
-    item_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str] = mapped_column(String(500), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA")
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
     )
     
-    # Relationships
-    delivery_note = relationship("DeliveryNote", back_populates="line_items")
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+    
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    
+    metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
+    
+    delivery_note: Mapped["DeliveryNote"] = relationship(
+        back_populates="lines",
+    )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNoteLineItem(id={self.id}, item_code={self.item_code})>"
+        return f"<DeliveryNoteLine {self.line_number}: {self.description}>"

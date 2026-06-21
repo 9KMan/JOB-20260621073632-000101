@@ -1,89 +1,76 @@
 // src/schemas/invoice.py
 """Invoice schemas."""
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.models.invoice import InvoiceStatus
+from src.schemas.common import BaseSchema, TimestampSchema
 
 
-class InvoiceLineItemBase(BaseModel):
-    """Base line item schema."""
-    line_number: int = Field(..., ge=1)
-    item_code: str = Field(..., max_length=100)
-    description: str = Field(..., max_length=500)
-    quantity: Decimal = Field(..., gt=0)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0)
-    line_total: Decimal = Field(..., ge=0)
+class InvoiceLineBase(BaseSchema):
+    """Base invoice line schema."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str = Field(max_length=500)
+    quantity: Decimal = Field(gt=0)
+    unit_of_measure: str = "EA"
+    unit_price: Decimal = Field(ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
 
 
-class InvoiceLineItemCreate(InvoiceLineItemBase):
-    """Schema for line item creation."""
+class InvoiceLineCreate(InvoiceLineBase):
+    """Invoice line creation schema."""
     pass
 
 
-class InvoiceLineItemResponse(InvoiceLineItemBase):
-    """Schema for line item response."""
+class InvoiceLineResponse(InvoiceLineBase, TimestampSchema):
+    """Invoice line response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
     invoice_id: UUID
-    
-    model_config = {"from_attributes": True}
+    line_total: Decimal
 
 
-class InvoiceBase(BaseModel):
+class InvoiceBase(BaseSchema):
     """Base invoice schema."""
-    invoice_number: str = Field(..., max_length=50)
-    supplier_id: UUID
-    purchase_order_id: Optional[UUID] = None
-    invoice_date: date
-    due_date: date
-    currency: str = Field(default="USD", max_length=3)
+    invoice_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
+    po_reference: Optional[str] = None
+    invoice_date: str
+    due_date: Optional[str] = None
+    currency: str = "USD"
     notes: Optional[str] = None
 
 
 class InvoiceCreate(InvoiceBase):
-    """Schema for invoice creation."""
-    line_items: list[InvoiceLineItemCreate] = Field(default_factory=list)
+    """Invoice creation schema."""
+    lines: list[InvoiceLineCreate]
 
 
-class InvoiceUpdate(BaseModel):
-    """Schema for invoice update."""
-    invoice_number: Optional[str] = Field(None, max_length=50)
-    supplier_id: Optional[UUID] = None
-    purchase_order_id: Optional[UUID] = None
-    invoice_date: Optional[date] = None
-    due_date: Optional[date] = None
-    status: Optional[str] = Field(None, max_length=20)
-    payment_status: Optional[str] = Field(None, max_length=20)
-    currency: Optional[str] = Field(None, max_length=3)
+class InvoiceUpdate(BaseSchema):
+    """Invoice update schema."""
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[InvoiceStatus] = None
     notes: Optional[str] = None
-    line_items: Optional[list[InvoiceLineItemCreate]] = None
+    lines: Optional[list[InvoiceLineCreate]] = None
 
 
-class InvoiceResponse(InvoiceBase):
-    """Schema for invoice response."""
+class InvoiceResponse(InvoiceBase, TimestampSchema):
+    """Invoice response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
-    status: str
-    payment_status: str
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    amount_paid: Decimal
-    created_at: datetime
-    updated_at: datetime
-    is_deleted: bool
-    line_items: list[InvoiceLineItemResponse] = []
-    
-    model_config = {"from_attributes": True}
-
-
-class InvoiceListResponse(BaseModel):
-    """Schema for paginated invoice list."""
-    items: list[InvoiceResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+    status: InvoiceStatus
+    lines: list[InvoiceLineResponse] = []

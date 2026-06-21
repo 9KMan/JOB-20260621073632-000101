@@ -1,37 +1,49 @@
 // src/models/balance.py
-"""Balance tracking for partial matches and splits."""
-import uuid
-from datetime import datetime
+"""Balance ledger models."""
 from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Numeric, String, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from src.models.base import BaseModel, TimestampMixin
 
 
-class BalanceLedger(Base):
-    """Balance ledger for tracking partial matches across documents."""
+class BalanceType(str, Enum):
+    """Balance type."""
+    INVOICE = "invoice"
+    DELIVERY = "delivery"
+    PARTIAL = "partial"
+
+
+class BalanceLedger(BaseModel, TimestampMixin):
+    """Balance ledger for tracking partial matches."""
     
     __tablename__ = "balance_ledger"
     
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    purchase_order_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delivery_note_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
     )
     
-    # Document reference
-    document_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    balance_type: Mapped[BalanceType] = mapped_column(
+        SQLEnum(BalanceType, name="balance_type", create_type=False),
         nullable=False,
-        index=True,
     )
-    document_number: Mapped[str] = mapped_column(String(50), nullable=False)
     
-    # Balance tracking
     original_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
@@ -41,82 +53,26 @@ class BalanceLedger(Base):
         default=Decimal("0.00"),
         nullable=False,
     )
-    pending_amount: Mapped[Decimal] = mapped_column(
+    remaining_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
     
-    # Status
-    balance_status: Mapped[str] = mapped_column(
-        String(20),
-        default="OPEN",
-        nullable=False,
-        index=True,
-    )  # OPEN, PARTIAL, CLOSED
-    
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
+    original_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+    matched_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.00"),
         nullable=False,
     )
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    remaining_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
     
-    # Relationships
-    entries = relationship("BalanceLedgerEntry", back_populates="balance_ledger", cascade="all, delete-orphan")
+    is_settled: Mapped[bool] = mapped_column(default=False, nullable=False)
     
     def __repr__(self) -> str:
-        return f"<BalanceLedger(id={self.id}, document={self.document_type}:{self.document_number}, balance_status={self.balance_status})>"
-
-
-class BalanceLedgerEntry(Base):
-    """Individual entries in the balance ledger."""
-    
-    __tablename__ = "balance_ledger_entries"
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    balance_ledger_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("balance_ledger.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    match_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matches.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    balance_after: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    reference_document_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    reference_document_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    reference_document_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    
-    # Relationships
-    balance_ledger = relationship("BalanceLedger", back_populates="entries")
-    
-    def __repr__(self) -> str:
-        return f"<BalanceLedgerEntry(id={self.id}, entry_type={self.entry_type}, amount={self.amount})>"
+        return f"<BalanceLedger {self.id}: {self.balance_type} - {self.remaining_amount}>"

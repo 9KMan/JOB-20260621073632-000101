@@ -1,5 +1,5 @@
 // src/config.py
-"""Application configuration management."""
+"""Application configuration."""
 import os
 from functools import lru_cache
 from typing import Optional
@@ -8,50 +8,61 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+class DatabaseSettings(BaseSettings):
+    """Database configuration."""
+    
+    host: str = Field(default="localhost", env="POSTGRES_HOST")
+    port: int = Field(default=5432, env="POSTGRES_PORT")
+    username: str = Field(default="postgres", env="POSTGRES_USER")
+    password: str = Field(default="postgres", env="POSTGRES_PASSWORD")
+    name: str = Field(default="finaro_ap", env="POSTGRES_DB")
+    
+    @property
+    def url(self) -> str:
+        """Get database URL."""
+        return f"postgresql+asyncpg://{self.username}:{self.password}@{self.host}:{self.port}/{self.name}"
+    
+    @property
+    def sync_url(self) -> str:
+        """Get synchronous database URL."""
+        return f"postgresql://{self.username}:{self.password}@{self.host}:{self.port}/{self.name}"
+
+
+class JWTSettings(BaseSettings):
+    """JWT configuration."""
+    
+    secret_key: str = Field(default="your-secret-key-change-in-production", env="JWT_SECRET_KEY")
+    algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(default=30, env="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
+
+
+class AppSettings(BaseSettings):
+    """Application settings."""
+    
+    name: str = "FinaRo AP Automation"
+    version: str = "1.0.0"
+    debug: bool = Field(default=False, env="DEBUG")
+    api_v1_prefix: str = "/api/v1"
+    
+    @property
+    def cors_origins(self) -> list[str]:
+        """Get CORS origins."""
+        return ["*"]
+
+
 class Settings(BaseSettings):
-    """Application settings with environment variable support."""
-
-    # Application
-    APP_NAME: str = "FinaRo AP Automation"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False)
-
-    # Database
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://finaro:finaro_secure_pass@localhost:5432/finaro_ap"
-    )
-    DATABASE_POOL_SIZE: int = Field(default=20)
-    DATABASE_MAX_OVERFLOW: int = Field(default=10)
-    DATABASE_POOL_TIMEOUT: int = Field(default=30)
-    DATABASE_POOL_RECYCLE: int = Field(default=3600)
-
-    # JWT Authentication
-    JWT_SECRET_KEY: str = Field(default="change-me-in-production")
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
-
-    # Matching Engine Weights (must sum to 1.0)
-    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
-    MATCH_WEIGHT_AMOUNT: float = 0.20
-    MATCH_WEIGHT_DATE: float = 0.10
-
-    # Match Thresholds
-    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
-    MATCH_THRESHOLD_PENDING_REVIEW: float = 0.70
-    MATCH_THRESHOLD_REJECTED: float = 0.0
-
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
-
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-
+    """Combined settings."""
+    
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    app: AppSettings = Field(default_factory=AppSettings)
+    
     class Config:
         env_file = ".env"
-        case_sensitive = True
+        env_nested_delimiter = "__"
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings."""
     return Settings()

@@ -1,85 +1,72 @@
 // src/schemas/delivery_note.py
-"""Delivery Note schemas."""
-from datetime import date, datetime
+"""Delivery note schemas."""
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.models.delivery_note import DeliveryNoteStatus
+from src.schemas.common import BaseSchema, TimestampSchema
 
 
-class DeliveryNoteLineItemBase(BaseModel):
-    """Base line item schema."""
-    line_number: int = Field(..., ge=1)
-    item_code: str = Field(..., max_length=100)
-    description: str = Field(..., max_length=500)
-    quantity: Decimal = Field(..., gt=0)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=0)
-    line_total: Decimal = Field(..., ge=0)
+class DeliveryNoteLineBase(BaseSchema):
+    """Base DN line schema."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str = Field(max_length=500)
+    quantity: Decimal = Field(gt=0)
+    unit_of_measure: str = "EA"
 
 
-class DeliveryNoteLineItemCreate(DeliveryNoteLineItemBase):
-    """Schema for line item creation."""
+class DeliveryNoteLineCreate(DeliveryNoteLineBase):
+    """DN line creation schema."""
     pass
 
 
-class DeliveryNoteLineItemResponse(DeliveryNoteLineItemBase):
-    """Schema for line item response."""
+class DeliveryNoteLineResponse(DeliveryNoteLineBase, TimestampSchema):
+    """DN line response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
     delivery_note_id: UUID
-    
-    model_config = {"from_attributes": True}
+    line_total: Decimal
 
 
-class DeliveryNoteBase(BaseModel):
+class DeliveryNoteBase(BaseSchema):
     """Base delivery note schema."""
-    dn_number: str = Field(..., max_length=50)
-    supplier_id: UUID
-    purchase_order_id: Optional[UUID] = None
-    delivery_date: date
-    received_by: str = Field(..., max_length=100)
-    currency: str = Field(default="USD", max_length=3)
+    dn_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
+    po_reference: Optional[str] = None
+    delivery_date: str
+    received_date: Optional[str] = None
+    currency: str = "USD"
     notes: Optional[str] = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """Schema for delivery note creation."""
-    line_items: list[DeliveryNoteLineItemCreate] = Field(default_factory=list)
+    """Delivery note creation schema."""
+    lines: list[DeliveryNoteLineCreate]
 
 
-class DeliveryNoteUpdate(BaseModel):
-    """Schema for delivery note update."""
-    dn_number: Optional[str] = Field(None, max_length=50)
-    supplier_id: Optional[UUID] = None
-    purchase_order_id: Optional[UUID] = None
-    delivery_date: Optional[date] = None
-    received_by: Optional[str] = Field(None, max_length=100)
-    status: Optional[str] = Field(None, max_length=20)
-    currency: Optional[str] = Field(None, max_length=3)
+class DeliveryNoteUpdate(BaseSchema):
+    """Delivery note update schema."""
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
+    received_date: Optional[str] = None
+    status: Optional[DeliveryNoteStatus] = None
     notes: Optional[str] = None
-    line_items: Optional[list[DeliveryNoteLineItemCreate]] = None
+    lines: Optional[list[DeliveryNoteLineCreate]] = None
 
 
-class DeliveryNoteResponse(DeliveryNoteBase):
-    """Schema for delivery note response."""
-    id: UUID
-    status: str
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
-    is_deleted: bool
-    line_items: list[DeliveryNoteLineItemResponse] = []
+class DeliveryNoteResponse(DeliveryNoteBase, TimestampSchema):
+    """Delivery note response schema."""
+    model_config = ConfigDict(from_attributes=True)
     
-    model_config = {"from_attributes": True}
-
-
-class DeliveryNoteListResponse(BaseModel):
-    """Schema for paginated delivery note list."""
-    items: list[DeliveryNoteResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+    id: UUID
+    total_amount: Decimal
+    status: DeliveryNoteStatus
+    lines: list[DeliveryNoteLineResponse] = []

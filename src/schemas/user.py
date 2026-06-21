@@ -1,55 +1,44 @@
 // src/schemas/user.py
 """User schemas."""
-import uuid
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from src.models.enums import UserRole
+from src.schemas.common import BaseSchema, TimestampSchema
 
 
-class UserBase(BaseModel):
+class UserBase(BaseSchema):
     """Base user schema."""
     email: EmailStr
-    full_name: str = Field(..., min_length=1, max_length=255)
+    username: str = Field(min_length=3, max_length=100)
+    full_name: Optional[str] = None
 
 
 class UserCreate(UserBase):
-    """Schema for creating a user."""
-    password: str = Field(..., min_length=8, max_length=100)
-    role: UserRole = UserRole.VIEWER
+    """User creation schema."""
+    password: str = Field(min_length=8, max_length=100)
 
 
-class UserUpdate(BaseModel):
-    """Schema for updating a user."""
+class UserUpdate(BaseSchema):
+    """User update schema."""
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
-    role: Optional[UserRole] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    full_name: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=100)
     is_active: Optional[bool] = None
 
 
-class UserResponse(UserBase):
-    """Schema for user response."""
+class UserResponse(UserBase, TimestampSchema):
+    """User response schema."""
     model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    role: UserRole
+    
+    id: UUID
     is_active: bool
     is_superuser: bool
-    created_at: datetime
-    updated_at: datetime
 
 
-class UserLogin(BaseModel):
-    """Schema for user login."""
-    email: EmailStr
-    password: str
-
-
-class TokenResponse(BaseModel):
-    """Schema for token response."""
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+class UserInDB(UserResponse):
+    """User in database schema."""
+    hashed_password: str
