@@ -1,66 +1,58 @@
-# docker-compose.yml
-version: '3.8'
+// docker-compose.yml
+version: "3.9"
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: finaro-api
+    container_name: ap-automation-api
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql://finaro:password@postgres:5432/finaro_ap
-      - SECRET_KEY=dev-secret-key-change-in-production-32chars
-      - DEBUG=true
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./src:/app/src
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme-in-production}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-0.95}
+      - THRESHOLD_MID=${THRESHOLD_MID:-0.80}
+      - THRESHOLD_LOW=${THRESHOLD_LOW:-0.50}
+      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-0.05}
+      - TOLERANCE_QTY=${TOLERANCE_QTY:-0.10}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - finaro-network
+      pgbouncer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
+    networks:
+      - ap-network
 
   postgres:
     image: postgres:15-alpine
-    container_name: finaro-postgres
+    container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=finaro
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=finaro_ap
-    ports:
-      - "5432:5432"
+      - POSTGRES_USER=${POSTGRES_USER:-apuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
+      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro_ap"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks:
-      - finaro-network
     restart: unless-stopped
-
-  alembic:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: finaro-alembic
-    command: alembic upgrade head
-    environment:
-      - DATABASE_URL=postgresql://finaro:password@postgres:5432/finaro_ap
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
-      - finaro-network
+      - ap-network
 
-networks:
-  finaro-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
+  pgbo
