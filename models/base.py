@@ -1,27 +1,27 @@
-// models/base.py
-"""SQLAlchemy declarative base and mixins."""
+# models/base.py
+"""SQLAlchemy declarative base."""
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base for all models."""
-
+    """Base class for all database models."""
+    
     type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
-        datetime: DateTime(timezone=True),
+        uuid.UUID: lambda col: col.with_variant(
+            type_map.get(type(col), col),
+            dialect_name
+        )
     }
 
 
 class TimestampMixin:
-    """Mixin that adds created_at and updated_at timestamps."""
-
+    """Mixin providing created_at and updated_at timestamps."""
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -35,11 +35,10 @@ class TimestampMixin:
     )
 
 
-class UUIDPrimaryKeyMixin:
-    """Mixin that adds UUID primary key."""
-
+class UUIDMixin:
+    """Mixin providing UUID primary key."""
+    
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
         nullable=False,
@@ -47,8 +46,8 @@ class UUIDPrimaryKeyMixin:
 
 
 class SoftDeleteMixin:
-    """Mixin that adds soft delete functionality."""
-
+    """Mixin providing soft delete capability."""
+    
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -58,29 +57,3 @@ class SoftDeleteMixin:
         default=False,
         nullable=False,
     )
-
-    def soft_delete(self) -> None:
-        """Mark the record as deleted."""
-        self.is_deleted = True
-        self.deleted_at = datetime.now(timezone.utc)
-
-    def restore(self) -> None:
-        """Restore a soft-deleted record."""
-        self.is_deleted = False
-        self.deleted_at = None
-
-
-class TableNameMixin:
-    """Mixin that provides consistent table naming."""
-
-    @classmethod
-    def __ tablename__(cls) -> str:
-        """Generate table name from class name."""
-        name = cls.__name__
-        # Convert CamelCase to snake_case
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)

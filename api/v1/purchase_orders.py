@@ -1,45 +1,38 @@
 # api/v1/purchase_orders.py
-"""Purchase Order endpoints."""
+"""Purchase Order endpoints for ingestion and retrieval."""
 
-from typing import Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.database import get_db_session
+from models import PurchaseOrder, POLine
 from api.schemas import (
-    ApiResponse,
-    ErrorResponse,
+    BaseResponse,
     PaginatedResponse,
     PurchaseOrderCreate,
-    PurchaseOrderListResponse,
     PurchaseOrderResponse,
 )
-from core.database import get_db
-from models.enums import PurchaseOrderStatus
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from services.anchoring import AnchoringService
 
 router = APIRouter()
 
 
 @router.post(
     "/",
-    response_model=ApiResponse[PurchaseOrderResponse],
+    response_model=BaseResponse[PurchaseOrderResponse],
     status_code=status.HTTP_201_CREATED,
-    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    summary="Ingest new purchase order",
+    description="Create a new purchase order from ERP system.",
 )
 async def create_purchase_order(
     po_data: PurchaseOrderCreate,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[PurchaseOrderResponse]:
-    """
-    Ingest a new purchase order from ERP.
-
-    Creates a PO with line items. The PO becomes available for matching.
-    """
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> BaseResponse[PurchaseOrderResponse]:
+    """Ingest a new purchase order."""
     # Check for duplicate PO number
     existing = await db.execute(
         select(PurchaseOrder).where(PurchaseOrder.po_number == po_data.po_number)
@@ -49,207 +42,164 @@ async def create_purchase_order(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Purchase Order {po_data.po_number} already exists",
         )
-
+    
     # Create PO
-    po = PurchaseOrder(
-        vendor_number=po_data.vendor_number,
-        vendor_name=po_data.vendor_name,
+    purchase_order = PurchaseOrder(
         po_number=po_data.po_number,
+        vendor_id=po_data.vendor_id,
+        vendor_name=po_data.vendor_name,
         order_date=po_data.order_date,
         expected_delivery_date=po_data.expected_delivery_date,
+        currency=po_data.currency,
         subtotal=po_data.subtotal,
         tax_amount=po_data.tax_amount,
         total_amount=po_data.total_amount,
-        currency=po_data.currency,
         payment_terms=po_data.payment_terms,
-        shipping_terms=po_data.shipping_terms,
-        description=po_data.description,
-        erp_id=po_data.erp_id,
-        raw_data=po_data.raw_data,
-        status=PurchaseOrderStatus.ACTIVE,
+        shipping_address=po_data.shipping_address,
+        notes=po_data.notes,
+        source_system=po_data.source_system,
+        metadata_=po_data.metadata,
+        status="sent",
     )
-
+    db.add(purchase_order)
+    await db.flush()
+    
     # Create line items
     for line_data in po_data.lines:
-        line = PurchaseOrderLine(
+        line = POLine(
+            purchase_order_id=purchase_order.id,
             line_number=line_data.line_number,
-            item_number=line_data.item_number,
             description=line_data.description,
-            ordered_quantity=line_data.ordered_quantity,
+            quantity=line_data.quantity,
             unit_of_measure=line_data.unit_of_measure,
             unit_price=line_data.unit_price,
-            line_amount=line_data.line_amount,
-            tax_rate=line_data.tax_rate,
+            net_amount=line_data.net_amount,
             tax_amount=line_data.tax_amount,
-            remaining_quantity=line_data.ordered_quantity,
-            remaining_amount=line_data.line_amount,
+            tax_rate=line_data.tax_rate,
+            promised_date=line_data.promised_date,
         )
-        po.lines.append(line)
-
-    db.add(po)
-    await db.flush()
-
-    # Load the lines relationship
-    await db.refresh(po, ["lines"])
-
-    return ApiResponse(
+        db.add(line)
+    
+    await db.commit()
+    await db.refresh(purchase_order)
+    
+    # Load lines relationship
+    result = await db.execute(
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.lines))
+        .where(PurchaseOrder.id == purchase_order.id)
+    )
+    purchase_order = result.scalar_one()
+    
+    return BaseResponse(
         success=True,
-        data=PurchaseOrderResponse.model_validate(po),
-        message="Purchase Order created successfully",
+        data=PurchaseOrderResponse.model_validate(purchase_order),
+        message="Purchase order created successfully",
     )
 
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[PurchaseOrderListResponse],
+    response_model=PaginatedResponse[PurchaseOrderResponse],
+    summary="List purchase orders",
+    description="Get paginated list of purchase orders with optional filters.",
 )
 async def list_purchase_orders(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    vendor_number: str | None = None,
-    status: PurchaseOrderStatus | None = None,
-    po_number: str | None = None,
-    db: AsyncSession = Depends(get_db),
-) -> PaginatedResponse[PurchaseOrderListResponse]:
-    """
-    List all purchase orders with pagination and filtering.
-    """
-    query = select(PurchaseOrder).where(PurchaseOrder.deleted_at.is_(None))
-
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
+    vendor_id: str | None = None,
+    status: str | None = None,
+    order_date_from: str | None = None,
+    order_date_to: str | None = None,
+) -> PaginatedResponse[PurchaseOrderResponse]:
+    """List purchase orders with pagination and filters."""
+    query = select(PurchaseOrder).options(selectinload(PurchaseOrder.lines))
+    count_query = select(func.count(PurchaseOrder.id))
+    
     # Apply filters
-    if vendor_number:
-        query = query.where(PurchaseOrder.vendor_number == vendor_number)
+    if vendor_id:
+        query = query.where(PurchaseOrder.vendor_id == vendor_id)
+        count_query = count_query.where(PurchaseOrder.vendor_id == vendor_id)
     if status:
         query = query.where(PurchaseOrder.status == status)
-    if po_number:
-        query = query.where(PurchaseOrder.po_number.ilike(f"%{po_number}%"))
-
-    # Count total
-    count_query = select(PurchaseOrder.id).where(PurchaseOrder.deleted_at.is_(None))
-    total_result = await db.execute(count_query)
-    total = len(total_result.all())
-
+        count_query = count_query.where(PurchaseOrder.status == status)
+    
+    # Get total count
+    total = await db.scalar(count_query)
+    
     # Apply pagination
-    query = query.order_by(PurchaseOrder.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-
+    offset = (page - 1) * per_page
+    query = query.order_by(PurchaseOrder.created_at.desc()).offset(offset).limit(per_page)
+    
     result = await db.execute(query)
     purchase_orders = result.scalars().all()
-
-    items = [PurchaseOrderListResponse.model_validate(po) for po in purchase_orders]
-    total_pages = (total + page_size - 1) // page_size
-
+    
+    pages = (total + per_page - 1) // per_page if total else 1
+    
     return PaginatedResponse(
-        data=items,
-        total=total,
+        success=True,
+        data=[PurchaseOrderResponse.model_validate(po) for po in purchase_orders],
+        total=total or 0,
         page=page,
-        page_size=page_size,
-        total_pages=total_pages,
+        per_page=per_page,
+        pages=pages,
     )
 
 
 @router.get(
     "/{po_id}",
-    response_model=ApiResponse[PurchaseOrderResponse],
-    responses={404: {"model": ErrorResponse}},
+    response_model=BaseResponse[PurchaseOrderResponse],
+    summary="Get purchase order by ID",
 )
 async def get_purchase_order(
     po_id: UUID,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[PurchaseOrderResponse]:
-    """
-    Get a single purchase order by ID with all line items.
-    """
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> BaseResponse[PurchaseOrderResponse]:
+    """Get a single purchase order by ID."""
     result = await db.execute(
         select(PurchaseOrder)
         .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.id == po_id, PurchaseOrder.deleted_at.is_(None))
+        .where(PurchaseOrder.id == po_id)
     )
-    po = result.scalar_one_or_none()
-
-    if not po:
+    purchase_order = result.scalar_one_or_none()
+    
+    if not purchase_order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Purchase Order {po_id} not found",
+            detail=f"Purchase order {po_id} not found",
         )
-
-    return ApiResponse(
+    
+    return BaseResponse(
         success=True,
-        data=PurchaseOrderResponse.model_validate(po),
+        data=PurchaseOrderResponse.model_validate(purchase_order),
     )
 
 
 @router.get(
-    "/number/{po_number}",
-    response_model=ApiResponse[PurchaseOrderResponse],
-    responses={404: {"model": ErrorResponse}},
+    "/by-number/{po_number}",
+    response_model=BaseResponse[PurchaseOrderResponse],
+    summary="Get purchase order by PO number",
 )
 async def get_purchase_order_by_number(
     po_number: str,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[PurchaseOrderResponse]:
-    """
-    Get a purchase order by its PO number.
-    """
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> BaseResponse[PurchaseOrderResponse]:
+    """Get a purchase order by its PO number."""
     result = await db.execute(
         select(PurchaseOrder)
         .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.po_number == po_number, PurchaseOrder.deleted_at.is_(None))
+        .where(PurchaseOrder.po_number == po_number.upper())
     )
-    po = result.scalar_one_or_none()
-
-    if not po:
+    purchase_order = result.scalar_one_or_none()
+    
+    if not purchase_order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Purchase Order {po_number} not found",
+            detail=f"Purchase order {po_number} not found",
         )
-
-    return ApiResponse(
+    
+    return BaseResponse(
         success=True,
-        data=PurchaseOrderResponse.model_validate(po),
-    )
-
-
-@router.patch(
-    "/{po_id}/close",
-    response_model=ApiResponse[PurchaseOrderResponse],
-    responses={404: {"model": ErrorResponse}},
-)
-async def close_purchase_order(
-    po_id: UUID,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[PurchaseOrderResponse]:
-    """
-    Close a purchase order and all its lines.
-    """
-    result = await db.execute(
-        select(PurchaseOrder)
-        .options(selectinload(PurchaseOrder.lines))
-        .where(PurchaseOrder.id == po_id, PurchaseOrder.deleted_at.is_(None))
-    )
-    po = result.scalar_one_or_none()
-
-    if not po:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Purchase Order {po_id} not found",
-        )
-
-    if po.status == PurchaseOrderStatus.CLOSED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Purchase Order is already closed",
-        )
-
-    po.status = PurchaseOrderStatus.CLOSED
-    for line in po.lines:
-        line.is_closed = True
-
-    await db.flush()
-    await db.refresh(po, ["lines"])
-
-    return ApiResponse(
-        success=True,
-        data=PurchaseOrderResponse.model_validate(po),
-        message="Purchase Order closed successfully",
+        data=PurchaseOrderResponse.model_validate(purchase_order),
     )

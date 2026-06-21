@@ -1,13 +1,10 @@
-// core/config.py
-"""Application configuration using pydantic-settings.
-
-All configuration is loaded from environment variables.
-"""
+# core/config.py
+"""Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,106 +18,89 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application
-    app_name: str = "AP Automation Core Engine"
-    app_version: str = "0.1.0"
-    environment: Literal["development", "staging", "production"] = "development"
-    debug: bool = False
-    api_port: int = 8000
-
     # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        description="PostgreSQL connection string with asyncpg driver",
-    )
-    postgres_user: str = "apuser"
-    postgres_password: str = "appassword"
-    postgres_db: str = "apautomation"
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-
-    # PGBouncer
-    pgbouncer_host: str = "localhost"
-    pgbouncer_port: int = 6432
-
+    database_url: Annotated[str, Field(
+        description="PostgreSQL connection string",
+        examples=["postgresql+asyncpg://user:pass@host:5432/dbname"]
+    )]
+    pgbouncer_host: Annotated[str | None, Field(
+        default=None,
+        description="PGBouncer host for connection pooling"
+    )]
+    pgbouncer_port: Annotated[int, Field(
+        default=5432,
+        description="PGBouncer port"
+    )]
+    
     # JWT Authentication
-    jwt_secret_key: str = Field(
-        default="change-this-secret-key-in-production",
-        description="Secret key for JWT signing (HS256)",
-    )
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-
-    # Matching Thresholds (0.0 - 1.0)
-    threshold_high: float = Field(
-        default=0.95,
-        ge=0.0,
-        le=1.0,
-        description="Auto-approve threshold",
-    )
-    threshold_mid: float = Field(
-        default=0.75,
-        ge=0.0,
-        le=1.0,
-        description="1-click review threshold",
-    )
-    threshold_low: float = Field(
-        default=0.50,
-        ge=0.0,
-        le=1.0,
-        description="Exception threshold",
-    )
-
+    jwt_secret_key: Annotated[str, Field(
+        description="HS256 signing secret key"
+    )]
+    jwt_algorithm: Annotated[str, Field(
+        default="HS256",
+        description="JWT algorithm"
+    )]
+    access_token_expire_minutes: Annotated[int, Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description="Access token expiry in minutes"
+    )]
+    
+    # Matching Thresholds
+    threshold_high: Annotated[int, Field(
+        default=95,
+        ge=0,
+        le=100,
+        description="Auto-approve threshold percentage"
+    )]
+    threshold_mid: Annotated[int, Field(
+        default=70,
+        ge=0,
+        le=100,
+        description="One-click review threshold percentage"
+    )]
+    threshold_low: Annotated[int, Field(
+        default=50,
+        ge=0,
+        le=100,
+        description="Exception threshold percentage"
+    )]
+    
     # Tolerance Settings
-    tolerance_price: float = Field(
-        default=0.02,
-        ge=0.0,
-        le=1.0,
-        description="Price match tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=0.05,
-        ge=0.0,
-        le=1.0,
-        description="Quantity match tolerance percentage",
-    )
+    tolerance_price: Annotated[float, Field(
+        default=5.0,
+        ge=0,
+        le=100,
+        description="Price match tolerance percentage"
+    )]
+    tolerance_qty: Annotated[float, Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description="Quantity match tolerance percentage"
+    )]
+    
+    # Application
+    log_level: Annotated[str, Field(
+        default="INFO",
+        description="Logging level"
+    )]
+    debug: Annotated[bool, Field(
+        default=False,
+        description="Debug mode"
+    )]
 
-    # CORS
-    cors_origins: str = "*"
-
-    # Logging
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-
-    @field_validator("cors_origins")
-    @classmethod
-    def parse_cors_origins(cls, v: str) -> str:
-        """Parse CORS origins from string."""
-        if v == "*":
-            return "*"
-        return v
-
+    @computed_field
     @property
-    def cors_origins_list(self) -> list[str]:
-        """Get CORS origins as list."""
-        if self.cors_origins == "*":
-            return ["*"]
-        return [origin.strip() for origin in self.cors_origins.split(",")]
-
-    @property
-    def database_url_sync(self) -> str:
-        """Get synchronous database URL for Alembic."""
-        return self.database_url.replace("+asyncpg", "")
-
-    def get_decision_threshold(
-        self, decision: Literal["approve", "review", "exception"]
-    ) -> float:
-        """Get threshold value for a decision type."""
-        thresholds = {
-            "approve": self.threshold_high,
-            "review": self.threshold_mid,
-            "exception": self.threshold_low,
-        }
-        return thresholds[decision]
+    def effective_database_url(self) -> str:
+        """Return database URL, optionally via PGBouncer."""
+        if self.pgbouncer_host:
+            return self.database_url.replace(
+                "postgresql+asyncpg://",
+                f"postgresql+asyncpg://"
+            ).rsplit("@", 1)[0] + f"@{self.pgbouncer_host}:{self.pgbouncer_port}/"
+        return self.database_url
 
 
 @lru_cache
@@ -129,5 +109,5 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Global settings instance
+# Global settings instance for convenience
 settings = get_settings()

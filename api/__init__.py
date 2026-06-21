@@ -1,7 +1,16 @@
-// api/__init__.py
-"""API module for AP Automation Core Engine.
+# api/__init__.py
+"""API package for AP Automation Engine."""
 
-This module contains FastAPI routes, schemas, and API utilities.
-"""
+from api.schemas import (
+    BaseResponse,
+    PaginatedResponse,
+    ErrorResponse,
+    HealthCheckResponse,
+)
 
-__all__ = ["schemas"]
+__all__ = [
+    "BaseResponse",
+    "PaginatedResponse",
+    "ErrorResponse",
+    "HealthCheckResponse",
+]
