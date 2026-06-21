@@ -1,17 +1,17 @@
 # models/base.py
-"""SQLAlchemy declarative base and common mixins."""
+"""SQLAlchemy declarative base and mixins."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import DateTime, Func, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base for all models."""
+    """Base class for all SQLAlchemy models."""
 
     type_annotation_map = {
         uuid.UUID: UUID(as_uuid=True),
@@ -19,76 +19,65 @@ class Base(DeclarativeBase):
     }
 
 
-class TimestampMixin:
-    """Mixin to add created_at and updated_at timestamps."""
+class UUIDPrimaryKey:
+    """
+    Mixin that adds a UUID primary-key column called `id`.
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-
-class UUIDPrimaryKeyMixin:
-    """Mixin to add UUID primary key."""
+    Uses server-generated UUID v4 by default.
+    """
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        nullable=False,
+        sort_key=lambda: uuid.uuid4(),  # allows ORDER BY id in SQLite compat mode
     )
 
 
-class SoftDeleteMixin:
-    """Mixin to add soft delete functionality."""
+class Timestamps:
+    """
+    Mixin that adds `created_at` and `updated_at` datetime columns.
 
-    deleted_at: Mapped[datetime | None] = mapped_column(
+    - ``created_at`` is set once on insert.
+    - ``updated_at`` is refreshed on every insert and update via ``onupdate``.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        nullable=True,
-        default=None,
-    )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
         nullable=False,
+        server_default=Func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=Func.now(),
+        onupdate=lambda _: datetime.now(timezone=True),
     )
 
-    def soft_delete(self) -> None:
-        """Mark the record as deleted."""
-        self.is_deleted = True
-        self.deleted_at = datetime.now(timezone.utc)
 
-    def restore(self) -> None:
-        """Restore a soft-deleted record."""
-        self.is_deleted = False
-        self.deleted_at = None
+class AuditMixin:
+    """
+    Mixin that adds an `audit_json` column for storing mutable audit metadata.
 
+    Use cases: store who triggered a status change, raw ERP payload snippets, etc.
+    """
 
-class TenantMixin:
-    """Mixin to add tenant_id for multi-tenancy support."""
-
-    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+    audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        default=None,
         nullable=True,
-        index=True,
     )
 
 
-class CustomIndex(Index):
-    """Custom index with common configurations."""
+# ── Common indexes ─────────────────────────────────────────────────────────────
 
-    @classmethod
-    def for_search(cls, *columns: str, name: str | None = None) -> Index:
-        """Create an index optimized for search operations."""
-        return cls(name or f"ix_{'_'.join(columns)}", *columns)
+def _fk_index(table_name: str, column_name: str) -> Index:
+    """Return an Index for a foreign-key column."""
+    return Index(f"ix_{table_name}_{column_name}", column_name)
 
-    @classmethod
-    def for_foreign_key(cls, column: str, table: str) -> Index:
-        """Create an index for a foreign key column."""
-        return cls(f"ix_{table}_{column}", column)
+
+def make_indexes() -> list[Index]:
+    """
+    Return a list of commonly-needed indexes.
+    Add more specific composite indexes per-model as needed.
+    """
+    return []

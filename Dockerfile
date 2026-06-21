@@ -1,27 +1,41 @@
-# syntax=docker/dockerfile:1
-FROM python:3.11-slim as base
+# Dockerfile
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    openssl \
     libpq-dev \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy application
-COPY . .
+FROM base AS builder
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+COPY --chown=root:root pyproject.toml ./
+
+RUN pip install --no-cache-dir --prefix=/install -e .[dev]
+
+FROM base AS runtime
+
+COPY --chown=root:root --from=builder /install /usr/local
+
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home appuser
+
 USER appuser
 
-# Expose port
+COPY --chown=appuser:appuser --from=builder /app .
+
 EXPOSE 8000
 
-# Default command
-CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/usr/local/bin:${PATH}"
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]

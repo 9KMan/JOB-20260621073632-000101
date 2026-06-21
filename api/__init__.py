@@ -1,6 +1,6 @@
 # api/__init__.py
-"""API package initialization."""
+"""API module — routers and shared schemas."""
 
-from api.v1.router import api_router
+from api.schemas import PageParams
 
-__all__ = ["api_router"]
+__all__ = ["PageParams"]

@@ -1,10 +1,10 @@
 # core/config.py
-"""Application configuration using pydantic-settings."""
+"""Application configuration via pydantic-settings."""
 
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,132 +18,78 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application
-    app_name: str = Field(default="AP Automation Core", description="Application name")
-    app_version: str = Field(default="0.1.0", description="Application version")
-    debug: bool = Field(default=False, description="Enable debug mode")
-    log_level: str = Field(default="INFO", description="Logging level")
-    environment: str = Field(default="development", description="Environment name")
+    # ── Database ──────────────────────────────────────────────────────────────
+    database_url: Annotated[
+        PostgresDsn,
+        Field(
+            default="postgresql+asyncpg://apuser:apsecret@localhost:5432/apautomation",
+            description="Async PostgreSQL connection string",
+        ),
+    ]
+    database_pool_size: Annotated[int, Field(default=20, ge=1, le=100)]
+    database_max_overflow: Annotated[int, Field(default=10, ge=0, le=50)]
+    database_pool_timeout: Annotated[int, Field(default=30, ge=5)]
+    database_echo: Annotated[bool, Field(default=False)]
 
-    # API
-    api_v1_prefix: str = Field(default="/api/v1", description="API v1 prefix")
-    cors_origins: list[str] = Field(
-        default=["http://localhost:3000"],
-        description="CORS allowed origins",
-    )
+    # ── JWT / Auth ────────────────────────────────────────────────────────────
+    jwt_secret_key: Annotated[str, Field(min_length=32)]
+    jwt_algorithm: Annotated[str, Field(default="HS256")]
+    jwt_expire_minutes: Annotated[int, Field(default=30, ge=1)]
 
-    # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        description="Async PostgreSQL connection URL",
-    )
-    database_pool_size: int = Field(default=20, description="Connection pool size")
-    database_max_overflow: int = Field(default=10, description="Max pool overflow")
-    database_pool_timeout: int = Field(default=30, description="Pool timeout in seconds")
-    database_pool_recycle: int = Field(default=3600, description="Pool recycle in seconds")
-    database_echo: bool = Field(default=False, description="Echo SQL queries")
+    # ── CORS ──────────────────────────────────────────────────────────────────
+    cors_origins: Annotated[str, Field(default="*")]
 
-    # PGBouncer (optional fallback)
-    pgbouncer_host: str | None = Field(default=None, description="PGBouncer host")
-    pgbouncer_port: int = Field(default=5432, description="PGBouncer port")
+    # ── Matching Thresholds ─────────────────────────────────────────────────────
+    threshold_high: Annotated[int, Field(default=95, ge=0, le=100, description="Auto-approve score threshold")]
+    threshold_mid: Annotated[int, Field(default=75, ge=0, le=100, description="1-click review threshold")]
+    threshold_low: Annotated[int, Field(default=50, ge=0, le=100, description="Exception threshold")]
 
-    # Security
-    jwt_secret_key: str = Field(
-        default="changeme-in-production",
-        description="JWT secret key for HS256 signing",
-    )
-    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
-    jwt_access_token_expire_minutes: int = Field(
-        default=30, description="Access token expiry in minutes"
-    )
+    # ── Match Tolerance ─────────────────────────────────────────────────────────
+    tolerance_price: Annotated[float, Field(default=2.0, ge=0, description="Price match tolerance %")]
+    tolerance_qty: Annotated[float, Field(default=5.0, ge=0, description="Quantity match tolerance %")]
 
-    # Matching Thresholds (percentages 0-100)
-    threshold_high: int = Field(
-        default=95,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold",
-    )
-    threshold_mid: int = Field(
-        default=70,
-        ge=0,
-        le=100,
-        description="1-click review threshold",
-    )
-    threshold_low: int = Field(
-        default=40,
-        ge=0,
-        le=100,
-        description="Exception threshold",
-    )
+    # ── Logging ────────────────────────────────────────────────────────────────
+    log_level: Annotated[str, Field(default="INFO")]
 
-    # Tolerance Settings (percentages)
-    tolerance_price: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        description="Price tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        description="Quantity tolerance percentage",
-    )
-
-    # Learning Loop
-    learning_auto_promote_threshold: int = Field(
-        default=5,
-        ge=1,
-        description="Number of confirmed matches before auto-promotion",
-    )
-
-    @field_validator("log_level")
-    @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Validate log level is a valid Python logging level."""
-        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-        upper_v = v.upper()
-        if upper_v not in valid_levels:
-            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
-        return upper_v
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS origins from comma-separated string or list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+    # ── Derived helpers ────────────────────────────────────────────────────────
+    @property
+    def database_url_sync(self) -> str:
+        """Synchronous DB URL for Alembic migrations."""
+        return self.database_url.replace("postgresql+asyncpg", "postgresql")
 
     @property
-    def effective_database_url(self) -> str:
-        """Return the effective database URL, using PGBouncer if configured."""
-        if self.pgbouncer_host:
-            # Parse the original URL to construct PGBouncer URL
-            url = self.database_url
-            # Replace host/port with PGBouncer settings
-            return url.replace(
-                "postgresql+asyncpg://",
-                f"postgresql+asyncpg://",
-            ).rsplit("@", 1)[0] + f"@{self.pgbouncer_host}:{self.pgbouncer_port}/apautomation"
-        return self.database_url
+    def cors_origins_list(self) -> list[str]:
+        """Parse CORS_ORIGINS comma-separated string into a list."""
+        if self.cors_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
-    def get_matching_decision_thresholds(self) -> dict[str, int]:
-        """Return the matching decision thresholds as a dictionary."""
-        return {
-            "auto_approve": self.threshold_high,
-            "review": self.threshold_mid,
-            "exception": self.threshold_low,
-        }
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> "Settings":
+        """Ensure thresholds are ordered: high >= mid >= low."""
+        if not (self.threshold_low <= self.threshold_mid <= self.threshold_high):
+            raise ValueError("threshold_low must be <= threshold_mid <= threshold_high")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self) -> "Settings":
+        """Warn if JWT secret looks like a default/placeholder in non-test envs."""
+        weak_secrets = {"change-me", "changeme", "secret", "your-secret", "change-me-in-production"}
+        if self.jwt_secret_key.lower() in weak_secrets:
+            import warnings
+            warnings.warn(
+                "JWT_SECRET_KEY appears weak. Set a strong random value in production.",
+                UserWarning,
+                stacklevel=1,
+            )
+        return self
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Return a singleton cached Settings instance."""
     return Settings()
 
 
-# Convenience alias
+# Global singleton
 settings = get_settings()
-SettingsDep = Annotated[Settings, None]

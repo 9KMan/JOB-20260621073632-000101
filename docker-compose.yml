@@ -1,62 +1,98 @@
-version: '3.8'
+# docker-compose.yml
+version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apsecret}
+      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ap_network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-apsecret}@postgres:5432/${POSTGRES_DB:-apautomation}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      RESERVE_POOL_SIZE: "5"
+      RESERVE_POOL_TIMEOUT: "3"
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap_network
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: ap_api
+    restart: unless-stopped
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn core.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-apsecret}@pgbouncer:5432/${POSTGRES_DB:-apautomation}?prepared_statement_cache_size=500"
+      DATABASE_POOL_SIZE: "20"
+      DATABASE_MAX_OVERFLOW: "10"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-$(openssl rand -hex 32)}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: "30"
+      THRESHOLD_HIGH: "95"
+      THRESHOLD_MID: "75"
+      THRESHOLD_LOW: "50"
+      TOLERANCE_PRICE: "2"
+      TOLERANCE_QTY: "5"
+      CORS_ORIGINS: "*"
+      LOG_LEVEL: "INFO"
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://finaro:finaro_secret@db:5432/finaro
-      - REDIS_URL=redis://cache:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+    volumes:
+      - ./:/app
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
-      cache:
-        condition: service_started
-    volumes:
-      - ./src:/app/src
-    command: uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  db:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=finaro
-      - POSTGRES_PASSWORD=finaro_secret
-      - POSTGRES_DB=finaro
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  cache:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-  migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - DATABASE_URL=postgresql+psycopg2://finaro:finaro_secret@db:5432/finaro
-    depends_on:
-      db:
-        condition: service_healthy
-    command: alembic upgrade head
-    restart: "no"
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - ap_network
 
 volumes:
   postgres_data:
-  redis_data:
+    driver: local
+
+networks:
+  ap_network:
+    driver: bridge

@@ -1,58 +1,50 @@
 # models/__init__.py
-"""Models package - SQLAlchemy ORM models."""
+"""SQLAlchemy ORM models — exported from this package."""
 
-from models.base import Base
-from models.balance_ledger import BalanceLedger
-from models.cross_ref import CrossRef
-from models.delivery_note import DeliveryNote
+from models.base import Base, UUIDPrimaryKey
+from models.balance_ledger import BalanceLedger, BalanceLedgerLine
+from models.cross_ref import CrossRef, CrossRefLine
+from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.enums import (
-    DecisionStatus,
-    DocumentStatus,
+    ApprovalDecision,
     ExceptionReason,
+    ExceptionStatus,
     InvoiceStatus,
-    LineStatus,
-    MatchDecision,
-    MatchScoreLevel,
+    LineMatchStatus,
+    MatchConfidence,
+    MatchStatus,
     PurchaseOrderStatus,
 )
-from models.invoice import Invoice
-from models.purchase_order import PurchaseOrder
+from models.invoice import Invoice, InvoiceLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 
 __all__ = [
     # Base
     "Base",
+    "UUIDPrimaryKey",
     # Enums
-    "DocumentStatus",
     "InvoiceStatus",
     "PurchaseOrderStatus",
-    "LineStatus",
-    "MatchDecision",
-    "MatchScoreLevel",
-    "DecisionStatus",
+    "DeliveryNoteStatus",
+    "MatchStatus",
+    "LineMatchStatus",
+    "ApprovalDecision",
+    "MatchConfidence",
+    "ExceptionStatus",
     "ExceptionReason",
-    # Models
+    # Invoice
     "Invoice",
+    "InvoiceLine",
+    # PurchaseOrder
     "PurchaseOrder",
+    "PurchaseOrderLine",
+    # DeliveryNote
     "DeliveryNote",
+    "DeliveryNoteLine",
+    # BalanceLedger
     "BalanceLedger",
+    "BalanceLedgerLine",
+    # CrossRef
     "CrossRef",
+    "CrossRefLine",
 ]
-
-
-def register_models() -> None:
-    """Import all models to ensure they are registered with Base."""
-    from models import (
-        balance_ledger,
-        cross_ref,
-        delivery_note,
-        invoice,
-        purchase_order,
-    )
-    # Models are imported to trigger SQLAlchemy model registration
-    _ = (
-        balance_ledger,
-        cross_ref,
-        delivery_note,
-        invoice,
-        purchase_order,
-    )

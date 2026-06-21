@@ -1,59 +1,72 @@
 # models/balance_ledger.py
-"""Balance Ledger model definition for tracking PO/Invoice balances."""
+"""BalanceLedger and BalanceLedgerLine models — per-PO-line quantity/amount balances."""
 
 import uuid
-from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    ForeignKey,
     Index,
     Numeric,
-    String,
-    ForeignKey,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-
-if TYPE_CHECKING:
-    from models.invoice import Invoice, InvoiceLine
-    from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-    from models.delivery_note import DeliveryNote, DeliveryNoteLine
+from models.base import Base, Timestamps, UUIDPrimaryKey
 
 
-class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class BalanceLedger(Base, UUIDPrimaryKey, Timestamps):
     """
-    Balance Ledger for tracking PO line balances.
-
-    This table maintains a running balance of quantities for each PO line,
-    tracking how much has been delivered, invoiced, and received.
-
-    Attributes:
-        id: UUID primary key
-        po_id: Reference to parent PO
-        po_line_id: Reference to specific PO line
-        transaction_type: Type of transaction (delivery, invoice, adjustment)
-        document_type: Type of document (DN, Invoice, Manual)
-        document_id: Reference to the document
-        document_line_id: Reference to the specific line
-        quantity_before: Quantity before this transaction
-        quantity_change: Quantity change from this transaction
-        quantity_after: Quantity after this transaction
-        amount_before: Amount before this transaction
-        amount_change: Amount change from this transaction
-        amount_after: Amount after this transaction
-        notes: Transaction notes
-        metadata: Additional flexible fields
+    Balance ledger at the PO level.
+    Mirrors the total open balance across all lines of one PO.
     """
 
-    __tablename__ = "balance_ledger"
+    __tablename__ = "balance_ledgers"
 
-    # References
     po_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    currency: Mapped[str] = mapped_column(default="USD", nullable=False)
+    total_open_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────────────────────────
+    po: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="balance_ledger",
+    )
+    lines: Mapped[list["BalanceLedgerLine"]] = relationship(
+        "BalanceLedgerLine",
+        back_populates="ledger",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("po_id", name="uq_balance_ledger_po_id"),
+    )
+
+
+class BalanceLedgerLine(Base, UUIDPrimaryKey, Timestamps):
+    """
+    Balance ledger at the PO-line level.
+    One record per PO line, tracking open qty and amount.
+    """
+
+    __tablename__ = "balance_ledger_lines"
+
+    ledger_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("balance_ledgers.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -61,127 +74,52 @@ class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
+        unique=True,
         index=True,
     )
 
-    # Transaction details
-    transaction_type: Mapped[str] = mapped_column(
-        String(50),
+    # ── Quantities ──────────────────────────────────────────────────────────
+    qty_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    qty_delivered: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.0000"),
+    )
+    qty_invoiced: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0.0000"),
+    )
+    qty_pending: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        index=True,
-    )
-    document_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-        index=True,
-    )
-    document_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-        index=True,
-    )
+    )  # remaining undelivered + uninvoiced
 
-    # Quantity balance
-    quantity_before: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
+    # ── Amounts ──────────────────────────────────────────────────────────────
+    amount_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    amount_delivered: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         default=Decimal("0.00"),
     )
-    quantity_change: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-    )
-    quantity_after: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-    )
-
-    # Amount balance
-    amount_before: Mapped[Decimal] = mapped_column(
+    amount_invoiced: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
     )
-    amount_change: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    amount_after: Mapped[Decimal] = mapped_column(
+    amount_pending: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
 
-    # Reference numbers
-    reference_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-
-    # Notes
-    notes: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-
-    # Metadata
-    metadata: Mapped[dict | None] = mapped_column(
-        JSONB,
-        nullable=True,
-    )
-
-    # Tenant
-    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-        index=True,
-    )
-
-    # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        back_populates="balance_entries",
-    )
+    # ── Relationships ────────────────────────────────────────────────────────
+    ledger: Mapped["BalanceLedger"] = relationship("BalanceLedger", back_populates="lines")
     po_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
-        back_populates="balance_entries",
+        back_populates="balance_line",
     )
 
     __table_args__ = (
-        Index("ix_balance_ledger_po_line", "po_line_id"),
-        Index("ix_balance_ledger_document", "document_type", "document_id"),
-        Index("ix_balance_ledger_tenant", "tenant_id", "po_id"),
+        UniqueConstraint("po_line_id", name="uq_balance_ledger_line_po_line_id"),
+        Index("ix_balance_ledger_lines_po_line_id", "po_line_id"),
     )
 
-    def __repr__(self) -> str:
-        return (
-            f"<BalanceLedger {self.transaction_type} "
-            f"{self.po_line_id}: {self.quantity_change}>"
-        )
 
-    @classmethod
-    def transaction_types(cls) -> dict[str, str]:
-        """Return valid transaction types."""
-        return {
-            "DELIVERY": "delivery",
-            "INVOICE": "invoice",
-            "ADJUSTMENT": "adjustment",
-            "CREDIT": "credit",
-            "RETURN": "return",
-            "REVERSAL": "reversal",
-        }
-
-    @classmethod
-    def document_types(cls) -> dict[str, str]:
-        """Return valid document types."""
-        return {
-            "PURCHASE_ORDER": "purchase_order",
-            "DELIVERY_NOTE": "delivery_note",
-            "INVOICE": "invoice",
-            "CREDIT_NOTE": "credit_note",
-            "MANUAL": "manual",
-        }
+# ── Forward reference resolution ──────────────────────────────────────────────
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine  # noqa: E402, F401
