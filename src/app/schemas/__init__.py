@@ -1,23 +1,19 @@
 // src/app/schemas/__init__.py
-"""Pydantic schemas initialization."""
-from app.schemas.auth import (
-    TokenSchema,
-    TokenPayload,
+"""Pydantic schemas for API request/response validation."""
+from app.schemas.user import (
     UserCreate,
     UserUpdate,
     UserResponse,
-    LoginRequest,
-)
-from app.schemas.supplier import (
-    SupplierCreate,
-    SupplierUpdate,
-    SupplierResponse,
+    UserLogin,
+    Token,
+    TokenData,
 )
 from app.schemas.purchase_order import (
     PurchaseOrderCreate,
     PurchaseOrderUpdate,
     PurchaseOrderResponse,
     PurchaseOrderLineCreate,
+    PurchaseOrderLineUpdate,
     PurchaseOrderLineResponse,
 )
 from app.schemas.invoice import (
@@ -25,6 +21,7 @@ from app.schemas.invoice import (
     InvoiceUpdate,
     InvoiceResponse,
     InvoiceLineCreate,
+    InvoiceLineUpdate,
     InvoiceLineResponse,
 )
 from app.schemas.delivery_note import (
@@ -32,70 +29,53 @@ from app.schemas.delivery_note import (
     DeliveryNoteUpdate,
     DeliveryNoteResponse,
     DeliveryNoteLineCreate,
+    DeliveryNoteLineUpdate,
     DeliveryNoteLineResponse,
 )
 from app.schemas.match import (
-    MatchResultCreate,
-    MatchResultResponse,
-    MatchResultUpdate,
-    MatchConfirmationRequest,
-    MatchSearchParams,
-)
-from app.schemas.balance import (
-    BalanceLedgerCreate,
-    BalanceLedgerResponse,
-    BalanceLedgerUpdate,
-)
-from app.schemas.common import (
-    PaginatedResponse,
-    SearchParams,
-    MessageResponse,
-    ErrorResponse,
+    MatchCreate,
+    MatchUpdate,
+    MatchResponse,
+    MatchLineCreate,
+    MatchLineResponse,
+    MatchDecisionUpdate,
+    MatchScoreSummary,
+    ThreeWayMatchRequest,
+    ThreeWayMatchResponse,
 )
 
 __all__ = [
-    # Auth
-    "TokenSchema",
-    "TokenPayload",
     "UserCreate",
     "UserUpdate",
     "UserResponse",
-    "LoginRequest",
-    # Supplier
-    "SupplierCreate",
-    "SupplierUpdate",
-    "SupplierResponse",
-    # Purchase Order
+    "UserLogin",
+    "Token",
+    "TokenData",
     "PurchaseOrderCreate",
     "PurchaseOrderUpdate",
     "PurchaseOrderResponse",
     "PurchaseOrderLineCreate",
+    "PurchaseOrderLineUpdate",
     "PurchaseOrderLineResponse",
-    # Invoice
     "InvoiceCreate",
     "InvoiceUpdate",
     "InvoiceResponse",
     "InvoiceLineCreate",
+    "InvoiceLineUpdate",
     "InvoiceLineResponse",
-    # Delivery Note
     "DeliveryNoteCreate",
     "DeliveryNoteUpdate",
     "DeliveryNoteResponse",
     "DeliveryNoteLineCreate",
+    "DeliveryNoteLineUpdate",
     "DeliveryNoteLineResponse",
-    # Match
-    "MatchResultCreate",
-    "MatchResultResponse",
-    "MatchResultUpdate",
-    "MatchConfirmationRequest",
-    "MatchSearchParams",
-    # Balance
-    "BalanceLedgerCreate",
-    "BalanceLedgerResponse",
-    "BalanceLedgerUpdate",
-    # Common
-    "PaginatedResponse",
-    "SearchParams",
-    "MessageResponse",
-    "ErrorResponse",
+    "MatchCreate",
+    "MatchUpdate",
+    "MatchResponse",
+    "MatchLineCreate",
+    "MatchLineResponse",
+    "MatchDecisionUpdate",
+    "MatchScoreSummary",
+    "ThreeWayMatchRequest",
+    "ThreeWayMatchResponse",
 ]

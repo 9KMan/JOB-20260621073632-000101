@@ -1,52 +1,46 @@
 // src/app/models/base.py
-"""
-Base model classes and mixins.
-"""
+"""Base model with common fields."""
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Column, DateTime, text
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
-
-
-class UUIDPrimaryKey:
-    """Mixin for UUID primary key."""
-
-    id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        index=True,
-    )
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
+    """Mixin to add created_at and updated_at timestamps."""
 
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        index=True,
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        onupdate=datetime.utcnow,
+    )
+
+
+class UUIDMixin:
+    """Mixin to add UUID primary key."""
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
 
 
 class SoftDeleteMixin:
     """Mixin for soft delete functionality."""
 
-    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
-    is_deleted = Column(
-        text("boolean").default("false"),
-        nullable=False,
-        server_default=text("false"),
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
     )
+    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)

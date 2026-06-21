@@ -1,28 +1,23 @@
 // src/app/models/__init__.py
-"""Database models initialization."""
-from app.models.base import Base, UUIDPrimaryKey, TimestampMixin
+"""Database models."""
+from app.models.base import TimestampMixin
 from app.models.user import User
-from app.models.supplier import Supplier
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.models.invoice import Invoice, InvoiceLine
 from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.models.match import MatchResult, MatchDecision
-from app.models.balance import BalanceLedger, BalanceType
+from app.models.match import Match, MatchLine, BalanceLedger, MatchDecision
 
 __all__ = [
-    "Base",
-    "UUIDPrimaryKey",
     "TimestampMixin",
     "User",
-    "Supplier",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "Invoice",
     "InvoiceLine",
     "DeliveryNote",
     "DeliveryNoteLine",
-    "MatchResult",
-    "MatchDecision",
+    "Match",
+    "MatchLine",
     "BalanceLedger",
-    "BalanceType",
+    "MatchDecision",
 ]
