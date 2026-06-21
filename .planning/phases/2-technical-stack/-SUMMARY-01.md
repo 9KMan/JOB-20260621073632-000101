@@ -2,18 +2,29 @@
 
 ## Overview
 **Plan:** 
-**Completed:** 2026-06-21T13:46:55Z
-**Duration:** 0.0 min
+**Completed:** 2026-06-21T14:05:56Z
+**Duration:** 9.5 min
 **Model:** MiniMax-M2.7-highspeed
-**Commit:** 8c0205f0
+**Commit:** f76171ea
 
 ## Execution
-- Files created: 2
+- Files created: 13
 - Status: COMPLETE
 
 ## Files Created
-- migrations/env.py
-- migrations/script.py.mako
+- services/anchoring.py
+- services/balances.py
+- services/cascade.py
+- services/learning.py
+- services/scoring.py
+- tests/integration/__init__.py
+- tests/integration/test_matching_flow.py
+- tests/unit/__init__.py
+- tests/unit/test_anchoring.py
+- tests/unit/test_balances.py
+- tests/unit/test_cascade.py
+- tests/unit/test_scoring.py
+- workers/__init__.py
 
 ## Done Criteria (verified)
 - All plan criteria met
@@ -25,12 +36,13 @@ All code written and committed. Syntax checks passed.
 None — plan executed exactly as written.
 
 ## Key Decisions
-```file:migrations/env.py
-# Auto-generated: migrations/env.py
+```file:services/anchoring.py
+python
+// services/anchoring.py
+"""Layer 1 of the matching cascade: PO anchoring.
 
-```
-```file:migrations/script.py.mako
-# Auto-generated: migrations/script.py.mako
+Given an invoice, anchoring identifies which purchase order the invoice belongs
+to. Strategies, in priority order:
 
 ## Next
 Ready for next plan in this phase.
