@@ -1,12 +1,13 @@
 # Phase 2 — Technical Stack
+
 ## AP Automation Core Engine — FinaRo
 
 ---
 
 ## 1. Phase Overview
 
-**Phase:** 2 of N
-**Subject:** Technical Stack
+**Phase:** 2 of N  
+**Subject:** Technical Stack  
 **Goal:** Define the technology choices, project structure, and implementation patterns that will guide all subsequent phases.
 
 ---

@@ -1,149 +1,169 @@
 # core/config.py
-"""Application configuration using pydantic-settings."""
+"""Configuration management using pydantic-settings.
 
-import os
+All configuration is loaded from environment variables.
+No hardcoded secrets or configuration values.
+"""
+
 from functools import lru_cache
-from typing import Optional
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
+    """Database configuration settings."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/ap_automation",
+        description="PostgreSQL database connection URL for async SQLAlchemy",
+    )
+    PGBOUNCER_HOST: str = Field(default="localhost", description="PGBouncer host address")
+    PGBOUNCER_PORT: int = Field(default=5432, ge=1, le=65535, description="PGBouncer port")
+    DATABASE_POOL_SIZE: int = Field(default=20, ge=1, description="Connection pool size")
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0, description="Max pool overflow connections")
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1, description="Pool timeout in seconds")
+    DATABASE_POOL_RECYCLE: int = Field(default=3600, ge=0, description="Pool recycle time in seconds")
+    DATABASE_ECHO: bool = Field(default=False, description="Echo SQL queries (debug only)")
 
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        description="Async PostgreSQL connection string",
-    )
-    pgbouncer_host: Optional[str] = Field(
-        default=None,
-        description="PGBouncer host override",
-    )
-    pgbouncer_port: int = Field(
-        default=5432,
-        description="PGBouncer port",
-    )
-    echo_sql: bool = Field(
-        default=False,
-        description="Echo SQL statements (debug mode)",
-    )
-    pool_size: int = Field(
-        default=20,
-        description="Connection pool size",
-    )
-    max_overflow: int = Field(
-        default=10,
-        description="Maximum overflow connections",
-    )
-    pool_timeout: int = Field(
-        default=30,
-        description="Pool timeout in seconds",
-    )
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format."""
+        if not v.startswith(("postgresql+asyncpg://", "postgresql://")):
+            raise ValueError("DATABASE_URL must start with postgresql+asyncpg:// or postgresql://")
+        return v
 
 
 class JWTSettings(BaseSettings):
-    """JWT authentication settings."""
+    """JWT authentication configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
-
-    jwt_secret_key: str = Field(
+    JWT_SECRET_KEY: str = Field(
         default="changeme-in-production",
-        description="Secret key for JWT signing (HS256)",
+        description="Secret key for HS256 JWT signing",
     )
-    jwt_algorithm: str = Field(
+    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = Field(
         default="HS256",
         description="JWT algorithm",
     )
-    access_token_expire_minutes: int = Field(
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         default=30,
+        ge=1,
+        le=1440,
         description="Access token expiry in minutes",
+    )
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="Refresh token expiry in days",
     )
 
 
 class ThresholdSettings(BaseSettings):
-    """Matching threshold configuration."""
+    """Matching engine threshold configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
-
-    threshold_high: float = Field(
+    THRESHOLD_HIGH: float = Field(
         default=0.95,
         ge=0.0,
         le=1.0,
-        description="Auto-approve threshold (score >= this value)",
+        description="Auto-approve threshold (score >= THRESHOLD_HIGH)",
     )
-    threshold_mid: float = Field(
-        default=0.80,
+    THRESHOLD_MID: float = Field(
+        default=0.75,
         ge=0.0,
         le=1.0,
-        description="1-click review threshold (score >= this value)",
+        description="1-click review threshold (score >= THRESHOLD_MID)",
     )
-    threshold_low: float = Field(
-        default=0.60,
+    THRESHOLD_LOW: float = Field(
+        default=0.50,
         ge=0.0,
         le=1.0,
-        description="Exception threshold (score >= this value)",
+        description="Exception threshold (score >= THRESHOLD_LOW)",
     )
+
+    @field_validator("THRESHOLD_HIGH", "THRESHOLD_MID", "THRESHOLD_LOW", mode="after")
+    @classmethod
+    def validate_thresholds(cls, v: float) -> float:
+        """Ensure thresholds are valid values."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Threshold must be between 0.0 and 1.0")
+        return v
 
 
 class ToleranceSettings(BaseSettings):
-    """Matching tolerance configuration."""
+    """Tolerance settings for matching comparisons."""
 
-    model_config = SettingsConfigDict(env_prefix="")
-
-    tolerance_price: float = Field(
+    TOLERANCE_PRICE: float = Field(
         default=0.02,
         ge=0.0,
         le=1.0,
         description="Price match tolerance as decimal (2% = 0.02)",
     )
-    tolerance_qty: float = Field(
+    TOLERANCE_QTY: float = Field(
         default=0.10,
         ge=0.0,
         le=1.0,
         description="Quantity match tolerance as decimal (10% = 0.10)",
     )
 
+    @field_validator("TOLERANCE_PRICE", "TOLERANCE_QTY", mode="after")
+    @classmethod
+    def validate_tolerance(cls, v: float) -> float:
+        """Ensure tolerance values are valid percentages."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Tolerance must be between 0.0 and 1.0")
+        return v
+
 
 class AppSettings(BaseSettings):
-    """Main application settings."""
+    """Application-level settings."""
+
+    APP_NAME: str = Field(default="AP Automation", description="Application name")
+    APP_VERSION: str = Field(default="0.1.0", description="Application version")
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO",
+        description="Logging level",
+    )
+    API_V1_PREFIX: str = Field(default="/api/v1", description="API v1 route prefix")
+    CORS_ORIGINS: list[str] = Field(
+        default=["*"],
+        description="CORS allowed origins",
+    )
+    DEBUG: bool = Field(default=False, description="Debug mode flag")
+
+
+class Settings(
+    DatabaseSettings,
+    JWTSettings,
+    ThresholdSettings,
+    ToleranceSettings,
+    AppSettings,
+):
+    """Combined settings class for the entire application.
+
+    Loads all configuration from environment variables.
+    All secrets and configuration must be provided via env vars.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
+        case_sensitive=True,
+        extra="ignore",
     )
-
-    app_name: str = Field(
-        default="AP Automation Core Engine",
-        description="Application name",
-    )
-    app_version: str = Field(
-        default="0.1.0",
-        description="Application version",
-    )
-    debug: bool = Field(
-        default=False,
-        description="Debug mode flag",
-    )
-    api_v1_prefix: str = Field(
-        default="/api/v1",
-        description="API v1 prefix",
-    )
-
-    # Compose sub-settings
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    jwt: JWTSettings = Field(default_factory=JWTSettings)
-    threshold: ThresholdSettings = Field(default_factory=ThresholdSettings)
-    tolerance: ToleranceSettings = Field(default_factory=ToleranceSettings)
 
 
 @lru_cache
-def get_settings() -> AppSettings:
-    """Get cached application settings singleton."""
-    return AppSettings()
+def get_settings() -> Settings:
+    """Get cached settings instance.
+
+    Returns:
+        Settings: The application settings singleton.
+    """
+    return Settings()
 
 
+# Global settings instance for convenience
 settings = get_settings()

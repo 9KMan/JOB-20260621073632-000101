@@ -1,6 +1,18 @@
 # core/__init__.py
-"""Core module initialization."""
-from core.config import get_settings
-from core.database import AsyncSessionLocal, get_db
+"""Core module for AP Automation Engine.
 
-__all__ = ["get_settings", "AsyncSessionLocal", "get_db"]
+This module contains the foundational components:
+- Configuration management
+- Database session handling
+- Security utilities (JWT, password hashing)
+"""
+
+from core.config import settings
+from core.database import get_db_session, engine, async_session_factory
+
+__all__ = [
+    "settings",
+    "get_db_session",
+    "engine",
+    "async_session_factory",
+]

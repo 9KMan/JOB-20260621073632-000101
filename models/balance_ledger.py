@@ -1,94 +1,117 @@
 # models/balance_ledger.py
-"""BalanceLedger SQLAlchemy model for tracking PO line balances."""
-import uuid
-from decimal import Decimal
+"""Balance Ledger SQLAlchemy model.
 
-from sqlalchemy import ForeignKey, Index, Numeric, UniqueConstraint
+Tracks the running balance for each PO line, including invoices, deliveries,
+and payments. Provides audit trail for AP reconciliation.
+"""
+
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.base import Base
+from models.enums import BalanceTransactionType
+
+if TYPE_CHECKING:
+    from models.invoice import Invoice, InvoiceLine
+    from models.purchase_order import POLine, PurchaseOrder
 
 
-class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Balance ledger tracking for PO lines."""
+class BalanceLedger(Base):
+    """Balance Ledger model.
+
+    Records all transactions affecting the balance for each PO line.
+    Includes invoices, deliveries, credit notes, payments, and adjustments.
+    """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        UniqueConstraint("po_line_id", name="uq_balance_ledger_po_line"),
         Index("ix_balance_ledger_po_id", "po_id"),
         Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_invoice_id", "invoice_id"),
+        Index("ix_balance_ledger_transaction_type", "transaction_type"),
+        Index("ix_balance_ledger_transaction_date", "transaction_date"),
+        Index("ix_balance_ledger_created_at", "created_at"),
+        {"schema": None},
     )
 
-    po_id: Mapped[uuid.UUID] = mapped_column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    po_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
     )
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
+    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    transaction_type: Mapped[BalanceTransactionType] = mapped_column(
+        String(30),
         nullable=False,
-        unique=True,
     )
-
-    # Quantities
-    quantity_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    quantity_received: Mapped[Decimal] = mapped_column(Numeric(15, 4), default=Decimal("0.00"), nullable=False)
-    quantity_invoiced: Mapped[Decimal] = mapped_column(Numeric(15, 4), default=Decimal("0.00"), nullable=False)
-    quantity_to_receive: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    quantity_to_invoice: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-
-    # Amounts
-    amount_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    amount_received: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    amount_invoiced: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    amount_to_receive: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    amount_to_invoice: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-
-    # Last activity tracking
-    last_receipt_date: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    running_quantity: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    running_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
     )
-    last_invoice_date: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        back_populates="balance_ledger",
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="balance_ledger_entries",
+    )
+    po_line: Mapped["POLine"] = relationship(
+        "POLine",
+        back_populates="balance_ledger_entries",
+    )
+    invoice: Mapped["Invoice"] = relationship(
+        "Invoice",
+        back_populates="balance_ledger_entries",
     )
 
     def __repr__(self) -> str:
-        return f"<BalanceLedger po_line={self.po_line_id} to_receive={self.quantity_to_receive}>"
-
-    @property
-    def quantity_variance(self) -> Decimal:
-        """Calculate quantity variance (received - invoiced)."""
-        return self.quantity_received - self.quantity_invoiced
-
-    @property
-    def amount_variance(self) -> Decimal:
-        """Calculate amount variance (received - invoiced)."""
-        return self.amount_received - self.amount_invoiced
-
-    @property
-    def is_fully_received(self) -> bool:
-        """Check if all ordered quantity has been received."""
-        return self.quantity_to_receive == Decimal("0.00")
-
-    @property
-    def is_fully_invoiced(self) -> bool:
-        """Check if all received quantity has been invoiced."""
-        return self.quantity_to_invoice == Decimal("0.00")
-
-    @property
-    def is_balanced(self) -> bool:
-        """Check if the ledger is balanced."""
-        return (
-            self.quantity_received == self.quantity_invoiced
-            and self.amount_received == self.amount_invoiced
-        )
+        return f"<BalanceLedger {self.transaction_type}: {self.amount}>"

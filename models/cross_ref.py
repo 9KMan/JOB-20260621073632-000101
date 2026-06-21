@@ -1,144 +1,157 @@
 # models/cross_ref.py
-"""Cross Reference (Learning Loop) SQLAlchemy model."""
+"""Cross Reference SQLAlchemy model.
 
-from datetime import datetime
+Stores learned associations between invoices, POs, and delivery notes.
+Implements the learning loop for the matching engine.
+"""
+
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    Date,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
+    Text,
+    func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
+from models.base import Base
+from models.enums import CrossRefStatus
 
 if TYPE_CHECKING:
     from models.invoice import Invoice, InvoiceLine
-    from models.purchase_order import POLine
 
 
-class CrossRef(Base, UUIDMixin, TimestampMixin):
-    """Cross Reference model for learning/promotion logic.
+class CrossRef(Base):
+    """Cross Reference model for learning loop.
 
-    Tracks confirmed matches between PO lines and Invoice lines
-    to improve future matching accuracy.
+    Records confirmed matches between entities to improve future matching.
+    Tracks learned associations and promotes reliable patterns.
     """
 
     __tablename__ = "cross_ref"
-
-    po_line_id: Mapped[UUID] = mapped_column(
-        PG_UUID,
-        ForeignKey("po_lines.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+    __table_args__ = (
+        Index("ix_cross_ref_invoice_id", "invoice_id"),
+        Index("ix_cross_ref_po_id", "po_id"),
+        Index("ix_cross_ref_dn_id", "dn_id"),
+        Index("ix_cross_ref_status", "status"),
+        Index("ix_cross_ref_confirmed_count", "confirmed_count"),
+        Index("ix_cross_ref_last_confirmed", "last_confirmed_at"),
+        {"schema": None},
     )
-    invoice_id: Mapped[UUID] = mapped_column(
-        PG_UUID,
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    invoice_line_id: Mapped[UUID] = mapped_column(
-        PG_UUID,
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("invoice_lines.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    # Matching characteristics
-    vendor_id: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        index=True,
-    )
-    part_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    description_similarity: Mapped[float] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-        default=0.0,
-    )
-    quantity_match: Mapped[float] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-        default=0.0,
-    )
-    price_match: Mapped[float] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-        default=0.0,
-    )
-    overall_score: Mapped[float] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-        default=0.0,
-    )
-    # Confirmation data
-    confirmed: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
         nullable=True,
     )
-    confirmed_by: Mapped[UUID | None] = mapped_column(
-        PG_UUID,
+    po_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=True,
     )
-    # Learning data
-    confirmation_count: Mapped[int] = mapped_column(
+    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    dn_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    status: Mapped[CrossRefStatus] = mapped_column(
+        String(30),
+        default=CrossRefStatus.PENDING,
+        nullable=False,
+    )
+    match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    match_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    confirmed_count: Mapped[int] = mapped_column(
         Integer,
-        nullable=False,
         default=0,
+        nullable=False,
     )
-    rejection_count: Mapped[int] = mapped_column(
+    rejected_count: Mapped[int] = mapped_column(
         Integer,
-        nullable=False,
         default=0,
-    )
-    # Promotion status
-    promoted: Mapped[bool] = mapped_column(
-        Boolean,
         nullable=False,
-        default=False,
     )
-    promotion_score: Mapped[float] = mapped_column(
+    reliability_score: Mapped[Decimal] = mapped_column(
         Numeric(5, 4),
+        default=Decimal("0.0000"),
         nullable=False,
-        default=0.0,
     )
-    promotion_level: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-    )
-    metadata: Mapped[dict | None] = mapped_column(
-        JSONB,
+    first_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
+    )
+    last_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    match_metadata: Mapped[dict | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_auto_promoted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     # Relationships
-    po_line: Mapped["POLine"] = relationship(
-        "POLine",
-        back_populates="cross_refs",
-    )
     invoice: Mapped["Invoice"] = relationship(
         "Invoice",
         back_populates="cross_refs",
     )
 
-    __table_args__ = (
-        Index("ix_cross_ref_vendor_part", "vendor_id", "part_number"),
-        Index("ix_cross_ref_promoted", "promoted", "promotion_level"),
-        Index("ix_cross_ref_confirmed", "confirmed", "confirmation_count"),
-    )
+    def __repr__(self) -> str:
+        return f"<CrossRef {self.id}: score={self.match_score}, status={self.status}>"
+
+    @property
+    def is_promoted(self) -> bool:
+        """Check if this cross-reference has been promoted."""
+        return self.status == CrossRefStatus.PROMOTED
+
+    @property
+    def promotion_eligible(self) -> bool:
+        """Check if this cross-reference is eligible for promotion."""
+        return (
+            self.confirmed_count >= 3
+            and self.reliability_score >= Decimal("0.80")
+            and self.status == CrossRefStatus.LEARNED
+        )
