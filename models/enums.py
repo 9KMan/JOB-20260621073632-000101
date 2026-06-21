@@ -1,112 +1,80 @@
-// models/enums.py
-"""Enumerations for status fields and decision types."""
+# models/enums.py
+"""Enumeration types for the AP Automation Engine."""
 
 from enum import Enum
 
 
-class InvoiceStatus(str, Enum):
-    """Status values for invoices."""
+class DocumentStatus(str, Enum):
+    """Status values for documents (Invoice, PO, Delivery Note)."""
 
     DRAFT = "draft"
     PENDING = "pending"
-    MATCHING = "matching"
     MATCHED = "matched"
+    PARTIALLY_MATCHED = "partially_matched"
+    EXCEPTION = "exception"
     APPROVED = "approved"
-    EXCEPTION = "exception"
     REJECTED = "rejected"
-    PAID = "paid"
     CANCELLED = "cancelled"
-
-
-class PurchaseOrderStatus(str, Enum):
-    """Status values for purchase orders."""
-
-    DRAFT = "draft"
-    SENT = "sent"
-    CONFIRMED = "confirmed"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-
-class DeliveryNoteStatus(str, Enum):
-    """Status values for delivery notes."""
-
-    DRAFT = "draft"
-    ISSUED = "issued"
-    RECEIVED = "received"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
-
-
-class MatchDecision(str, Enum):
-    """Match decision outcomes from the matching engine."""
-
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_REVIEW = "one_click_review"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
-    NO_MATCH = "no_match"
-    PENDING = "pending"
+    ARCHIVED = "archived"
 
 
 class MatchStatus(str, Enum):
-    """Status values for match records."""
+    """Status values for matching operations."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    DISMISSED = "dismissed"
-    SUPERSEDED = "superseded"
+    MATCHED = "matched"
+    PARTIALLY_MATCHED = "partially_matched"
+    NO_MATCH = "no_match"
+    EXCEPTION = "exception"
+    CANCELLED = "cancelled"
 
 
-class ExceptionType(str, Enum):
-    """Types of exceptions in the matching process."""
+class DecisionType(str, Enum):
+    """Decision types from the matching engine."""
 
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY_NOTE = "missing_delivery_note"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    PARTIAL_MATCH = "partial_match"
-    OVER_INVOICED = "over_invoiced"
-    UNDER_INVOICED = "under_invoiced"
-    DATE_VARIANCE = "date_variance"
-    SUPPLIER_MISMATCH = "supplier_mismatch"
-    OTHER = "other"
+    AUTO_APPROVE = "auto_approve"
+    MANUAL_REVIEW = "manual_review"
+    EXCEPTION = "exception"
+    REJECT = "reject"
 
 
 class ExceptionStatus(str, Enum):
     """Status values for exceptions."""
 
     OPEN = "open"
-    IN_REVIEW = "in_review"
+    UNDER_REVIEW = "under_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
 
 
-class LineMatchStatus(str, Enum):
-    """Status values for individual line matches."""
+class ExceptionReason(str, Enum):
+    """Reason codes for exceptions."""
 
-    PENDING = "pending"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    MISSING_PURCHASE_ORDER = "missing_purchase_order"
+    MISSING_DELIVERY_NOTE = "missing_delivery_note"
+    PARTIAL_DELIVERY = "partial_delivery"
+    OVERDELIVERY = "overdelivery"
+    UNDERDELIVERY = "underdelivery"
+    UNMATCHED_LINES = "unmatched_lines"
+    PO_EXPIRED = "po_expired"
+    PO_CLOSED = "po_closed"
+    VENDOR_MISMATCH = "vendor_mismatch"
+    DATE_MISMATCH = "date_mismatch"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    TAX_MISMATCH = "tax_mismatch"
+    OTHER = "other"
+
+
+class LineStatus(str, Enum):
+    """Status values for invoice/PO/delivery note lines."""
+
+    OPEN = "open"
     MATCHED = "matched"
-    PARTIAL = "partial"
-    OVER_DELIVERED = "over_delivered"
-    UNDER_DELIVERED = "under_delivered"
-    NO_MATCH = "no_match"
+    PARTIALLY_MATCHED = "partially_matched"
     EXCEPTION = "exception"
-
-
-class CrossRefType(str, Enum):
-    """Types of cross-reference entries."""
-
-    SUPPLIER = "supplier"
-    PRODUCT = "product"
-    CATEGORY = "category"
-    PRICE = "price"
-    QUANTITY = "quantity"
-    MANUAL = "manual"
-    LEARNED = "learned"
+    CANCELLED = "cancelled"

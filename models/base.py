@@ -1,105 +1,67 @@
-// models/base.py
-"""SQLAlchemy declarative base and mixin classes."""
+# models/base.py
+"""SQLAlchemy declarative base and mixins."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Index, text
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models.
+    """Base class for all SQLAlchemy models."""
 
-    Provides common columns and functionality for all models.
-    """
-
-    pass
+    type_annotation_map = {
+        uuid.UUID: UUID(as_uuid=True),
+    }
 
 
 class TimestampMixin:
-    """Mixin providing created_at and updated_at timestamps."""
+    """Mixin that adds created_at and updated_at timestamp columns."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        doc="Timestamp when the record was created",
+        server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        onupdate=datetime.utcnow,
-        doc="Timestamp when the record was last updated",
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
 class UUIDMixin:
-    """Mixin providing UUID primary key."""
+    """Mixin that adds a UUID primary key column."""
 
     id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        server_default=text("gen_random_uuid()"),
-        doc="Unique identifier (UUID)",
     )
 
 
 class SoftDeleteMixin:
-    """Mixin providing soft delete functionality."""
+    """Mixin that adds soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,
-        doc="Timestamp when the record was soft-deleted",
-    )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        server_default=text("FALSE"),
-        doc="Flag indicating if the record is soft-deleted",
     )
 
+    @property
+    def is_deleted(self) -> bool:
+        """Check if the record is soft deleted."""
+        return self.deleted_at is not None
 
-def create_uuid() -> uuid.UUID:
-    """Generate a new UUID4.
+    def soft_delete(self) -> None:
+        """Soft delete the record by setting deleted_at."""
+        self.deleted_at = datetime.now(timezone.utc)
 
-    Returns:
-        A new UUID4 instance.
-    """
-    return uuid.uuid4()
-
-
-# Common indexes for foreign keys and high-cardinality columns
-def fk_index(table_name: str, column_name: str) -> Index:
-    """Create an index for a foreign key column.
-
-    Args:
-        table_name: Name of the table.
-        column_name: Name of the foreign key column.
-
-    Returns:
-        Index object for the foreign key.
-    """
-    return Index(
-        f"ix_{table_name}_{column_name}",
-        column_name,
-        postgresql_using="btree",
-    )
-
-
-def create_timestamp_indexes(table_name: str) -> list[Index]:
-    """Create standard timestamp indexes.
-
-    Args:
-        table_name: Name of the table.
-
-    Returns:
-        List of Index objects for timestamps.
-    """
-    return [
-        Index(f"ix_{table_name}_created_at", "created_at"),
-        Index(f"ix_{table_name}_updated_at", "updated_at"),
-    ]
+    def restore(self) -> None:
+        """Restore a soft deleted record."""
+        self.deleted_at = None

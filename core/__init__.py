@@ -1,29 +1,17 @@
-// core/__init__.py
-"""Core module for AP Automation Engine.
+# core/__init__.py
+"""Core package for AP Automation Engine.
 
-This module contains the foundational components:
-- Configuration management
-- Database session handling
-- Security utilities
+This package contains the foundational components:
+- Configuration management (pydantic-settings)
+- Database session management (SQLAlchemy async)
+- Security utilities (JWT, bcrypt)
 """
 
-from core.config import Settings, get_settings
-from core.database import (
-    Base,
-    DatabaseSession,
-    get_db,
-    init_db,
-    engine,
-    async_session_maker,
-)
+from core.config import settings
+from core.database import get_db, DataBaseManager
 
 __all__ = [
-    "Settings",
-    "get_settings",
-    "Base",
-    "DatabaseSession",
+    "settings",
     "get_db",
-    "init_db",
-    "engine",
-    "async_session_maker",
+    "DataBaseManager",
 ]
