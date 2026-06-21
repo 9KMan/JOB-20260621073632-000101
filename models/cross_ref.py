@@ -1,9 +1,14 @@
 # models/cross_ref.py
-"""CrossRef SQLAlchemy model for learning loop/cross-reference data."""
+"""CrossRef SQLAlchemy model.
+
+Learning loop / cross-reference table that stores confirmed matches
+for improving future matching accuracy.
+"""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -14,224 +19,175 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import DecisionType
+from models.base import Base, UUIDMixin, TimestampMixin, TableNameMixin
+from models.enums import LearningStatus, MatchSource, MatchConfidence
 
 
-class CrossRef(Base, UUIDMixin, TimestampMixin):
-    """Cross Reference model for learning loop and confirmed matches.
+class CrossRef(Base, UUIDMixin, TimestampMixin, TableNameMixin):
+    """Cross-reference table for learning loop.
 
-    This table stores confirmed matches between Invoice lines and
-    PO/DN lines to improve future matching accuracy.
+    Stores confirmed matches between:
+    - Invoice lines and PO lines
+    - Invoice lines and DN lines
+    - SKU patterns
+    - Supplier patterns
+
+    Used to improve matching accuracy over time through promotion
+    and demotion of rules based on user confirmation.
     """
 
     __tablename__ = "cross_ref"
-
-    # Document References
-    invoice_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-        doc="Reference to Invoice",
+    __table_args__ = (
+        UniqueConstraint(
+            "invoice_line_id",
+            "po_line_id",
+            name="uq_cross_ref_invoice_po_line",
+        ),
+        UniqueConstraint(
+            "invoice_line_id",
+            "dn_line_id",
+            name="uq_cross_ref_invoice_dn_line",
+        ),
+        Index("ix_cross_ref_invoice_line_id", "invoice_line_id"),
+        Index("ix_cross_ref_po_line_id", "po_line_id"),
+        Index("ix_cross_ref_dn_line_id", "dn_line_id"),
+        Index("ix_cross_ref_supplier_id", "supplier_id"),
+        Index("ix_cross_ref_sku", "sku"),
+        Index("ix_cross_ref_learning_status", "learning_status"),
+        Index("ix_cross_ref_match_count", "match_count"),
     )
+
+    # Primary references
     invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoice_lines.id", ondelete="CASCADE"),
         nullable=True,
-        index=True,
-        doc="Reference to Invoice Line",
     )
-    purchase_order_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-        doc="Reference to Purchase Order",
-    )
-    purchase_order_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=True,
-        index=True,
-        doc="Reference to PO Line",
     )
-    delivery_note_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-        doc="Reference to Delivery Note",
-    )
-    delivery_note_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
         nullable=True,
-        index=True,
-        doc="Reference to DN Line",
     )
 
-    # Match Details
-    match_type: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        doc="Match type: PO_ONLY, DN_ONLY, PO_DN",
-    )
-    decision: Mapped[DecisionType] = mapped_column(
-        String(20),
-        nullable=False,
-        doc="Match decision: AUTO_APPROVED, REVIEW, EXCEPTION",
-    )
-
-    # Scoring
-    matching_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        doc="Matching score percentage (0-100)",
-    )
-    price_match_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=True,
-        doc="Price component score",
-    )
-    quantity_match_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=True,
-        doc="Quantity component score",
-    )
-    description_match_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=True,
-        doc="Description match component score",
-    )
-
-    # Matched Values
-    invoice_quantity: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Matched invoice quantity",
-    )
-    invoice_unit_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Matched invoice unit price",
-    )
-    po_quantity: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Matched PO quantity",
-    )
-    po_unit_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Matched PO unit price",
-    )
-    dn_quantity: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Matched DN quantity",
-    )
-
-    # Learning Data
-    product_code: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        index=True,
-        doc="Product code (learned)",
-    )
-    supplier_id: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        index=True,
-        doc="Supplier ID",
-    )
-    confirmed_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Confirmed/settled unit price",
-    )
-    confirmed_quantity: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-        doc="Confirmed/settled quantity",
-    )
-
-    # Promotion tracking
-    match_count: Mapped[int] = mapped_column(
-        Integer,
-        default=1,
-        nullable=False,
-        doc="Number of times this match pattern was used",
-    )
-    is_promoted: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-        doc="Whether this is a promoted/high-confidence match",
-    )
-    confidence_level: Mapped[str] = mapped_column(
-        String(20),
-        default="LOW",
-        nullable=False,
-        doc="Confidence level: LOW, MEDIUM, HIGH",
-    )
-
-    # User confirmation
-    confirmed_by: Mapped[str | None] = mapped_column(
+    # Pattern-based references
+    supplier_id: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
-        doc="User who confirmed this match",
+        index=True,
     )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
+    supplier_sku: Mapped[str | None] = mapped_column(
+        String(100),
         nullable=True,
-        doc="Timestamp when match was confirmed",
+        index=True,
+    )
+    sku: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    description_pattern: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )
 
-    # Quality tracking
+    # Match metrics
+    match_score: Mapped[float] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+    )
+    confidence: Mapped[MatchConfidence] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    source: Mapped[MatchSource] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    # Learning status
+    learning_status: Mapped[LearningStatus] = mapped_column(
+        String(20),
+        nullable=False,
+        default=LearningStatus.ACTIVE,
+    )
+
+    # Usage tracking
+    match_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    success_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    failure_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Approval tracking
+    is_approved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    approved_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     notes: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
-        doc="Additional notes about the match",
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-        doc="Whether this cross-ref is active",
-    )
-
-    # Relationships
-    invoice: Mapped["Invoice"] = relationship(
-        "Invoice",
-        back_populates="cross_refs",
-    )
-
-    __table_args__ = (
-        Index("ix_cross_ref_invoice", "invoice_id"),
-        Index("ix_cross_ref_po_line", "purchase_order_line_id"),
-        Index("ix_cross_ref_dn_line", "delivery_note_line_id"),
-        Index("ix_cross_ref_supplier_product", "supplier_id", "product_code"),
-        Index("ix_cross_ref_confidence", "confidence_level", "is_active"),
-        Index("ix_cross_ref_match_count", "match_count", "is_promoted"),
     )
 
     def __repr__(self) -> str:
-        return f"<CrossRef {self.match_type} - Score: {self.matching_score}>"
+        return f"<CrossRef score={self.match_score} status={self.learning_status}>"
 
-    def promote(self) -> None:
-        """Promote this cross-reference to high confidence."""
-        self.is_promoted = True
-        self.confidence_level = "HIGH"
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate of this cross-reference."""
+        if self.match_count == 0:
+            return 0.0
+        return (self.success_count / self.match_count) * 100
+
+    def record_match(self, success: bool) -> None:
+        """Record a match attempt.
+
+        Args:
+            success: Whether the match was successful
+        """
         self.match_count += 1
+        self.last_used_at = datetime.utcnow()
 
-    def confirm(self, user: str) -> None:
-        """Mark this cross-reference as confirmed by user."""
-        self.confirmed_by = user
-        self.confirmed_at = datetime.now(timezone.utc)
-        if self.decision == DecisionType.REVIEW:
-            self.decision = DecisionType.AUTO_APPROVED
+        if success:
+            self.success_count += 1
+            self.last_success_at = datetime.utcnow()
+        else:
+            self.failure_count += 1
