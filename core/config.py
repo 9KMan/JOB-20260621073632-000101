@@ -1,19 +1,15 @@
-# core/config.py
-"""Application configuration using pydantic-settings.
-
-All configuration is loaded from environment variables.
-No hardcoded secrets or connection strings.
-"""
+// core/config.py
+"""Application settings loaded from environment variables via pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application configuration — all values sourced from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -22,128 +18,114 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application
-    APP_NAME: str = "AP Automation Core"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = Field(default=False)
-    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # ── Application ────────────────────────────────────────────────────────────
+    app_name: str = Field(default="AP Automation Core", description="Application display name")
+    environment: str = Field(default="development", description="deployment environment")
+    log_level: str = Field(default="INFO", description="Logging verbosity level")
+    debug: bool = Field(default=False, description="Enable debug mode")
 
-    # Database
-    DATABASE_URL: PostgresDsn = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+    # ── Database ───────────────────────────────────────────────────────────────
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:changeme@localhost:5432/apautomation",
         description="Async PostgreSQL connection string",
     )
-    DATABASE_HOST: str = Field(default="localhost")
-    DATABASE_PORT: int = Field(default=5432)
-    DATABASE_NAME: str = Field(default="apautomation")
-    DATABASE_USER: str = Field(default="apuser")
-    DATABASE_PASSWORD: str = Field(default="appass")
-    DATABASE_POOL_SIZE: int = Field(default=20, ge=1, le=100)
-    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
-    DATABASE_POOL_TIMEOUT: int = Field(default=30)
-    DATABASE_POOL_RECYCLE: int = Field(default=3600)
-    DATABASE_ECHO: bool = Field(default=False)
+    pgbouncer_host: str = Field(default="localhost", description="PGBouncer host")
+    pgbouncer_port: int = Field(default=5432, description="PGBouncer port")
+    db_pool_size: int = Field(default=10, description="Connection pool size")
+    db_max_overflow: int = Field(default=20, description="Connection pool max overflow")
+    db_pool_timeout: int = Field(default=30, description="Connection pool timeout (seconds)")
+    db_echo: bool = Field(default=False, description="Echo SQL queries (debug only)")
 
-    # PGBouncer (if used)
-    PGBOUNCER_HOST: str = Field(default="localhost")
-    PGBOUNCER_PORT: int = Field(default=5433)
-
-    # Security / JWT
-    JWT_SECRET_KEY: str = Field(
-        default="change-me-in-production",
-        description="Secret key for JWT signing (HS256)",
+    # ── JWT / Authentication ────────────────────────────────────────────────────
+    jwt_secret_key: str = Field(
+        default="change-me-in-production-use-strong-secret-key-256-bits",
+        description="HS256 signing secret (min 256 bits)",
     )
-    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
-    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1)
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_access_token_expire_minutes: int = Field(
+        default=30, description="Access token expiry (minutes)"
+    )
+    jwt_refresh_token_expire_days: int = Field(
+        default=7, description="Refresh token expiry (days)"
+    )
+    bcrypt_rounds: int = Field(default=12, description="bcrypt cost factor")
 
-    # Matching Thresholds
-    THRESHOLD_HIGH: float = Field(
-        default=0.95,
+    # ── Matching Thresholds ─────────────────────────────────────────────────────
+    threshold_high: float = Field(
+        default=95.0,
         ge=0.0,
-        le=1.0,
-        description="Auto-approve threshold (score >= this value)",
+        le=100.0,
+        description="Auto-approve threshold (percentage)",
     )
-    THRESHOLD_MID: float = Field(
-        default=0.75,
+    threshold_mid: float = Field(
+        default=70.0,
         ge=0.0,
-        le=1.0,
-        description="1-click review threshold",
+        le=100.0,
+        description="1-click review threshold (percentage)",
     )
-    THRESHOLD_LOW: float = Field(
-        default=0.50,
+    threshold_low: float = Field(
+        default=40.0,
         ge=0.0,
-        le=1.0,
-        description="Exception threshold (score < this value)",
+        le=100.0,
+        description="Exception threshold (percentage)",
     )
 
-    # Tolerance Settings
-    TOLERANCE_PRICE: float = Field(
-        default=0.02,
+    # ── Tolerance Settings ──────────────────────────────────────────────────────
+    tolerance_price: float = Field(
+        default=5.0,
         ge=0.0,
-        le=1.0,
-        description="Price match tolerance percentage",
+        le=100.0,
+        description="Allowed price variance percentage",
     )
-    TOLERANCE_QTY: float = Field(
-        default=0.05,
+    tolerance_qty: float = Field(
+        default=10.0,
         ge=0.0,
-        le=1.0,
-        description="Quantity match tolerance percentage",
-    )
-    TOLERANCE_DATE_DAYS: int = Field(
-        default=5,
-        ge=0,
-        description="Date match tolerance in days",
+        le=100.0,
+        description="Allowed quantity variance percentage",
     )
 
-    # Learning Loop Settings
-    LEARNING_AUTO_PROMOTE: bool = Field(
-        default=True,
-        description="Auto-promote confirmed matches to cross_ref",
+    # ── Learning Loop ──────────────────────────────────────────────────────────
+    learning_confirmed_weight: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Weight for confirmed matches in learning"
     )
-    LEARNING_PROMOTE_THRESHOLD: int = Field(
-        default=3,
-        ge=1,
-        description="Number of confirmed matches before auto-promoting",
+    learning_rejected_weight: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="Weight for rejected matches in learning"
     )
-
-    # CORS
-    CORS_ORIGINS: list[str] = Field(default=["http://localhost:3000"])
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list[str] = Field(
-        default=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-    )
-    CORS_ALLOW_HEADERS: list[str] = Field(
-        default=["*"]
+    learning_promotion_min_confirmations: int = Field(
+        default=3, ge=1, description="Min confirmations to promote a cross-reference"
     )
 
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-    OPENAPI_URL: str = "/openapi.json"
-    DOCS_URL: str = "/docs"
-    REDOC_URL: str = "/redoc"
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        allowed = {"development", "staging", "production"}
+        if v.lower() not in allowed:
+            raise ValueError(f"environment must be one of {allowed}, got: {v}")
+        return v.lower()
 
-    # Redis (optional, for caching/sessions)
-    REDIS_URL: RedisDsn | None = Field(default=None)
-
-    def get_sync_database_url(self) -> str:
-        """Get synchronous database URL for Alembic migrations."""
-        return str(self.DATABASE_URL).replace(
-            "postgresql+asyncpg://", "postgresql://"
-        )
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = v.upper()
+        if upper not in allowed:
+            raise ValueError(f"log_level must be one of {allowed}, got: {v}")
+        return upper
 
     @property
     def is_production(self) -> bool:
-        """Check if running in production mode."""
-        return not self.DEBUG and self.ENVIRONMENT == "production"
+        return self.environment == "production"
 
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Return a cached singleton Settings instance."""
     return Settings()
 
 
-settings = get_settings()
+# Convenience type alias for dependency injection
+SettingsDep = Annotated[Settings, Field(default_factory=get_settings)]

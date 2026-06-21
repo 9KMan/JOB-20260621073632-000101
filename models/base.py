@@ -1,30 +1,27 @@
-# models/base.py
-"""SQLAlchemy declarative base configuration."""
+// models/base.py
+"""SQLAlchemy declarative base and mixins."""
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import DateTime, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models.
-
-    Provides common columns and utility methods for all models.
-    """
-
+    """Base class for all SQLAlchemy models."""
     pass
 
 
 class TimestampMixin:
-    """Mixin providing created_at and updated_at timestamp columns."""
+    """Adds created_at / updated_at timestamps to a model."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
-        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -34,10 +31,11 @@ class TimestampMixin:
     )
 
 
-class UUIDPrimaryKeyMixin:
-    """Mixin providing UUID primary key."""
+class UUIDPrimaryMixin:
+    """Adds a UUID primary key to a model."""
 
     id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
         nullable=False,
@@ -45,23 +43,11 @@ class UUIDPrimaryKeyMixin:
 
 
 class SoftDeleteMixin:
-    """Mixin providing soft delete functionality."""
+    """Adds a soft-delete deleted_at timestamp to a model."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+        default=None,
         index=True,
     )
-    deleted_by: Mapped[str | None] = mapped_column(
-        nullable=True,
-    )
-
-    def soft_delete(self, deleted_by: str | None = None) -> None:
-        """Mark the record as deleted."""
-        self.deleted_at = datetime.now(timezone.utc)
-        self.deleted_by = deleted_by
-
-    @property
-    def is_deleted(self) -> bool:
-        """Check if the record is soft deleted."""
-        return self.deleted_at is not None

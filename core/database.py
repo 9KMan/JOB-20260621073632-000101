@@ -1,11 +1,10 @@
-# core/database.py
-"""Async SQLAlchemy database session management."""
+// core/database.py
+"""Async SQLAlchemy session management."""
 
-from collections.abc import AsyncGenerator
+import logging
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import AsyncGenerator
 
-from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -13,116 +12,98 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
-from core.config import settings
+from core.config import get_settings
 
+logger = logging.getLogger(__name__)
 
-def create_async_engine_with_pool() -> AsyncEngine:
-    """Create async engine with connection pooling."""
-    engine = create_async_engine(
-        settings.DATABASE_URL,
-        echo=settings.DATABASE_ECHO,
-        pool_size=settings.DATABASE_POOL_SIZE,
-        max_overflow=settings.DATABASE_MAX_OVERFLOW,
-        pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-        pool_recycle=settings.DATABASE_POOL_RECYCLE,
-        pool_pre_ping=True,
-    )
-    return engine
+# ── Engine ─────────────────────────────────────────────────────────────────────
+
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def create_async_engine_null_pool() -> AsyncEngine:
-    """Create async engine without pooling (for testing)."""
-    engine = create_async_engine(
-        settings.DATABASE_URL,
-        echo=settings.DATABASE_ECHO,
-        poolclass=NullPool,
-    )
-    return engine
+def get_engine() -> AsyncEngine:
+    """Lazily create (or return cached) async engine."""
+    global _engine
+    if _engine is None:
+        settings = get_settings()
+        _engine = create_async_engine(
+            settings.database_url,
+            echo=settings.db_echo,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            poolclass=AsyncAdaptedQueuePool,
+            pool_pre_ping=True,
+        )
+        logger.info("Async engine created: pool_size=%d, max_overflow=%d",
+                    settings.db_pool_size, settings.db_max_overflow)
+    return _engine
 
 
-class DatabaseManager:
-    """Manages async database engine and session factory."""
-
-    def __init__(self) -> None:
-        self._engine: AsyncEngine | None = None
-        self._session_factory: async_sessionmaker[AsyncSession] | None = None
-
-    def init(self, use_pool: bool = True) -> None:
-        """Initialize the database engine and session factory."""
-        if use_pool:
-            self._engine = create_async_engine_with_pool()
-        else:
-            self._engine = create_async_engine_null_pool()
-
-        self._session_factory = async_sessionmaker(
-            bind=self._engine,
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Lazily create (or return cached) session factory."""
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(
+            bind=get_engine(),
             class_=AsyncSession,
             expire_on_commit=False,
             autoflush=False,
             autocommit=False,
         )
+    return _session_factory
 
-    async def close(self) -> None:
-        """Close the database engine."""
-        if self._engine:
-            await self._engine.dispose()
-            self._engine = None
-            self._session_factory = None
 
-    @property
-    def engine(self) -> AsyncEngine:
-        """Get the async engine."""
-        if self._engine is None:
-            self.init()
-        return self._engine  # type: ignore
+# Convenience aliases for backward compat
+engine = get_engine()
+AsyncSessionLocal = get_session_factory()
 
-    @property
-    def session_factory(self) -> async_sessionmaker[AsyncSession]:
-        """Get the session factory."""
-        if self._session_factory is None:
-            self.init()
-        return self._session_factory  # type: ignore
 
-    @asynccontextmanager
-    async def session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Get a database session as a context manager."""
-        session = self.session_factory()
+# ── Base ──────────────────────────────────────────────────────────────────────
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base — all models inherit from this."""
+    pass
+
+
+# ── Session Dependency ─────────────────────────────────────────────────────────
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency that yields an async session and ensures it is closed.
+    Use with: async def endpoint(session: AsyncSession = Depends(get_db_session))
+    """
+    factory = get_session_factory()
+    async with factory() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """FastAPI dependency for getting a database session."""
-        async with self.session() as session:
+
+@asynccontextmanager
+async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """Context-manager version of get_db_session for use outside FastAPI routes."""
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
             yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
-# Global database manager instance
-db_manager = DatabaseManager()
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency to get database session.
-
-    Yields:
-        AsyncSession: Database session for the request.
-    """
-    async for session in db_manager.get_session():
-        yield session
-
-
-# Type alias for dependency injection
-DbSession = Annotated[AsyncSession, Depends(get_db)]
-
-
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class."""
-
-    pass
+async def dispose_engine() -> None:
+    """Dispose the engine — call on application shutdown."""
+    global _engine, _session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _session_factory = None
+        logger.info("Async engine disposed")

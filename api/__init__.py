@@ -1,4 +1,6 @@
-# api/__init__.py
-"""API package for AP Automation Engine."""
+// api/__init__.py
+"""API package — FastAPI routers and shared schemas."""
 
-__all__ = []
+from api.schemas import HealthResponse
+
+__all__ = ["HealthResponse"]
