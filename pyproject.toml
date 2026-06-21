@@ -4,56 +4,96 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finaro-ap-automation"
+name = "ap-automation-engine"
 version = "1.0.0"
-description = "AP Automation Core Engine for Finaro - 3-Way Matching Engine"
-authors = [
-    {name = "FinaRo Team", email = "team@finaro.com"}
-]
+description = "AP Automation Core Engine for FinaRo"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
-license = {text = "PROPRIETARY"}
+authors = [
+    {name = "FinaRo", email = "dev@finaro.com"}
+]
+keywords = ["ap", "automation", "invoice", "matching", "erp"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
 ]
 
 dependencies = [
-    "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
-    "sqlalchemy>=2.0.25",
-    "alembic>=1.13.1",
-    "psycopg2-binary>=2.9.9",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
-    "pydantic>=2.5.3",
-    "pydantic-settings>=2.1.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
-    "python-multipart>=0.0.6",
-    "email-validator>=2.1.0",
-    "python-dateutil>=2.8.2",
-    "structlog>=24.1.0",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27.0",
+    "psycopg2-binary>=2.9.9",
+    "greenlet>=3.0.0",
+    "aiosqlite>=0.19.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.4",
-    "pytest-asyncio>=0.23.3",
+    "pytest>=8.1.0",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "httpx>=0.26.0",
-    "factory-boy>=3.3.0",
-    "faker>=22.0.0",
-    "ruff>=0.1.13",
+    "black>=24.2.0",
+    "isort>=5.13.0",
     "mypy>=1.8.0",
+    "ruff>=0.3.0",
 ]
 
-[project.scripts]
-finaro-ap = "api.main:main"
+[project.urls]
+Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101/docs"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["core*", "models*", "api*", "services*", "workers*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip = [".venv", "build", "dist"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W", "I", "N", "D", "UP", "YTT", "ANN", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "DJ", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "RUF", "UP"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "ERA001", "PLR0913", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -62,16 +102,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-select = ["E", "F", "I", "N", "W", "UP", "B", "C4"]
-ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

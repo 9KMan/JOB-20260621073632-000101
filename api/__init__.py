@@ -1,12 +1,9 @@
-# api/__init__.py
-"""API module for the AP Automation Engine.
+// api/__init__.py
+"""API package for AP Automation Engine.
 
-This module contains:
-- Shared Pydantic schemas
-- Versioned API routers
-- API utilities and helpers
+This package contains:
+- Shared Pydantic schemas (schemas.py)
+- API versioned routes (v1/)
 """
 
-from api.v1.router import api_router
-
-__all__ = ["api_router"]
+__all__ = ["schemas"]

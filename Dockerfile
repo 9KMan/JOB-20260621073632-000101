@@ -1,47 +1,53 @@
 // Dockerfile
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim as base
 
-WORKDIR /app
+# Prevent Python from writing pyc files and buffering stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    curl \
+    build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash appuser
 
+WORKDIR /app
+
+# Install Python dependencies
 COPY pyproject.toml ./
-RUN uv sync --frozen --no-dev
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -e ".[dev]"
 
-COPY src/ ./src/
-COPY alembic/ ./alembic/
+# Copy application code
+COPY core/ ./core/
+COPY models/ ./models/
+COPY api/ ./api/
+COPY services/ ./services/
+COPY workers/ ./workers/
+COPY migrations/ ./migrations/
 COPY alembic.ini ./
 
-FROM base as production
+# Create necessary directories
+RUN mkdir -p /app/logs /app/uploads && \
+    chown -R appuser:appuser /app
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-RUN addgroup --system --gid 1001 appgroup && \
-    adduser --system --uid 1001 --ingroup appgroup appuser
-
-COPY --from=base /app/venv /app/venv
-ENV PATH="/app/venv/bin:$PATH"
-
+# Switch to non-root user
 USER appuser
 
+# Expose port
 EXPOSE 8000
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-FROM base as development
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-COPY --from=base /app/venv /app/venv
-ENV PATH="/app/venv/bin:$PATH"
-
-EXPOSE 8000
-
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default command - development
+CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
