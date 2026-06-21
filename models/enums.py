@@ -1,107 +1,178 @@
 # models/enums.py
-"""Enumeration types used across the AP automation engine."""
+"""SQLAlchemy and Pydantic enums for the application."""
 
-import enum
+import uuid
+from enum import Enum
+from typing import Annotated
+
+from sqlalchemy import String
+from sqlalchemy.types import TypeDecorator
+
+from pydantic import BaseModel, ConfigDict
 
 
-class InvoiceStatus(str, enum.Enum):
-    """Lifecycle status of an invoice record."""
+class DocumentStatus(str, Enum):
+    """Status for documents (Invoice, PO, DN)."""
 
     DRAFT = "draft"
-    RECEIVED = "received"
-    MATCHING_IN_PROGRESS = "matching_in_progress"
+    PENDING = "pending"
+    PROCESSING = "processing"
     MATCHED = "matched"
+    PARTIALLY_MATCHED = "partially_matched"
     EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
-    PAID = "paid"
     CANCELLED = "cancelled"
+    ARCHIVED = "archived"
 
 
-class PurchaseOrderStatus(str, enum.Enum):
-    """Lifecycle status of a purchase order."""
-
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    APPROVED = "approved"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-
-class DeliveryNoteStatus(str, enum.Enum):
-    """Lifecycle status of a delivery note."""
-
-    DRAFT = "draft"
-    ISSUED = "issued"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
-    CANCELLED = "cancelled"
-
-
-class MatchingDecision(str, enum.Enum):
-    """
-    Outcome of the matching engine for a given invoice / PO pair.
-
-    Values are ordered from most confident to least confident.
-    """
-
-    AUTO_APPROVED = "auto_approved"
-    """Score >= THRESHOLD_HIGH — fully confident, auto-approved."""
-
-    ONE_CLICK_REVIEW = "one_click_review"
-    """Score between THRESHOLD_MID and THRESHOLD_HIGH — needs human confirmation."""
-
-    EXCEPTION = "exception"
-    """Score between THRESHOLD_LOW and THRESHOLD_MID — flagged for exception handling."""
-
-    REJECTED = "rejected"
-    """Score < THRESHOLD_LOW — no viable match found."""
-
-
-class ExceptionType(str, enum.Enum):
-    """Categorises a matching exception for triage."""
-
-    PRICE_MISMATCH = "price_mismatch"
-    """Unit price differs beyond tolerance."""
-
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    """Billed quantity differs beyond tolerance."""
-
-    MISSING_PO = "missing_po"
-    """No PO anchor found for this invoice."""
-
-    MISSING_DELIVERY = "missing_delivery"
-    """No delivery note found for this PO line."""
-
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    """Potential duplicate of an existing invoice."""
-
-    OVER_INVOICED = "over_invoiced"
-    """Invoice amount exceeds PO line value."""
-
-    PARTIAL_DELIVERY = "partial_delivery"
-    """PO line quantity exceeds delivered quantity."""
-
-    CROSS_REF_BLOCKED = "cross_ref_blocked"
-    """Cross-reference record conflicts with current match."""
-
-
-class LineStatus(str, enum.Enum):
-    """Status of an individual line item within a document."""
+class LineStatus(str, Enum):
+    """Status for document lines."""
 
     OPEN = "open"
-    """Line has remaining quantity to be matched."""
-
     PARTIALLY_MATCHED = "partially_matched"
-    """Line has been partially matched."""
-
     FULLY_MATCHED = "fully_matched"
-    """Line has been fully matched."""
-
-    OVER_DELIVERED = "over_delivered"
-    """Delivered quantity exceeds ordered quantity."""
-
-    OVER_INVOICED = "over_invoiced"
-    """Invoiced quantity exceeds delivered quantity."""
-
+    EXCEPTION = "exception"
     CANCELLED = "cancelled"
+
+
+class MatchingStatus(str, Enum):
+    """Status for the matching process."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class MatchingDecision(str, Enum):
+    """Decision result from matching."""
+
+    AUTO_APPROVED = "auto_approved"
+    REVIEW_REQUIRED = "review_required"
+    EXCEPTION = "exception"
+    NO_MATCH = "no_match"
+
+
+class ExceptionType(str, Enum):
+    """Types of matching exceptions."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    MISSING_PO = "missing_po"
+    MULTIPLE_MATCHES = "multiple_matches"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DATE_VARIANCE = "date_variance"
+    DELIVERY_VARIANCE = "delivery_variance"
+    OTHER = "other"
+
+
+class ExceptionStatus(str, Enum):
+    """Status of exceptions."""
+
+    OPEN = "open"
+    UNDER_REVIEW = "under_review"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+    ESCALATED = "escalated"
+
+
+class ExceptionReason(str, Enum):
+    """Reasons for exceptions."""
+
+    PRICE_TOO_HIGH = "price_too_high"
+    PRICE_TOO_LOW = "price_too_low"
+    QUANTITY_EXCEEDS_PO = "quantity_exceeds_po"
+    QUANTITY_UNDER_PO = "quantity_under_po"
+    NO_PO_REFERENCE = "no_po_reference"
+    MULTIPLE_PO_CANDIDATES = "multiple_po_candidates"
+    INVOICE_ALREADY_EXISTS = "invoice_already_exists"
+    INVOICE_DATE_MISMATCH = "invoice_date_mismatch"
+    DELIVERY_DATE_MISMATCH = "delivery_date_mismatch"
+    PARTIAL_DELIVERY = "partial_delivery"
+    MANUAL_OVERRIDE = "manual_override"
+    UNKNOWN = "unknown"
+
+
+class MatchConfidence(str, Enum):
+    """Confidence levels for matches."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NONE = "none"
+
+
+# Custom SQLAlchemy type for storing enum values as strings
+class EnumType(TypeDecorator):
+    """Abstract base for enum type columns."""
+
+    impl = String(50)
+    cache_ok = True
+
+    def __init__(self, enum_class: type[Enum]) -> None:
+        super().__init__()
+        self.enum_class = enum_class
+
+    def process_bind_param(self, value: Enum | str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, Enum):
+            return value.value
+        return value
+
+    def process_result_value(self, value: str | None) -> Enum | None:
+        if value is None:
+            return None
+        for item in self.enum_class:
+            if item.value == value:
+                return item
+        raise ValueError(f"Unknown {self.enum_class.__name__} value: {value}")
+
+
+# Pydantic models for enum choices/lists
+class EnumChoice(BaseModel):
+    """Model for enum choice display."""
+
+    value: str
+    label: str
+    description: str | None = None
+
+
+def get_document_status_choices() -> list[EnumChoice]:
+    """Get display choices for DocumentStatus."""
+    return [
+        EnumChoice(value=s.value, label=s.name.replace("_", " ").title(), description=None)
+        for s in DocumentStatus
+    ]
+
+
+def get_matching_decision_choices() -> list[EnumChoice]:
+    """Get display choices for MatchingDecision."""
+    descriptions = {
+        MatchingDecision.AUTO_APPROVED: "Automatically approved based on high confidence score",
+        MatchingDecision.REVIEW_REQUIRED: "Requires 1-click review due to medium confidence",
+        MatchingDecision.EXCEPTION: "Exception raised, needs manual intervention",
+        MatchingDecision.NO_MATCH: "No matching PO found",
+    }
+    return [
+        EnumChoice(value=s.value, label=s.name.replace("_", " ").title(), description=descriptions.get(s))
+        for s in MatchingDecision
+    ]
+
+
+def get_exception_type_choices() -> list[EnumChoice]:
+    """Get display choices for ExceptionType."""
+    return [
+        EnumChoice(value=s.value, label=s.name.replace("_", " ").title(), description=None)
+        for s in ExceptionType
+    ]
+
+
+def get_exception_status_choices() -> list[EnumChoice]:
+    """Get display choices for ExceptionStatus."""
+    return [
+        EnumChoice(value=s.value, label=s.name.replace("_", " ").title(), description=None)
+        for s in ExceptionStatus
+    ]

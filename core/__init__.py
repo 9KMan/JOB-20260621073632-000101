@@ -1,18 +1,13 @@
 # core/__init__.py
-"""Core package — configuration, database, and security utilities."""
+"""Core package for AP Automation Engine."""
 
-from core.config import settings
-from core.database import (
-    AsyncSessionFactory,
-    get_db,
-    async_engine,
-    dispose_engine,
-)
+from core.config import Settings, get_settings
+from core.database import Base, get_db_session, init_db
 
 __all__ = [
-    "settings",
-    "AsyncSessionFactory",
-    "get_db",
-    "async_engine",
-    "dispose_engine",
+    "Settings",
+    "get_settings",
+    "Base",
+    "get_db_session",
+    "init_db",
 ]

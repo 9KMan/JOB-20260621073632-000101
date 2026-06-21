@@ -1,61 +1,99 @@
-# docker-compose.yml
-version: '3.8'
+version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ap_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ap_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ap_automation}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ap_user} -d ${POSTGRES_DB:-ap_automation}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap_network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap_pgbouncer
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-ap_user}:${POSTGRES_PASSWORD:-ap_password}@postgres:5432/${POSTGRES_DB:-ap_automation}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 100
+      DEFAULT_POOL_SIZE: 10
+      MIN_POOL_SIZE: 2
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 3
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgbouncer -d /etc/pgbouncer/pgbouncer.ini -R"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ap_network
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    container_name: ap_api
     environment:
-      - DATABASE_URL=postgresql+asyncpg://finaro:finaro123@db:5432/finaro
-      - SECRET_KEY=${SECRET_KEY:-supersecretkey123456789012345678901234567890}
-      - ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-ap_user}:${POSTGRES_PASSWORD:-ap_password}@pgbouncer:5432/${POSTGRES_DB:-ap_automation}"
+      DATABASE_POOL_SIZE: 10
+      DATABASE_MAX_OVERFLOW: 20
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_ALGORITHM: HS256
+      THRESHOLD_HIGH: ${THRESHOLD_HIGH:-95}
+      THRESHOLD_MID: ${THRESHOLD_MID:-70}
+      THRESHOLD_LOW: ${THRESHOLD_LOW:-40}
+      TOLERANCE_PRICE: ${TOLERANCE_PRICE:-5.0}
+      TOLERANCE_QTY: ${TOLERANCE_QTY:-10.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${API_PORT:-8000}:8000"
     depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-    command: >
-      sh -c "alembic upgrade head && uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload"
-    networks:
-      - finaro-network
-
-  db:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=finaro
-      - POSTGRES_PASSWORD=finaro123
-      - POSTGRES_DB=finaro
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      pgbouncer:
+        condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
-      - finaro-network
+      - ap_network
+    volumes:
+      - ./src:/app/src:ro
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap_migrations
     environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-    ports:
-      - "5050:80"
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-ap_user}:${POSTGRES_PASSWORD:-ap_password}@pgbouncer:5432/${POSTGRES_DB:-ap_automation}"
+    command: alembic upgrade head
     depends_on:
-      - db
+      pgbouncer:
+        condition: service_started
     networks:
-      - finaro-network
+      - ap_network
+
+networks:
+  ap_network:
+    driver: bridge
 
 volumes:
   postgres_data:
-
-networks:
-  finaro-network:
-    driver: bridge

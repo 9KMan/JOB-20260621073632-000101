@@ -1,6 +1,14 @@
 # api/__init__.py
-"""API package — FastAPI router, schemas, and endpoints."""
+"""API package for AP Automation Engine."""
 
-from api.v1.router import api_router
+from api.schemas import (
+    PaginatedResponse,
+    ErrorResponse,
+    SuccessResponse,
+)
 
-__all__ = ["api_router"]
+__all__ = [
+    "PaginatedResponse",
+    "ErrorResponse",
+    "SuccessResponse",
+]

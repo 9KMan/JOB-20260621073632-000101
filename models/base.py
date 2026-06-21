@@ -1,89 +1,97 @@
 # models/base.py
-"""SQLAlchemy declarative base and shared mixins."""
+"""SQLAlchemy declarative base and mixins."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    Index,
-    String,
-    text,
-)
-from sqlalchemy.orm import (
-    DeclarativeBase,
-    Mapped,
-    mapped_column,
-    declared_attr,
-)
+from sqlalchemy import DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base — all models inherit from this."""
+    """Base class for all SQLAlchemy models."""
 
-    type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
-    }
-
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        """Derive __tablename__ from the class name (snake_case)."""
-        name = cls.__name__
-        # Convert CamelCase to snake_case
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result) + "s"
+    pass
 
 
-class UUIDMixin:
-    """Adds a UUID primary key column."""
+class TimestampMixin:
+    """Mixin for created_at and updated_at timestamps."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Record creation timestamp",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        comment="Record last update timestamp",
+    )
+
+
+class UUIDPrimaryKeyMixin:
+    """Mixin for UUID primary key."""
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        server_default=text("gen_random_uuid()"),
-    )
-
-
-class TimestampMixin:
-    """Adds created_at and updated_at timestamp columns."""
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
         nullable=False,
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
+        comment="Primary key UUID",
     )
 
 
 class SoftDeleteMixin:
-    """Adds a soft-delete deleted_at column."""
+    """Mixin for soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        default=None,
         index=True,
+        comment="Soft delete timestamp",
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        index=True,
+        comment="Soft delete flag",
     )
 
-    @declared_attr
-    def is_deleted(cls) -> Mapped[bool]:
-        return mapped_column(
-            Boolean,
-            nullable=False,
-            default=False,
-            index=True,
-        )
+    def soft_delete(self) -> None:
+        """Mark record as deleted."""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
+
+    def restore(self) -> None:
+        """Restore soft-deleted record."""
+        self.is_deleted = False
+        self.deleted_at = None
+
+
+class VersionMixin:
+    """Mixin for optimistic locking."""
+
+    version: Mapped[int] = mapped_column(
+        default=1,
+        nullable=False,
+        comment="Optimistic locking version",
+    )
+
+
+def create_indexes(
+    table_name: str,
+    *columns: tuple[str, ...],
+    unique: bool = False,
+) -> Index:
+    """Create an index specification for model definition."""
+    ix_name = f"ix_{table_name}_{'_'.join(col for col in columns)}"
+    return Index(
+        ix_name,
+        *columns,
+        unique=unique,
+    )
