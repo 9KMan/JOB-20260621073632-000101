@@ -1,0 +1,50 @@
+{
+  "job_id": "JOB-20260621073632-000101",
+  "client": "Finaro",
+  "tier": "PREMIUM",
+  "source": "upwork",
+  "description": "Senior-leaning Python Developer \u2014 AP Automation Core Engine",
+  "budget": "$14,250\u2013$21,375 (150\u2013225 hrs @ $95/hr)",
+  "rate": "$95/hr",
+  "tech_stack": "Python, FastAPI, PostgreSQL, Docker, SQLAlchemy, Alembic, pytest",
+  "skills": "Python, FastAPI, PostgreSQL, Docker, REST API, pytest, SQLAlchemy, Alembic",
+  "lead_url": "https://www.upwork.com/jobs/~022068435266588988103",
+  "github_url": "https://github.com/9KMan/JOB-20260621073632-000101",
+  "github_repo": "9KMan/JOB-20260621073632-000101",
+  "state": "APPROVED",
+  "assignee": null,
+  "tier_score": {
+    "tech_stack_fitness": "HIGH",
+    "budget_alignment": "HIGH",
+    "scope_clarity": "HIGH",
+    "client_legitimacy": "HIGH",
+    "overall": "HIGH"
+  },
+  "notes": "Finaro AP Automation. Premium job. Reference PDF attached to Upwork listing. Reference implementation exists. FastAPI + PostgreSQL + learning loop. 8-12 week build.",
+  "tags": [
+    "python",
+    "fastapi",
+    "postgresql",
+    "ap-automation",
+    "premium",
+    "upwork",
+    "finaro"
+  ],
+  "ceo_review_issue_id": "425bc2ae-0727-4ff0-bdf1-9de00a372608",
+  "ceo_review_issue_number": 754,
+  "minio_prefix": "factory/jobs/JOB-20260617093000-000101/",
+  "created_at": "2026-06-21T07:36:32.444598+00:00",
+  "_version": 10,
+  "retry_count": 0,
+  "history": [],
+  "build_issue_id": null,
+  "confidence": 0.0,
+  "full_description": "Senior-leaning Python Developer \u2014 AP Automation Core Engine",
+  "ceo_verdict": {
+    "verdict": "a",
+    "label": "APPROVED",
+    "confidence": "high",
+    "stored_at": "2026-06-21T08:09:17.248643+00:00"
+  },
+  "assigned_at": null
+}
