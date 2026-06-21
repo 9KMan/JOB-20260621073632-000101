@@ -1,36 +1,19 @@
-// api/__init__.py
-"""API module for the AP Automation Engine."""
+# api/__init__.py
+"""API module for AP Automation Engine.
+
+This package contains the FastAPI application, routers, and schemas.
+"""
 
 from api.schemas import (
-    InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
-    PurchaseOrderCreate,
-    PurchaseOrderResponse,
-    DeliveryNoteCreate,
-    DeliveryNoteResponse,
-    MatchingRequest,
-    MatchingResponse,
-    ExceptionResponse,
-    ExceptionResolveRequest,
-    BalanceResponse,
-    PaginatedResponse,
+    HealthCheckResponse,
     ErrorResponse,
+    PaginationParams,
+    PaginatedResponse,
 )
 
 __all__ = [
-    "InvoiceCreate",
-    "InvoiceUpdate",
-    "InvoiceResponse",
-    "PurchaseOrderCreate",
-    "PurchaseOrderResponse",
-    "DeliveryNoteCreate",
-    "DeliveryNoteResponse",
-    "MatchingRequest",
-    "MatchingResponse",
-    "ExceptionResponse",
-    "ExceptionResolveRequest",
-    "BalanceResponse",
-    "PaginatedResponse",
+    "HealthCheckResponse",
     "ErrorResponse",
+    "PaginationParams",
+    "PaginatedResponse",
 ]

@@ -1,140 +1,185 @@
-// models/cross_ref.py
-"""Cross-reference model for learning and match history."""
+# models/cross_ref.py
+"""CrossRef (Learning Loop) SQLAlchemy model."""
 
-import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from uuid import UUID
 
 from sqlalchemy import (
-    String,
-    DateTime,
-    Numeric,
-    Integer,
-    ForeignKey,
     Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
     Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from models.invoice import Invoice
-    from models.purchase_order import PurchaseOrder
+from models.base import Base, BaseMixin
+from models.enums import MatchSource
 
 
-class CrossRef(Base, UUIDMixin, TimestampMixin):
-    """Cross-reference table for learning loop and match history.
-    
-    Stores confirmed matches between invoices and POs to improve
-    future matching accuracy through learning.
-    
-    Attributes:
-        id: UUID primary key
-        invoice_id: Invoice reference
-        po_id: Purchase order reference
-        invoice_line_number: Matched invoice line number
-        po_line_id: Matched PO line item reference
-        supplier_id: Supplier identifier
-        supplier_part_number: Supplier's part number
-        po_part_description: PO line description
-        match_count: Number of times this match has been confirmed
-        total_quantity: Cumulative matched quantity
-        average_price: Average matched price
-        last_matched_at: Most recent match timestamp
-        is_promoted: Whether this match is promoted for priority
-        confidence_score: Calculated confidence score
-        is_active: Whether this cross-reference is active
+class CrossRef(Base, BaseMixin):
+    """Learning Loop / Cross-Reference Table.
+
+    Stores confirmed matches and learned patterns to improve future matching.
     """
-    
-    __tablename__ = "cross_refs"
+
+    __tablename__ = "cross_ref"
     __table_args__ = (
-        Index("ix_cross_refs_invoice_id", "invoice_id"),
-        Index("ix_cross_refs_po_id", "po_id"),
-        Index("ix_cross_refs_supplier_id", "supplier_id"),
-        Index("ix_cross_refs_supplier_part", "supplier_id", "supplier_part_number"),
-        Index("ix_cross_refs_match_count", "match_count"),
-        Index("ix_cross_refs_is_promoted", "is_promoted"),
+        Index("ix_cross_ref_vendor_id", "vendor_id"),
+        Index("ix_cross_ref_sku", "sku"),
+        Index("ix_cross_ref_po_number", "po_number"),
+        Index("ix_cross_ref_invoice_number", "invoice_number"),
+        Index("ix_cross_ref_is_active", "is_active"),
+        Index("ix_cross_ref_match_count", "match_count"),
+        Index("ix_cross_ref_last_matched", "last_matched_at"),
+        # Composite indexes for common lookups
+        Index("ix_cross_ref_vendor_sku", "vendor_id", "sku"),
+        Index("ix_cross_ref_vendor_po_invoice", "vendor_id", "po_number", "invoice_number"),
     )
-    
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        String(36),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    po_id: Mapped[uuid.UUID] = mapped_column(
-        String(36),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    invoice_line_number: Mapped[int | None] = mapped_column(
-        nullable=True,
-    )
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
-        String(36),
-        ForeignKey("purchase_order_line_items.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    supplier_id: Mapped[str] = mapped_column(
+
+    # Vendor Information
+    vendor_id: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+        index=True,
+    )
+    vendor_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    # Product Matching
+    sku: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    product_code: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
     )
     supplier_part_number: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
     )
-    po_part_description: Mapped[str] = mapped_column(
-        String(500),
+
+    # PO Reference
+    po_number: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    po_line_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    po_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    po_line_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Invoice Reference
+    invoice_number: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        ForeignKey("invoices.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Match Details
+    match_date: Mapped[date] = mapped_column(
+        Date,
         nullable=False,
     )
+    match_source: Mapped[MatchSource] = mapped_column(
+        Enum(MatchSource, name="match_source", create_type=False),
+        nullable=False,
+        default=MatchSource.MANUAL,
+    )
+
+    # Match Statistics
     match_count: Mapped[int] = mapped_column(
         Integer,
+        nullable=False,
         default=1,
-        nullable=False,
-    )
-    total_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        default=Decimal("0"),
-        nullable=False,
-    )
-    average_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
     )
     last_matched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
     )
-    is_promoted: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
+    first_matched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
     )
+
+    # Confidence and Status
     confidence_score: Mapped[float] = mapped_column(
         Numeric(5, 2),
-        default=0.0,
         nullable=False,
+        default=Decimal("100.00"),
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
-        default=True,
         nullable=False,
+        default=True,
+        index=True,
     )
-    confirmed_by: Mapped[str | None] = mapped_column(
+    is_promoted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    # Verification
+    verified_by: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
     )
-    confirmation_notes: Mapped[str | None] = mapped_column(
-        String(500),
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
-    
-    # Relationships
-    invoice: Mapped["Invoice | None"] = relationship(
-        "Invoice",
-        back_populates="cross_refs",
+
+    # Pricing Information (learned from confirmed matches)
+    unit_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
     )
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
+    quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
     )
+
+    # Additional Data
+    metadata: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CrossRef {self.id} vendor={self.vendor_id} "
+            f"sku={self.sku} po={self.po_number} count={self.match_count}>"
+        )
