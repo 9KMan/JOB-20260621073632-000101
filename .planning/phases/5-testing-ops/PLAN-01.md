@@ -568,7 +568,95 @@ MIT
 
 ---
 
-## 13. Phase Completion Checklist
+## 13. Files to Create
+
+The following files must be created in Phase 5:
+
+### Unit Tests
+```
+tests/unit/__init__.py
+tests/unit/conftest.py
+tests/unit/core/__init__.py
+tests/unit/core/test_engine.py
+tests/unit/core/test_matchers/__init__.py
+tests/unit/core/test_matchers/test_invoice.py
+tests/unit/core/test_matchers/test_po.py
+tests/unit/core/test_matchers/test_grn.py
+tests/unit/core/test_matchers/test_line.py
+tests/unit/core/validators/__init__.py
+tests/unit/core/validators/test_amount.py
+tests/unit/core/validators/test_date.py
+tests/unit/core/validators/test_quantity.py
+tests/unit/core/validators/test_currency.py
+tests/unit/core/test_config.py
+tests/unit/api/__init__.py
+tests/unit/api/test_auth.py
+tests/unit/api/test_invoices.py
+tests/unit/api/test_purchase_orders.py
+tests/unit/api/test_grns.py
+tests/unit/api/test_matching.py
+tests/unit/services/__init__.py
+tests/unit/services/test_auth_service.py
+tests/unit/services/test_matching_service.py
+tests/unit/services/test_document_services.py
+```
+
+### Integration Tests
+```
+tests/integration/__init__.py
+tests/integration/conftest.py
+tests/integration/test_api/__init__.py
+tests/integration/test_api/test_auth.py
+tests/integration/test_api/test_invoices.py
+tests/integration/test_api/test_purchase_orders.py
+tests/integration/test_api/test_grns.py
+tests/integration/test_api/test_matching.py
+tests/integration/test_database/__init__.py
+tests/integration/test_database/test_migrations.py
+tests/integration/test_database/test_repositories.py
+tests/integration/test_database/test_transactions.py
+tests/integration/test_matching/__init__.py
+tests/integration/test_matching/test_end_to_end.py
+tests/integration/test_matching/test_golden_dataset.py
+```
+
+### E2E Tests
+```
+tests/e2e/__init__.py
+tests/e2e/conftest.py
+tests/e2e/test_matching_flow.py
+tests/e2e/test_crud_flows.py
+```
+
+### Fixtures
+```
+tests/fixtures/golden_dataset.py
+tests/fixtures/__init__.py
+```
+
+### CI/CD
+```
+.github/workflows/ci.yml
+.github/workflows/deploy-staging.yml (optional)
+```
+
+### Docker
+```
+Dockerfile
+docker-compose.yml
+docker-compose.prod.yml
+nginx.conf
+```
+
+### Documentation
+```
+README.md
+ARCHITECTURE.md
+```
+
+---
+
+## 14. Phase Completion Checklist
 
 Before considering Phase 5 complete:
 

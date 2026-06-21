@@ -586,6 +586,118 @@ Phase 5 (Testing & Ops) cannot begin until Phase 4:
 
 ---
 
-## 12. Next Phase
+## 12. Files to Create
+
+The following files must be created in Phase 4:
+
+### API Layer
+```
+src/api/__init__.py
+src/api/main.py
+src/api/config.py
+src/api/dependencies.py
+```
+
+### API Middleware
+```
+src/api/middleware/__init__.py
+src/api/middleware/logging.py
+src/api/middleware/error_handler.py
+src/api/middleware/cors.py
+```
+
+### API Routes
+```
+src/api/routes/__init__.py
+src/api/routes/auth.py
+src/api/routes/invoices.py
+src/api/routes/purchase_orders.py
+src/api/routes/grns.py
+src/api/routes/matching.py
+src/api/routes/health.py
+```
+
+### API Schemas
+```
+src/api/schemas/__init__.py
+src/api/schemas/auth.py
+src/api/schemas/invoice.py
+src/api/schemas/po.py
+src/api/schemas/grn.py
+src/api/schemas/matching.py
+src/api/schemas/common.py
+```
+
+### Database Layer
+```
+src/db/__init__.py
+src/db/database.py
+src/db/repositories/__init__.py
+src/db/repositories/invoice_repo.py
+src/db/repositories/po_repo.py
+src/db/repositories/grn_repo.py
+src/db/repositories/match_result_repo.py
+src/db/migrations/  (Alembic migration files)
+```
+
+### ORM Models
+```
+src/models/__init__.py
+src/models/base.py
+src/models/invoice.py
+src/models/purchase_order.py
+src/models/grn.py
+src/models/line_item.py
+src/models/match_result.py
+src/models/supplier.py
+src/models/customer.py
+src/models/user.py
+```
+
+### Services
+```
+src/services/__init__.py
+src/services/auth.py
+src/services/invoice_service.py
+src/services/po_service.py
+src/services/grn_service.py
+src/services/matching_service.py
+```
+
+### Workers
+```
+src/workers/__init__.py
+src/workers/matching_worker.py
+```
+
+### Configuration
+```
+config.yaml
+requirements.txt (Phase 4 dependencies)
+.env.example
+.env.production
+```
+
+### Docker
+```
+Dockerfile
+docker-compose.yml
+docker-compose.prod.yml
+```
+
+### Tests
+```
+src/tests/unit/  (unit tests for API layer)
+src/tests/integration/  (integration tests)
+```
+
+### Documentation
+```
+README.md (update with Phase 4 content)
+```
+
+---
+
+## 13. Next Phase
 
 Phase 5: Testing & Operations — Unit/integration tests, CI/CD pipeline, monitoring, alerting.

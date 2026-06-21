@@ -309,6 +309,61 @@ pytest-cov>=4.1
 
 ---
 
-## 10. Next Phase
+## 10. Files to Create
+
+The following files must be created in Phase 3:
+
+### Core Module
+```
+src/core/__init__.py
+src/core/engine.py
+src/core/config.py
+```
+
+### Matchers
+```
+src/core/matchers/__init__.py
+src/core/matchers/invoice.py
+src/core/matchers/po.py
+src/core/matchers/grn.py
+src/core/matchers/line.py
+```
+
+### Validators
+```
+src/core/validators/__init__.py
+src/core/validators/amount.py
+src/core/validators/date.py
+src/core/validators/quantity.py
+src/core/validators/currency.py
+```
+
+### Models
+```
+src/core/models/__init__.py
+src/core/models/document.py
+src/core/models/line.py
+src/core/models/match_result.py
+src/core/models/mismatch.py
+```
+
+### Tests
+```
+src/tests/unit/test_matching_engine.py
+```
+
+### Configuration
+```
+config.yaml
+```
+
+### Requirements
+```
+requirements.txt (Phase 3 dependencies)
+```
+
+---
+
+## 11. Next Phase
 
 Phase 4: API Platform — Expose matching engine via FastAPI REST endpoints with PostgreSQL persistence.
