@@ -1,52 +1,10 @@
 # api/__init__.py
-"""API module package."""
+"""API package for FastAPI endpoints."""
 
-from api.schemas import (
-    BalanceLedgerResponse,
-    DecisionResponse,
-    ExceptionResponse,
-    ExceptionResolveRequest,
-    ExceptionDismissRequest,
-    InvoiceCreateRequest,
-    InvoiceLineResponse,
-    InvoiceResponse,
-    InvoiceUpdateRequest,
-    LineMatchResponse,
-    MatchTriggerRequest,
-    MatchingDecisionResponse,
-    PaginatedResponse,
-    PaginationParams,
-    PurchaseOrderCreateRequest,
-    PurchaseOrderLineResponse,
-    PurchaseOrderResponse,
-    DeliveryNoteCreateRequest,
-    DeliveryNoteLineResponse,
-    DeliveryNoteResponse,
-    HealthResponse,
-    ErrorResponse,
-)
+from api.schemas import BaseResponse, ErrorResponse, HealthResponse
 
 __all__ = [
-    "BalanceLedgerResponse",
-    "DecisionResponse",
-    "ExceptionResponse",
-    "ExceptionResolveRequest",
-    "ExceptionDismissRequest",
-    "InvoiceCreateRequest",
-    "InvoiceLineResponse",
-    "InvoiceResponse",
-    "InvoiceUpdateRequest",
-    "LineMatchResponse",
-    "MatchTriggerRequest",
-    "MatchingDecisionResponse",
-    "PaginatedResponse",
-    "PaginationParams",
-    "PurchaseOrderCreateRequest",
-    "PurchaseOrderLineResponse",
-    "PurchaseOrderResponse",
-    "DeliveryNoteCreateRequest",
-    "DeliveryNoteLineResponse",
-    "DeliveryNoteResponse",
-    "HealthResponse",
+    "BaseResponse",
     "ErrorResponse",
+    "HealthResponse",
 ]

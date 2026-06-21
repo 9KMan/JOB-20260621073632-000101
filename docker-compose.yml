@@ -1,80 +1,116 @@
 # docker-compose.yml
+version: "3.9"
+
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap-automation-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apautomation}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apautomation_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apautomation}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ap-automation-network
-
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
-    environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_secret}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 100
-      DEFAULT_POOL_SIZE: 20
-    ports:
-      - "6432:5432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ap-automation-network
-
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ap-automation-api
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_secret}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 5432
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
-      JWT_ALGORITHM: HS256
-      THRESHOLD_HIGH: 0.95
-      THRESHOLD_MID: 0.70
-      THRESHOLD_LOW: 0.50
-      TOLERANCE_PRICE: 0.02
-      TOLERANCE_QTY: 0.05
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5432
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme-in-production-use-strong-secret}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - THRESHOLD_HIGH=0.95
+      - THRESHOLD_MID=0.80
+      - THRESHOLD_LOW=0.60
+      - TOLERANCE_PRICE=0.02
+      - TOLERANCE_QTY=0.05
+      - LOG_LEVEL=INFO
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    networks:
+      - ap-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - ap-automation-network
+      start_period: 10s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap-automation-postgres
+    environment:
+      - POSTGRES_USER=apuser
+      - POSTGRES_PASSWORD=appass
+      - POSTGRES_DB=apautomation
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+    ports:
+      - "5432:5432"
     volumes:
-      - ./src:/app/src:ro
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ap-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap-automation-pgbouncer
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=apautomation
+      - DATABASE_USER=apuser
+      - DATABASE_PASSWORD=appass
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=5
+      - RESERVE_POOL_TIMEOUT=5
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ap-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U apuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: pgadmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ap-automation-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ap-network
+    restart: unless-stopped
+    profiles:
+      - debug
 
 volumes:
   postgres_data:
 
 networks:
-  ap-automation-network:
+  ap-network:
     driver: bridge

@@ -1,136 +1,170 @@
 # models/enums.py
-"""Enum definitions for the AP Automation Engine."""
+"""SQLAlchemy enums for status and type fields."""
 
-import enum
+import uuid
+from enum import Enum
+from typing import Any
+
+from sqlalchemy import String, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
 
 
-class DocumentStatus(str, enum.Enum):
-    """Status for documents (PO, Invoice, DN)."""
+class EnumMixin:
+    """Mixin to add common enum functionality."""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert enum to dictionary."""
+        return {
+            "value": self.value,
+            "name": self.name,
+        }
+
+    @classmethod
+    def values(cls) -> list[str]:
+        """Get all enum values as list."""
+        return [e.value for e in cls]
+
+
+# Invoice Status
+class InvoiceStatus(str, Enum, EnumMixin):
+    """Status values for invoices."""
 
     DRAFT = "draft"
-    PENDING = "pending"
-    SUBMITTED = "submitted"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    CLOSED = "closed"
-
-
-class InvoiceStatus(str, enum.Enum):
-    """Status specific to invoices."""
-
-    DRAFT = "draft"
-    RECEIVED = "received"
-    PENDING_MATCH = "pending_match"
+    PENDING_VALIDATION = "pending_validation"
+    VALIDATED = "validated"
+    MATCHING = "matching"
     MATCHED = "matched"
-    MATCHED_WITH_EXCEPTIONS = "matched_with_exceptions"
+    EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, enum.Enum):
-    """Status specific to purchase orders."""
+# Purchase Order Status
+class PurchaseOrderStatus(str, Enum, EnumMixin):
+    """Status values for purchase orders."""
 
     DRAFT = "draft"
-    APPROVED = "approved"
     SENT = "sent"
+    ACKNOWLEDGED = "acknowledged"
     PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class MatchStatus(str, enum.Enum):
-    """Status for matching operations."""
+# Delivery Note Status
+class DeliveryNoteStatus(str, Enum, EnumMixin):
+    """Status values for delivery notes."""
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    MATCHED = "matched"
-    PARTIAL_MATCH = "partial_match"
-    NO_MATCH = "no_match"
-    EXCEPTION = "exception"
+    DRAFT = "draft"
+    ISSUED = "issued"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
+    INVOICED = "invoiced"
     CANCELLED = "cancelled"
 
 
-class LineMatchStatus(str, enum.Enum):
-    """Status for individual line matching."""
+# Match Status
+class MatchStatus(str, Enum, EnumMixin):
+    """Status values for matching process."""
 
     PENDING = "pending"
-    FULL_MATCH = "full_match"
-    PARTIAL_MATCH = "partial_match"
-    OVER_DELIVERED = "over_delivered"
-    UNDER_DELIVERED = "under_delivered"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
     NO_MATCH = "no_match"
-    EXCEPTION = "exception"
+    MANUAL_REVIEW = "manual_review"
 
 
-class MatchConfidence(str, enum.Enum):
-    """Match confidence levels."""
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
-
-
-class DecisionType(str, enum.Enum):
-    """Decision types for matching engine."""
+# Match Decision
+class MatchDecision(str, Enum, EnumMixin):
+    """Match decision outcomes."""
 
     AUTO_APPROVED = "auto_approved"
-    AUTO_REJECTED = "auto_rejected"
     MANUAL_REVIEW = "manual_review"
     EXCEPTION = "exception"
+    REJECTED = "rejected"
+    NO_MATCH_FOUND = "no_match_found"
 
 
-class ExceptionStatus(str, enum.Enum):
-    """Status for exceptions."""
+# Exception Type
+class ExceptionType(str, Enum, EnumMixin):
+    """Types of exceptions in matching."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY_NOTE = "missing_delivery_note"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    PARTIAL_MATCH = "partial_match"
+    DATE_VARIANCE = "date_variance"
+    VENDOR_MISMATCH = "vendor_mismatch"
+    TAX_VARIANCE = "tax_variance"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    UNEXPECTED_LINE = "unexpected_line"
+
+
+# Exception Status
+class ExceptionStatus(str, Enum, EnumMixin):
+    """Status of exceptions."""
 
     OPEN = "open"
-    UNDER_REVIEW = "under_review"
+    IN_REVIEW = "in_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
 
 
-class ExceptionReason(str, enum.Enum):
-    """Reasons for exceptions."""
+# Source System
+class SourceSystem(str, Enum, EnumMixin):
+    """Source systems for documents."""
 
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    TAX_VARIANCE = "tax_variance"
-    DELIVERY_DATE_VARIANCE = "delivery_date_variance"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    OTHER = "other"
+    ERP = "erp"
+    OCR = "ocr"
+    MANUAL = "manual"
+    EDI = "edi"
+    API = "api"
+    PORTAL = "portal"
 
 
-class LedgerTransactionType(str, enum.Enum):
-    """Types of ledger transactions."""
-
-    INVOICE = "invoice"
-    DELIVERY_NOTE = "delivery_note"
-    CREDIT_NOTE = "credit_note"
-    ADJUSTMENT = "adjustment"
-    CLOSURE = "closure"
+# SQLAlchemy column types for enums
+def get_invoice_status_enum() -> Any:
+    """Get SQLAlchemy enum type for InvoiceStatus."""
+    return SQLEnum(InvoiceStatus, name="invoice_status", create_constraint=True)
 
 
-class ConfidenceLevel(str, enum.Enum):
-    """Confidence levels for cross-reference learning."""
-
-    GOLD = "gold"
-    SILVER = "silver"
-    BRONZE = "bronze"
-    UNVERIFIED = "unverified"
+def get_purchase_order_status_enum() -> Any:
+    """Get SQLAlchemy enum type for PurchaseOrderStatus."""
+    return SQLEnum(PurchaseOrderStatus, name="purchase_order_status", create_constraint=True)
 
 
-class MatchType(str, enum.Enum):
-    """Types of matches."""
+def get_delivery_note_status_enum() -> Any:
+    """Get SQLAlchemy enum type for DeliveryNoteStatus."""
+    return SQLEnum(DeliveryNoteStatus, name="delivery_note_status", create_constraint=True)
 
-    PO_MATCH = "po_match"
-    DN_MATCH = "dn_match"
-    PARTIAL_MATCH = "partial_match"
-    VARIANCE_MATCH = "variance_match"
+
+def get_match_status_enum() -> Any:
+    """Get SQLAlchemy enum type for MatchStatus."""
+    return SQLEnum(MatchStatus, name="match_status", create_constraint=True)
+
+
+def get_match_decision_enum() -> Any:
+    """Get SQLAlchemy enum type for MatchDecision."""
+    return SQLEnum(MatchDecision, name="match_decision", create_constraint=True)
+
+
+def get_exception_type_enum() -> Any:
+    """Get SQLAlchemy enum type for ExceptionType."""
+    return SQLEnum(ExceptionType, name="exception_type", create_constraint=True)
+
+
+def get_exception_status_enum() -> Any:
+    """Get SQLAlchemy enum type for ExceptionStatus."""
+    return SQLEnum(ExceptionStatus, name="exception_status", create_constraint=True)
+
+
+def get_source_system_enum() -> Any:
+    """Get SQLAlchemy enum type for SourceSystem."""
+    return SQLEnum(SourceSystem, name="source_system", create_constraint=True)

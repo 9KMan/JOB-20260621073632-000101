@@ -1,13 +1,13 @@
 # core/config.py
 """Application configuration using pydantic-settings.
 
-All configuration is managed via environment variables.
+All configuration is loaded from environment variables.
 """
 
 from functools import lru_cache
-from typing import List
+from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, PostgresDsn, RedisDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,100 +22,116 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = Field(default="ap-automation-engine", description="Application name")
-    app_version: str = Field(default="0.1.0", description="Application version")
-    debug: bool = Field(default=False, description="Debug mode")
-    log_level: str = Field(default="INFO", description="Logging level")
+    APP_NAME: str = "AP Automation Engine"
+    APP_VERSION: str = "0.1.0"
+    DEBUG: bool = Field(default=False)
+    LOG_LEVEL: str = Field(default="INFO")
 
     # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/ap_automation",
-        description="Async database connection URL",
+    DATABASE_URL: PostgresDsn = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        description="PostgreSQL async connection string",
     )
-    database_pool_size: int = Field(default=20, description="Database connection pool size")
-    database_max_overflow: int = Field(default=10, description="Max pool overflow")
-    database_pool_timeout: int = Field(default=30, description="Pool timeout in seconds")
-    database_echo: bool = Field(default=False, description="Echo SQL queries")
+    DATABASE_POOL_SIZE: int = Field(default=20, ge=1)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    DATABASE_POOL_RECYCLE: int = Field(default=3600, ge=0)
 
-    # JWT Authentication
-    jwt_secret_key: str = Field(
-        default="dev-secret-key-change-in-production",
-        description="Secret key for JWT signing",
+    # PGBouncer (optional)
+    PGBOUNCER_HOST: str | None = Field(default=None)
+    PGBOUNCER_PORT: int = Field(default=5432)
+    PGBOUNCER_DATABASE: str = Field(default="apautomation")
+
+    # Security - JWT
+    JWT_SECRET_KEY: str = Field(
+        default="changeme-in-production-use-strong-secret",
+        description="Secret key for JWT token signing (HS256)",
     )
-    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
-    jwt_access_token_expire_minutes: int = Field(
-        default=30, description="Access token expiration in minutes"
+    JWT_ALGORITHM: str = Field(default="HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1)
+
+    # Security - Password
+    BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=31)
+
+    # Matching Thresholds
+    THRESHOLD_HIGH: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold (above this = automatic approval)",
     )
-    jwt_refresh_token_expire_days: int = Field(
-        default=7, description="Refresh token expiration in days"
+    THRESHOLD_MID: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="1-click review threshold (between mid and high = review)",
+    )
+    THRESHOLD_LOW: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold (below this = exception flag)",
     )
 
-    # Matching Engine Thresholds (percentages)
-    threshold_high: int = Field(
-        default=90,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold percentage",
+    # Tolerance Settings
+    TOLERANCE_PRICE: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Price match tolerance percentage (2%)",
     )
-    threshold_mid: int = Field(
-        default=70,
-        ge=0,
-        le=100,
-        description="1-click review threshold percentage",
-    )
-    threshold_low: int = Field(
-        default=50,
-        ge=0,
-        le=100,
-        description="Exception threshold percentage",
-    )
-
-    # Tolerance Settings (percentages)
-    tolerance_price: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        description="Price match tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        description="Quantity match tolerance percentage",
+    TOLERANCE_QTY: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Quantity match tolerance percentage (5%)",
     )
 
     # CORS
-    cors_origins: List[str] = Field(
+    CORS_ORIGINS: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8080"],
         description="Allowed CORS origins",
     )
 
-    # Alembic
-    alembic_config: str = Field(default="alembic.ini", description="Alembic config file path")
+    # Redis (optional, for caching)
+    REDIS_URL: RedisDsn | None = Field(default=None)
 
     @property
-    def thresholds(self) -> dict:
-        """Return thresholds as a sorted dictionary."""
-        return {
-            "high": self.threshold_high,
-            "mid": self.threshold_mid,
-            "low": self.threshold_low,
-        }
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return not self.DEBUG
 
     @property
-    def tolerances(self) -> dict:
-        """Return tolerances as a dictionary."""
-        return {
-            "price": self.tolerance_price,
-            "qty": self.tolerance_qty,
-        }
+    def effective_database_url(self) -> str:
+        """Get the effective database URL, considering PGBouncer."""
+        if self.PGBOUNCER_HOST:
+            return (
+                f"postgresql+asyncpg://{self.DATABASE_URL.username}:"
+                f"{self.DATABASE_URL.password}@{self.PGBOUNCER_HOST}:"
+                f"{self.PGBOUNCER_PORT}/{self.PGBOUNCER_DATABASE}"
+            )
+        return str(self.DATABASE_URL)
+
+    def validate_thresholds(self) -> None:
+        """Validate threshold ordering."""
+        if not 0 <= self.THRESHOLD_LOW <= self.THRESHOLD_MID <= self.THRESHOLD_HIGH <= 1:
+            raise ValueError(
+                "Thresholds must be ordered: 0 <= THRESHOLD_LOW <= "
+                "THRESHOLD_MID <= THRESHOLD_HIGH <= 1"
+            )
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    settings = Settings()
+    settings.validate_thresholds()
+    return settings
 
 
 # Global settings instance
 settings = get_settings()
+
+# Type alias for dependency injection
+SettingsDep = Annotated[Settings, Field(default_factory=get_settings)]
