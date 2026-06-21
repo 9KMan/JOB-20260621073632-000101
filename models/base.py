@@ -1,26 +1,28 @@
 # models/base.py
-"""SQLAlchemy declarative base for all models."""
+"""SQLAlchemy declarative base."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base for all ORM models.
+def generate_uuid() -> str:
+    """Generate a new UUID string."""
+    return str(uuid.uuid4())
 
-    Provides common functionality for all models including:
-    - UUID primary keys
-    - Automatic timestamp management
-    - Soft delete support
-    """
+
+def utc_now() -> datetime:
+    """Get current UTC datetime."""
+    return datetime.now(timezone.utc)
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
 
     type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
         datetime: DateTime(timezone=True),
     }
 
@@ -30,52 +32,50 @@ class TimestampMixin:
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=utc_now,
         nullable=False,
-        doc="Timestamp when the record was created",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=utc_now,
+        onupdate=utc_now,
         nullable=False,
-        doc="Timestamp when the record was last updated",
     )
 
 
-class UUIDPrimaryKeyMixin:
+class UUIDMixin:
     """Mixin for UUID primary key."""
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    id: Mapped[str] = mapped_column(
         primary_key=True,
-        default=uuid.uuid4,
+        default=generate_uuid,
         nullable=False,
-        doc="Unique identifier (UUID)",
     )
 
 
 class SoftDeleteMixin:
-    """Mixin for soft delete support."""
+    """Mixin for soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=True,
         default=None,
-        doc="Timestamp when the record was soft deleted",
+        nullable=True,
     )
     is_deleted: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
-        doc="Flag indicating if the record is soft deleted",
     )
 
 
-def utc_now() -> datetime:
-    """Return current UTC datetime."""
-    return datetime.now(timezone.utc)
+@event.listens_for(Base, "before_insert", propagate=True)
+def set_created_at(mapper: Any, connection: Any, target: Any) -> None:
+    """Set created_at timestamp before insert."""
+    if hasattr(target, "created_at") and target.created_at is None:
+        target.created_at = utc_now()
 
 
-def generate_uuid() -> uuid.UUID:
-    """Generate a new UUID4."""
-    return uuid.uuid4()
+@event.listens_for(Base, "before_update", propagate=True)
+def set_updated_at(mapper: Any, connection: Any, target: Any) -> None:
+    """Set updated_at timestamp before update."""
+    if hasattr(target, "updated_at"):
+        target.updated_at = utc_now()

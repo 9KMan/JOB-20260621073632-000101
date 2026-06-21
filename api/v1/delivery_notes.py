@@ -8,183 +8,219 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import (
-    DeliveryNoteCreateSchema,
-    DeliveryNoteListSchema,
-    DeliveryNoteResponseSchema,
+    DeliveryNoteCreate,
+    DeliveryNoteResponse,
     PaginatedResponse,
+    PaginationParams,
+    SuccessResponse,
+    ErrorResponse,
 )
-from core.database import DbSession
-from models import DeliveryNote, DeliveryNoteLine
-from models.enums import DeliveryNoteStatus
+from core.database import get_db
+from models import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
 
 router = APIRouter()
 
 
 @router.post(
     "",
-    response_model=DeliveryNoteResponseSchema,
+    response_model=DeliveryNoteResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Ingest a new delivery note",
-    description="Create a new delivery note with optional line items.",
+    responses={
+        400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+    },
 )
 async def create_delivery_note(
-    dn_data: DeliveryNoteCreateSchema,
-    session: DbSession,
-) -> DeliveryNote:
-    """Create a new delivery note."""
-    # Check for duplicate DN number
-    existing = await session.execute(
-        select(DeliveryNote).where(DeliveryNote.dn_number == dn_data.dn_number)
+    dn_data: DeliveryNoteCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeliveryNoteResponse:
+    """Create a new delivery note with lines."""
+    existing = await db.execute(
+        select(DeliveryNote).where(
+            DeliveryNote.dn_number == dn_data.dn_number,
+            DeliveryNote.vendor_number == dn_data.vendor_number,
+        )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Delivery note {dn_data.dn_number} already exists",
+            detail=f"Delivery Note {dn_data.dn_number} already exists for this vendor",
         )
 
-    # Create delivery note
-    dn = DeliveryNote(
-        dn_number=dn_data.dn_number,
-        po_number=dn_data.po_number,
-        vendor_code=dn_data.vendor_code,
+    delivery_note = DeliveryNote(
+        vendor_number=dn_data.vendor_number,
         vendor_name=dn_data.vendor_name,
-        delivery_date=dn_data.delivery_date,
+        dn_number=dn_data.dn_number,
+        dn_date=dn_data.dn_date,
         received_date=dn_data.received_date,
-        currency=dn_data.currency,
         total_amount=dn_data.total_amount,
-        status=DeliveryNoteStatus.RECEIVED.value,
+        currency=dn_data.currency,
+        status=DeliveryNoteStatus.CONFIRMED.value,
+        notes=dn_data.notes,
         source_system=dn_data.source_system,
-        erp_dn_id=dn_data.erp_dn_id,
-        metadata_json=dn_data.metadata,
+        po_number=dn_data.po_number,
+        carrier=dn_data.carrier,
+        tracking_number=dn_data.tracking_number,
     )
 
-    session.add(dn)
-    await session.flush()
-
-    # Create line items
     for line_data in dn_data.lines:
         line = DeliveryNoteLine(
-            delivery_note_id=dn.id,
             line_number=line_data.line_number,
             description=line_data.description,
             quantity=line_data.quantity,
-            unit_of_measure=line_data.unit_of_measure,
             unit_price=line_data.unit_price,
             line_amount=line_data.line_amount,
             po_line_id=line_data.po_line_id,
-            status="received",
+            item_number=line_data.item_number,
+            uom=line_data.uom,
         )
-        session.add(line)
+        delivery_note.lines.append(line)
 
-    await session.commit()
-    await session.refresh(dn)
+    db.add(delivery_note)
+    await db.flush()
+    await db.refresh(delivery_note)
 
-    return dn
+    return DeliveryNoteResponse.model_validate(delivery_note)
 
 
 @router.get(
     "",
-    response_model=PaginatedResponse[DeliveryNoteListSchema],
-    summary="List delivery notes",
-    description="Retrieve a paginated list of delivery notes.",
+    response_model=PaginatedResponse[DeliveryNoteResponse],
 )
 async def list_delivery_notes(
-    session: DbSession,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    vendor_code: str | None = None,
-    po_number: str | None = None,
-    status_filter: str | None = Query(None, alias="status"),
-) -> dict:
-    """List delivery notes with pagination and filters."""
-    # Build query
-    query = select(DeliveryNote).where(DeliveryNote.deleted_at.is_(None))
-    count_query = select(func.count(DeliveryNote.id)).where(
-        DeliveryNote.deleted_at.is_(None)
-    )
+    db: Annotated[AsyncSession, Depends(get_db)],
+    pagination: Annotated[PaginationParams, Depends()],
+    vendor_number: str | None = Query(None, description="Filter by vendor number"),
+    status_filter: str | None = Query(None, alias="status", description="Filter by status"),
+    po_number: str | None = Query(None, alias="po_number", description="Filter by PO number"),
+) -> PaginatedResponse[DeliveryNoteResponse]:
+    """List all delivery notes with pagination and filters."""
+    query = select(DeliveryNote).where(DeliveryNote.is_deleted == False)
+    count_query = select(func.count(DeliveryNote.id)).where(DeliveryNote.is_deleted == False)
 
-    if vendor_code:
-        query = query.where(DeliveryNote.vendor_code == vendor_code)
-        count_query = count_query.where(DeliveryNote.vendor_code == vendor_code)
-
-    if po_number:
-        query = query.where(DeliveryNote.po_number == po_number)
-        count_query = count_query.where(DeliveryNote.po_number == po_number)
+    if vendor_number:
+        query = query.where(DeliveryNote.vendor_number == vendor_number)
+        count_query = count_query.where(DeliveryNote.vendor_number == vendor_number)
 
     if status_filter:
         query = query.where(DeliveryNote.status == status_filter)
         count_query = count_query.where(DeliveryNote.status == status_filter)
 
-    # Get total count
-    total = await session.scalar(count_query)
-    total = total or 0
+    if po_number:
+        query = query.where(DeliveryNote.po_number == po_number)
+        count_query = count_query.where(DeliveryNote.po_number == po_number)
 
-    # Apply pagination
-    offset = (page - 1) * page_size
-    query = query.order_by(DeliveryNote.created_at.desc()).offset(offset).limit(page_size)
+    query = query.offset(pagination.offset).limit(pagination.page_size)
+    query = query.order_by(DeliveryNote.dn_date.desc())
 
-    result = await session.execute(query)
-    delivery_notes = result.scalars().all()
+    result = await db.execute(query)
+    count_result = await db.execute(count_query)
 
-    return {
-        "items": delivery_notes,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "pages": (total + page_size - 1) // page_size if total > 0 else 0,
-    }
+    delivery_notes_list = result.scalars().all()
+    total = count_result.scalar() or 0
+
+    return PaginatedResponse.create(
+        items=[DeliveryNoteResponse.model_validate(dn) for dn in delivery_notes_list],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )
 
 
 @router.get(
     "/{dn_id}",
-    response_model=DeliveryNoteResponseSchema,
-    summary="Get delivery note by ID",
-    description="Retrieve a single delivery note with line items.",
+    response_model=DeliveryNoteResponse,
+    responses={404: {"model": ErrorResponse}},
 )
 async def get_delivery_note(
     dn_id: str,
-    session: DbSession,
-) -> DeliveryNote:
-    """Get delivery note by ID."""
-    result = await session.execute(
-        select(DeliveryNote).where(DeliveryNote.id == dn_id)
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeliveryNoteResponse:
+    """Get a specific delivery note by ID."""
+    result = await db.execute(
+        select(DeliveryNote).where(
+            DeliveryNote.id == dn_id, DeliveryNote.is_deleted == False
+        )
     )
-    dn = result.scalar_one_or_none()
+    delivery_note = result.scalar_one_or_none()
 
-    if not dn:
+    if not delivery_note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Delivery note {dn_id} not found",
+            detail=f"Delivery Note {dn_id} not found",
         )
 
-    return dn
+    return DeliveryNoteResponse.model_validate(delivery_note)
 
 
 @router.patch(
     "/{dn_id}/status",
-    response_model=DeliveryNoteResponseSchema,
-    summary="Update delivery note status",
-    description="Update the status of a delivery note.",
+    response_model=DeliveryNoteResponse,
+    responses={404: {"model": ErrorResponse}, 400: {"model": ErrorResponse}},
 )
 async def update_delivery_note_status(
     dn_id: str,
     new_status: str,
-    session: DbSession,
-) -> DeliveryNote:
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeliveryNoteResponse:
     """Update delivery note status."""
-    result = await session.execute(
-        select(DeliveryNote).where(DeliveryNote.id == dn_id)
+    result = await db.execute(
+        select(DeliveryNote).where(
+            DeliveryNote.id == dn_id, DeliveryNote.is_deleted == False
+        )
     )
-    dn = result.scalar_one_or_none()
+    delivery_note = result.scalar_one_or_none()
 
-    if not dn:
+    if not delivery_note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Delivery note {dn_id} not found",
+            detail=f"Delivery Note {dn_id} not found",
         )
 
-    dn.status = new_status
-    await session.commit()
-    await session.refresh(dn)
+    try:
+        DeliveryNoteStatus(new_status)
+    except ValueError:
+        valid_statuses = [s.value for s in DeliveryNoteStatus]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Valid values: {valid_statuses}",
+        )
 
-    return dn
+    delivery_note.status = new_status
+    await db.flush()
+    await db.refresh(delivery_note)
+
+    return DeliveryNoteResponse.model_validate(delivery_note)
+
+
+@router.delete(
+    "/{dn_id}",
+    response_model=SuccessResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def delete_delivery_note(
+    dn_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse:
+    """Soft delete a delivery note."""
+    result = await db.execute(
+        select(DeliveryNote).where(
+            DeliveryNote.id == dn_id, DeliveryNote.is_deleted == False
+        )
+    )
+    delivery_note = result.scalar_one_or_none()
+
+    if not delivery_note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Delivery Note {dn_id} not found",
+        )
+
+    delivery_note.is_deleted = True
+    delivery_note.deleted_at = func.now()
+    await db.flush()
+
+    return SuccessResponse(
+        success=True,
+        message=f"Delivery Note {dn_id} deleted successfully",
+    )

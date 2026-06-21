@@ -1,40 +1,68 @@
 # pyproject.toml
-[tool.poetry]
-name = "finaro-ap-automation"
+[project]
+name = "ap-automation-engine"
 version = "0.1.0"
-description = "FinaRo AP Automation Core Engine - 3-Way Matching Engine"
-authors = ["FinaRo Team"]
+description = "AP Automation Core Engine for FinaRo"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "FinaRo", email = "dev@finaro.com"}
+]
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.9",
+    "psycopg2-binary>=2.9.9",
+    "greenlet>=3.0.0",
+    "httpx>=0.27.0",
+    "pytest>=8.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-fastapi = "^0.109.2"
-uvicorn = {extras = ["standard"], version = "^0.27.1"}
-python-multipart = "^0.0.9"
-pydantic = "^2.6.1"
-pydantic-settings = "^2.1.0"
-sqlalchemy = "^2.0.25"
-alembic = "^1.13.1"
-asyncpg = "^0.29.0"
-psycopg2-binary = "^2.9.9"
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-bcrypt = "^4.1.2"
-email-validator = "^2.1.0"
-python-dotenv = "^1.0.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.4"
-pytest-cov = "^4.1.0"
-httpx = "^0.26.0"
+[project.optional-dependencies]
+dev = [
+    "black>=24.0.0",
+    "isort>=5.13.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "models*", "api*", "services*", "workers*", "migrations*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

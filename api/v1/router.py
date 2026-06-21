@@ -1,45 +1,34 @@
 # api/v1/router.py
-"""API v1 router aggregator.
-
-Combines all domain routers into a single API router
-with the /api/v1 prefix.
-"""
+"""API v1 router aggregator."""
 
 from fastapi import APIRouter
 
-from api.v1 import (
-    invoices,
-    purchase_orders,
-    delivery_notes,
-    matching,
-    exceptions,
-)
+from api.v1 import invoices, purchase_orders, delivery_notes, matching, exceptions
 
-api_router = APIRouter()
+api_router = APIRouter(prefix="/api/v1")
 
-# Include all domain routers
 api_router.include_router(
     invoices.router,
     prefix="/invoices",
-    tags=["invoices"],
+    tags=["Invoices"],
 )
 api_router.include_router(
     purchase_orders.router,
     prefix="/purchase-orders",
-    tags=["purchase-orders"],
+    tags=["Purchase Orders"],
 )
 api_router.include_router(
     delivery_notes.router,
     prefix="/delivery-notes",
-    tags=["delivery-notes"],
+    tags=["Delivery Notes"],
 )
 api_router.include_router(
     matching.router,
     prefix="/matching",
-    tags=["matching"],
+    tags=["Matching Engine"],
 )
 api_router.include_router(
     exceptions.router,
     prefix="/exceptions",
-    tags=["exceptions"],
+    tags=["Exceptions"],
 )

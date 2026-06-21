@@ -1,160 +1,85 @@
-// models/balance_ledger.py
-"""BalanceLedger SQLAlchemy model for tracking PO line balances."""
+# models/balance_ledger.py
+"""Balance ledger model for tracking PO/Invoice balances."""
 
-from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from sqlalchemy import (
-    Date,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    UniqueConstraint,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKey
+from models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
-    from models.purchase_order import PurchaseOrderLine
+    from models.invoice import InvoiceLine
 
 
-class BalanceLedger(Base, UUIDPrimaryKey, TimestampMixin):
-    """Balance Ledger model for tracking PO line invoicing balances.
-
-    This table provides an immutable audit trail of all invoice
-    applications against purchase order lines.
-    """
+class BalanceLedger(Base, UUIDMixin, TimestampMixin):
+    """Balance ledger for tracking purchase order balances."""
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        Index("ix_bl_po_line_id", "purchase_order_line_id"),
-        Index("ix_bl_transaction_type", "transaction_type"),
-        Index("ix_bl_posted_date", "posted_date"),
-        UniqueConstraint(
-            "purchase_order_line_id",
-            "transaction_id",
-            "transaction_type",
-            name="uq_bl_po_line_transaction",
-        ),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        Index("ix_balance_ledger_transaction_type", "transaction_type"),
     )
 
-    # Reference to PO Line
-    purchase_order_line_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+    po_line_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-
-    # Transaction Reference
+    invoice_line_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     transaction_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
     )
-    transaction_id: Mapped[str] = mapped_column(
-        String(50),
+    quantity_change: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
         nullable=False,
-        index=True,
     )
-
-    # Balance Tracking
-    posted_date: Mapped[date] = mapped_column(
-        Date,
-        nullable=False,
-        index=True,
-    )
-
-    # Amounts
-    original_amount: Mapped[Decimal] = mapped_column(
+    amount_change: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
-    applied_amount: Mapped[Decimal] = mapped_column(
+    running_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+    )
+    running_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
-    balance_remaining: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
+    reference_number: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
     )
-
-    # Quantity Tracking
-    original_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-    applied_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-    quantity_remaining: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-
-    # Status
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="active",
-    )
-
-    # Notes
-    notes: Mapped[Optional[str]] = mapped_column(
-        String(500),
+    description: Mapped[str | None] = mapped_column(
+        String(255),
         nullable=True,
     )
 
-    # Relationships
-    purchase_order_line: Mapped["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        back_populates="balance_ledger",
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine",
+        back_populates="balance_ledger_entries",
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<BalanceLedger {self.transaction_type} "
-            f"applied={self.applied_amount} "
-            f"remaining={self.balance_remaining}>"
-        )
+        return f"<BalanceLedger {self.transaction_type} - Qty: {self.quantity_change}>"
 
-    @classmethod
-    def create_invoice_entry(
-        cls,
-        po_line_id: str,
-        invoice_id: str,
-        amount: Decimal,
-        quantity: Decimal,
-        original_balance: Decimal,
-        original_qty: Decimal,
-    ) -> "BalanceLedger":
-        """Factory method to create an invoice ledger entry.
 
-        Args:
-            po_line_id: Purchase order line ID
-            invoice_id: Invoice ID reference
-            amount: Invoice amount applied
-            quantity: Invoice quantity applied
-            original_balance: Previous balance amount
-            original_qty: Previous balance quantity
+class TransactionType:
+    """Transaction type constants."""
 
-        Returns:
-            New BalanceLedger instance
-        """
-        return cls(
-            purchase_order_line_id=po_line_id,
-            transaction_type="invoice",
-            transaction_id=invoice_id,
-            posted_date=date.today(),
-            original_amount=original_balance,
-            applied_amount=amount,
-            balance_remaining=original_balance - amount,
-            original_quantity=original_qty,
-            applied_quantity=quantity,
-            quantity_remaining=original_qty - quantity,
-            status="active",
-        )
+    PO_CREATED = "po_created"
+    PO_AMENDED = "po_amended"
+    DN_RECEIVED = "dn_received"
+    DN_CANCELLED = "dn_cancelled"
+    INVOICE_CREATED = "invoice_created"
+    INVOICE_MATCHED = "invoice_matched"
+    INVOICE_CANCELLED = "invoice_cancelled"
+    CREDIT_MEMO = "credit_memo"
+    ADJUSTMENT = "adjustment"

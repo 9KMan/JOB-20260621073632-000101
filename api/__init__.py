@@ -1,11 +1,14 @@
-// api/__init__.py
-"""API package for AP Automation Engine.
+# api/__init__.py
+"""API package for AP Automation Engine."""
 
-This package contains FastAPI routers and Pydantic schemas for the REST API.
-"""
-
-from api.schemas import HealthCheck
+from api.schemas import (
+    PaginatedResponse,
+    ErrorResponse,
+    SuccessResponse,
+)
 
 __all__ = [
-    "HealthCheck",
+    "PaginatedResponse",
+    "ErrorResponse",
+    "SuccessResponse",
 ]
