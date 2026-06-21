@@ -1,43 +1,55 @@
-// src/app/models/base.py
-"""Base model classes with common functionality."""
-
+# src/app/models/base.py
+"""Base models with common mixins."""
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
-from sqlalchemy import Column, DateTime, Boolean, String
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import DateTime, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """Base class for all models."""
+    pass
 
 
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps."""
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+
+class UUIDMixin:
+    """Mixin for UUID primary key."""
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
         nullable=False,
     )
 
 
 class SoftDeleteMixin:
     """Mixin for soft delete functionality."""
-
-    deleted_at = Column(DateTime, nullable=True)
-    is_deleted = Column(Boolean, default=False, nullable=False)
-
-    def soft_delete(self) -> None:
-        """Mark record as deleted."""
-        self.deleted_at = datetime.utcnow()
-        self.is_deleted = True
-
-
-class BaseModel(Base, TimestampMixin, SoftDeleteMixin):
-    """Base model with UUID primary key and common mixins."""
-
-    __abstract__ = True
-
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )

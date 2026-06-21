@@ -1,105 +1,270 @@
-// src/app/models/matching.py
-"""Matching result and decision models."""
+# src/app/models/matching.py
+"""Matching models for 3-way matching."""
+import decimal
+import uuid
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, String, Numeric, ForeignKey, Text, Enum
-from sqlalchemy.orm import relationship
+from sqlalchemy import DECIMAL, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-import enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.models.base import BaseModel
+from src.app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from src.app.models.enums import MatchStatus, MatchResultType, DecisionType
 
-
-class MatchDecision(str, enum.Enum):
-    """Match decision enumeration."""
-
-    CONFIRMED = "CONFIRMED"
-    PENDING = "PENDING"
-    REJECTED = "REJECTED"
-
-
-class MatchType(str, enum.Enum):
-    """Match type enumeration."""
-
-    INVOICE_PO = "INVOICE_PO"
-    DELIVERY_NOTE_PO = "DELIVERY_NOTE_PO"
-    INVOICE_DELIVERY_NOTE = "INVOICE_DELIVERY_NOTE"
-    THREE_WAY = "THREE_WAY"
+if TYPE_CHECKING:
+    from src.app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+    from src.app.models.invoice import Invoice, InvoiceLine
+    from src.app.models.delivery_note import DeliveryNote, DeliveryNoteLine
+    from src.app.models.user import User
 
 
-class MatchResult(BaseModel):
-    """Match result entity storing all matching outcomes."""
-
+class MatchResult(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Result of matching between documents."""
+    
     __tablename__ = "match_results"
-
+    __table_args__ = (
+        {"schema": "matching"},
+    )
+    
     # Document references
-    invoice_id = Column(
-        UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=True
-    )
-    delivery_note_id = Column(
-        UUID(as_uuid=True), ForeignKey("delivery_notes.id", ondelete="CASCADE"), nullable=True
-    )
-    purchase_order_id = Column(
-        UUID(as_uuid=True), ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=True
-    )
-
-    # Match metadata
-    match_type = Column(String(20), nullable=False)
-    match_score = Column(Numeric(5, 4), nullable=False)
-    line_level_score = Column(Numeric(5, 4), nullable=True)
-    amount_score = Column(Numeric(5, 4), nullable=True)
-    date_score = Column(Numeric(5, 4), nullable=True)
-
-    # Decision
-    decision = Column(String(20), nullable=False, default=MatchDecision.PENDING.value)
-    auto_processed = Column(String(10), nullable=False, default="FALSE")
-
-    # Amount comparisons
-    invoice_amount = Column(Numeric(15, 2), nullable=True)
-    po_amount = Column(Numeric(15, 2), nullable=True)
-    dn_amount = Column(Numeric(15, 2), nullable=True)
-    variance_amount = Column(Numeric(15, 2), nullable=True)
-
-    # Quantity comparisons
-    invoice_quantity = Column(Numeric(12, 3), nullable=True)
-    po_quantity = Column(Numeric(12, 3), nullable=True)
-    dn_quantity = Column(Numeric(12, 3), nullable=True)
-    variance_quantity = Column(Numeric(12, 3), nullable=True)
-
-    # Details
-    details = Column(Text, nullable=True)
-    discrepancy_notes = Column(Text, nullable=True)
-
-    # Relationships
-    invoice = relationship("Invoice", foreign_keys=[invoice_id])
-    delivery_note = relationship("DeliveryNote", foreign_keys=[delivery_note_id])
-    purchase_order = relationship("PurchaseOrder", foreign_keys=[purchase_order_id])
-    confirmations = relationship(
-        "HumanConfirmation", back_populates="match_result", cascade="all, delete-orphan"
-    )
-
-    def __repr__(self) -> str:
-        return f"<MatchResult(id={self.id}, match_type={self.match_type}, decision={self.decision})>"
-
-
-class HumanConfirmation(BaseModel):
-    """Human confirmation for disputed matches."""
-
-    __tablename__ = "human_confirmations"
-
-    match_result_id = Column(
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("match_results.id", ondelete="CASCADE"),
+        ForeignKey("documents.invoices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.purchase_orders.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Match scores
+    line_level_score: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=5, scale=4),
         nullable=False,
     )
-    confirmed_by = Column(String(255), nullable=False)
-    confirmation_date = Column(String(50), nullable=False)
-    original_decision = Column(String(20), nullable=False)
-    new_decision = Column(String(20), nullable=False)
-    comments = Column(Text, nullable=True)
-    confidence_boost = Column(Numeric(5, 4), nullable=True)
-
+    amount_score: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=5, scale=4),
+        nullable=False,
+    )
+    date_score: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=5, scale=4),
+        nullable=False,
+    )
+    total_score: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=5, scale=4),
+        nullable=False,
+    )
+    
+    # Match type
+    match_type: Mapped[MatchResultType] = mapped_column(
+        SQLEnum(MatchResultType, name="match_result_type", create_type=False),
+        nullable=False,
+    )
+    
+    # Match status
+    status: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status", create_type=False),
+        default=MatchStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    
+    # Amount differences
+    invoice_amount: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=15, scale=2),
+        nullable=False,
+    )
+    po_amount: Mapped[Optional[decimal.Decimal]] = mapped_column(
+        Numeric(precision=15, scale=2),
+        nullable=True,
+    )
+    amount_difference: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=15, scale=2),
+        default=decimal.Decimal("0.00"),
+        nullable=False,
+    )
+    
+    # Notes
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    variance_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    
     # Relationships
-    match_result = relationship("MatchResult", back_populates="confirmations")
-
+    invoice: Mapped["Invoice"] = relationship(
+        "Invoice",
+        back_populates="match_results",
+    )
+    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
+        "DeliveryNote",
+        back_populates="match_results",
+    )
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        back_populates="matched_invoices",
+    )
+    cross_references: Mapped[list["CrossReference"]] = relationship(
+        "CrossReference",
+        back_populates="match_result",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    decisions: Mapped[list["MatchDecision"]] = relationship(
+        "MatchDecision",
+        back_populates="match_result",
+        lazy="selectin",
+    )
+    
     def __repr__(self) -> str:
-        return f"<HumanConfirmation(id={self.id}, new_decision={self.new_decision})>"
+        return f"<MatchResult(id={self.id}, status={self.status})>"
+
+
+class CrossReference(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Cross-reference between matched lines from different documents."""
+    
+    __tablename__ = "cross_references"
+    __table_args__ = (
+        {"schema": "matching"},
+    )
+    
+    # Match result reference
+    match_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("matching.match_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Line references (at least one pair must be present)
+    invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.invoice_lines.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.purchase_order_lines.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    dn_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.delivery_note_lines.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Match details
+    quantity_matched: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=12, scale=3),
+        nullable=False,
+    )
+    amount_matched: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=15, scale=2),
+        nullable=False,
+    )
+    match_confidence: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(precision=5, scale=4),
+        nullable=False,
+    )
+    
+    # Relationships
+    match_result: Mapped["MatchResult"] = relationship(
+        "MatchResult",
+        back_populates="cross_references",
+    )
+    invoice_line: Mapped[Optional["InvoiceLine"]] = relationship(
+        "InvoiceLine",
+        back_populates="cross_references",
+    )
+    po_line: Mapped[Optional["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine",
+        back_populates="matched_invoice_lines",
+    )
+    dn_line: Mapped[Optional["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
+        back_populates="cross_references",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<CrossReference(id={self.id})>"
+
+
+class MatchDecision(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Human review decision on a match result."""
+    
+    __tablename__ = "match_decisions"
+    __table_args__ = (
+        {"schema": "matching"},
+    )
+    
+    # Match result reference
+    match_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("matching.match_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Reviewer
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Decision
+    decision: Mapped[DecisionType] = mapped_column(
+        SQLEnum(DecisionType, name="decision_type", create_type=False),
+        nullable=False,
+    )
+    
+    # Comments
+    comments: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    
+    # Previous and new status
+    previous_status: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status", create_type=False),
+        nullable=False,
+    )
+    new_status: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status", create_type=False),
+        nullable=False,
+    )
+    
+    # Relationships
+    match_result: Mapped["MatchResult"] = relationship(
+        "MatchResult",
+        back_populates="decisions",
+    )
+    reviewed_by_user: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="decisions",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<MatchDecision(id={self.id}, decision={self.decision})>"

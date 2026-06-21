@@ -1,94 +1,108 @@
-// src/app/schemas/matching.py
-"""Matching Pydantic schemas."""
-
-from datetime import datetime
-from typing import Optional, List
+# src/app/schemas/matching.py
+"""Matching schemas."""
+from datetime import date, datetime
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from typing import Optional
+from uuid import UUID
 
-from src.app.schemas.invoice import InvoiceResponse
-from src.app.schemas.delivery_note import DeliveryNoteResponse
-from src.app.schemas.purchase_order import PurchaseOrderResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.app.schemas.common import BaseSchema, TimestampMixin, UUIDMixin
+from src.app.models.enums import MatchStatus, MatchResultType, DecisionType
 
 
-class MatchResultBase(BaseModel):
+class CrossReferenceBase(BaseSchema):
+    """Base cross-reference schema."""
+    invoice_line_id: Optional[UUID] = None
+    po_line_id: Optional[UUID] = None
+    dn_line_id: Optional[UUID] = None
+    quantity_matched: Decimal = Field(..., ge=0)
+    amount_matched: Decimal = Field(..., ge=0)
+    match_confidence: Decimal = Field(..., ge=0, le=1)
+
+
+class CrossReferenceCreate(CrossReferenceBase):
+    """Schema for creating a cross-reference."""
+    match_result_id: UUID
+
+
+class CrossReferenceRead(UUIDMixin, TimestampMixin, CrossReferenceBase):
+    """Schema for reading a cross-reference."""
+    match_result_id: UUID
+    deleted_at: Optional[datetime] = None
+    is_deleted: bool = False
+
+
+class MatchResultBase(BaseSchema):
     """Base match result schema."""
-
-    match_type: str
-    match_score: Decimal
-    decision: str
-
-
-class MatchResultResponse(MatchResultBase):
-    """Schema for match result response."""
-
-    id: str
-    invoice_id: Optional[str] = None
-    delivery_note_id: Optional[str] = None
-    purchase_order_id: Optional[str] = None
-    line_level_score: Optional[Decimal] = None
-    amount_score: Optional[Decimal] = None
-    date_score: Optional[Decimal] = None
-    auto_processed: str
-    invoice_amount: Optional[Decimal] = None
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID] = None
+    po_id: Optional[UUID] = None
+    line_level_score: Decimal = Field(..., ge=0, le=1)
+    amount_score: Decimal = Field(..., ge=0, le=1)
+    date_score: Decimal = Field(..., ge=0, le=1)
+    total_score: Decimal = Field(..., ge=0, le=1)
+    match_type: MatchResultType
+    invoice_amount: Decimal = Field(..., ge=0)
     po_amount: Optional[Decimal] = None
-    dn_amount: Optional[Decimal] = None
-    variance_amount: Optional[Decimal] = None
-    details: Optional[str] = None
-    discrepancy_notes: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    invoice: Optional[InvoiceResponse] = None
-    delivery_note: Optional[DeliveryNoteResponse] = None
-    purchase_order: Optional[PurchaseOrderResponse] = None
-
-    class Config:
-        from_attributes = True
+    amount_difference: Decimal = Field(default=Decimal("0.00"))
+    notes: Optional[str] = None
+    variance_reason: Optional[str] = None
 
 
-class MatchResultListResponse(BaseModel):
-    """Schema for paginated match result list response."""
-
-    items: List[MatchResultResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+class MatchResultCreate(MatchResultBase):
+    """Schema for creating a match result."""
+    cross_references: list[CrossReferenceCreate] = Field(default_factory=list)
 
 
-class MatchDecisionUpdate(BaseModel):
-    """Schema for updating match decision."""
+class MatchResultUpdate(BaseSchema):
+    """Schema for updating a match result."""
+    status: Optional[MatchStatus] = None
+    notes: Optional[str] = None
+    variance_reason: Optional[str] = None
 
-    decision: str = Field(..., pattern="^(CONFIRMED|PENDING|REJECTED)$")
+
+class MatchResultRead(UUIDMixin, TimestampMixin, MatchResultBase):
+    """Schema for reading a match result."""
+    status: MatchStatus
+    deleted_at: Optional[datetime] = None
+    is_deleted: bool = False
+    cross_references: list[CrossReferenceRead] = Field(default_factory=list)
+
+
+class MatchDecisionBase(BaseSchema):
+    """Base match decision schema."""
+    match_result_id: UUID
+    decision: DecisionType
     comments: Optional[str] = None
+    reason: Optional[str] = None
 
 
-class HumanConfirmationCreate(BaseModel):
-    """Schema for creating human confirmation."""
-
-    confirmed_by: str = Field(..., min_length=1, max_length=255)
-    confirmation_date: str = Field(..., max_length=50)
-    original_decision: str = Field(..., pattern="^(CONFIRMED|PENDING|REJECTED)$")
-    new_decision: str = Field(..., pattern="^(CONFIRMED|PENDING|REJECTED)$")
-    comments: Optional[str] = None
-    confidence_boost: Optional[Decimal] = Field(None, ge=0, le=1)
+class MatchDecisionCreate(MatchDecisionBase):
+    """Schema for creating a match decision."""
+    pass
 
 
-class MatchRequest(BaseModel):
-    """Schema for manual match request."""
-
-    invoice_id: Optional[str] = None
-    delivery_note_id: Optional[str] = None
-    purchase_order_id: Optional[str] = None
-    match_type: str = Field(..., pattern="^(INVOICE_PO|DELIVERY_NOTE_PO|INVOICE_DELIVERY_NOTE|THREE_WAY)$")
+class MatchDecisionRead(UUIDMixin, TimestampMixin, MatchDecisionBase):
+    """Schema for reading a match decision."""
+    reviewed_by: Optional[UUID] = None
+    previous_status: MatchStatus
+    new_status: MatchStatus
 
 
-class MatchSummaryResponse(BaseModel):
-    """Schema for matching summary response."""
+class MatchScoreBreakdown(BaseModel):
+    """Detailed match score breakdown."""
+    line_level_score: Decimal
+    amount_score: Decimal
+    date_score: Decimal
+    total_score: Decimal
+    weight_line_level: Decimal
+    weight_amount: Decimal
+    weight_date: Decimal
 
-    total_matches: int
-    confirmed: int
-    pending: int
-    rejected: int
-    auto_approved: int
-    human_review: int
+
+class MatchAnalysisResult(BaseModel):
+    """Result of a match analysis."""
+    match_result: MatchResultRead
+    score_breakdown: MatchScoreBreakdown
+    recommendations: list[str] = Field(default_factory=list)

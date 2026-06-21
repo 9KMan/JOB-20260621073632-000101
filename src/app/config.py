@@ -1,14 +1,14 @@
-// src/app/config.py
-"""Application configuration management."""
-import os
+# src/app/config.py
+"""Application configuration using Pydantic Settings."""
 from functools import lru_cache
-from typing import List
+from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings with environment variable support."""
+    """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -18,54 +18,57 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "FinaRo AP Automation"
-    app_version: str = "0.1.0"
-    debug: bool = False
-    secret_key: str = "change-me-in-production"
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = Field(default=False)
     
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finaro_ap"
-    database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/finaro_ap"
-    pgbouncer_host: str = "localhost"
-    pgbouncer_port: int = 5432
-    pgbouncer_pool_size: int = 20
+    DATABASE_URL: str = Field(
+        default="postgresql://finaro:finaro_secret@localhost:5432/finaro_db",
+        description="PostgreSQL connection string"
+    )
+    DATABASE_POOL_SIZE: int = Field(default=10, ge=1)
+    DATABASE_MAX_OVERFLOW: int = Field(default=20, ge=0)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    DATABASE_ECHO: bool = Field(default=False)
     
-    # JWT Authentication
-    jwt_secret_key: str = "change-me-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    # Redis
+    REDIS_URL: str = Field(default="redis://localhost:6379/0")
+    
+    # Authentication
+    SECRET_KEY: str = Field(
+        default="dev-secret-key-change-in-production",
+        description="Secret key for JWT signing"
+    )
+    ALGORITHM: str = Field(default="HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
+    
+    # Matching Engine Weights
+    MATCH_WEIGHT_LINE_LEVEL: float = Field(default=0.70)
+    MATCH_WEIGHT_AMOUNT: float = Field(default=0.20)
+    MATCH_WEIGHT_DATE: float = Field(default=0.10)
+    
+    # Decision Thresholds
+    MATCH_THRESHOLD_AUTO_APPROVE: float = Field(default=0.95)
+    MATCH_THRESHOLD_HUMAN_REVIEW: float = Field(default=0.70)
     
     # API
-    api_v1_prefix: str = "/api/v1"
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    API_V1_PREFIX: str = "/api/v1"
     
-    # Matching Engine Configuration
-    match_weight_line_level: float = 0.70
-    match_weight_amount: float = 0.20
-    match_weight_date: float = 0.10
-    auto_approve_threshold: float = 0.95
-    human_review_threshold: float = 0.70
+    # CORS
+    CORS_ORIGINS: list[str] = ["*"]
     
-    # Logging
-    log_level: str = "INFO"
-    log_format: str = "json"
+    def get_database_url_sync(self) -> str:
+        """Get synchronous database URL."""
+        return self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
     
     @property
-    def database_url_async(self) -> str:
-        """Return async database URL."""
-        return self.database_url
-    
-    @property
-    def cors_origins_list(self) -> List[str]:
-        """Return CORS origins as list."""
-        return [origin.strip() for origin in self.cors_origins]
+    def async_database_url(self) -> str:
+        """Get async database URL."""
+        return self.DATABASE_URL
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
-
-
-settings = get_settings()
