@@ -6,3 +6,9 @@ SPEC.txt
 TASK.txt
 pid
 role
+
+# Worker-internal files — NEVER push to GitHub
+.planning/
+*.pyc
+__pycache__/
+.DS_Store
