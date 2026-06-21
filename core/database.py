@@ -3,29 +3,50 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from core.config import settings
 
-# Create async engine
-engine: AsyncEngine = create_async_engine(
-    settings.database_url,
-    echo=settings.database_echo,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
+
+def _get_effective_database_url() -> str:
+    """Get the effective database URL, respecting PGBouncer override."""
+    if settings.database.pgbouncer_host:
+        # Reconstruct URL with PGBouncer host/port
+        base_url = settings.database.database_url
+        # Extract parts from the URL
+        if "://" in base_url:
+            protocol, rest = base_url.split("://", 1)
+            if "@" in rest:
+                credentials_host, db_name = rest.rsplit("@", 1)
+                host_port, _ = credentials_host.split("/", 1) if "/" in credentials_host else (credentials_host, "")
+                if "/" in host_port:
+                    credentials, host = host_port.split("@", 1)
+                else:
+                    credentials = ""
+                    host = host_port
+                return f"{protocol}://{credentials}@{settings.database.pgbouncer_host}:{settings.database.pgbouncer_port}/{db_name.split('/')[-1]}"
+    return settings.database.database_url
+
+
+engine = create_async_engine(
+    _get_effective_database_url(),
+    echo=settings.database.echo_sql,
+    poolclass=AsyncAdaptedQueuePool,
+    pool_size=settings.database.pool_size,
+    max_overflow=settings.database.max_overflow,
+    pool_timeout=settings.database.pool_timeout,
     pool_pre_ping=True,
-    poolclass=NullPool if settings.debug else None,
 )
 
-# Session factory
-async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
+async_session_maker = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
@@ -35,11 +56,7 @@ async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency that yields a database session.
-    
-    Ensures proper cleanup after request completion.
-    """
+    """Dependency for FastAPI to get async database session."""
     async with async_session_maker() as session:
         try:
             yield session
@@ -53,11 +70,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 @asynccontextmanager
 async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for database sessions.
-    
-    Useful for background tasks and scripts.
-    """
+    """Context manager for database session (for non-FastAPI use)."""
     async with async_session_maker() as session:
         try:
             yield session
@@ -69,14 +82,4 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def init_db() -> None:
-    """Initialize database tables."""
-    from models.base import Base
-    
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-async def close_db() -> None:
-    """Close database connections."""
-    await engine.dispose()
+DbSession = Annotated[AsyncSession, Depends(get_db)]

@@ -1,17 +1,20 @@
 # models/__init__.py
-"""Database models package."""
+"""Data models package."""
 
 from models.base import Base
 from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from models.purchase_order import PurchaseOrder, POLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
 from models.cross_ref import CrossRef
 from models.enums import (
     InvoiceStatus,
-    PurchaseOrderStatus,
+    InvoiceType,
+    POStatus,
+    POType,
     DeliveryNoteStatus,
-    MatchDecision,
+    MatchStatus,
+    DecisionType,
     ExceptionType,
     ExceptionStatus,
 )
@@ -19,13 +22,13 @@ from models.enums import (
 __all__ = [
     # Base
     "Base",
-    # Invoices
+    # Invoice
     "Invoice",
     "InvoiceLine",
-    # Purchase Orders
+    # Purchase Order
     "PurchaseOrder",
-    "PurchaseOrderLine",
-    # Delivery Notes
+    "POLine",
+    # Delivery Note
     "DeliveryNote",
     "DeliveryNoteLine",
     # Balance Ledger
@@ -34,9 +37,12 @@ __all__ = [
     "CrossRef",
     # Enums
     "InvoiceStatus",
-    "PurchaseOrderStatus",
+    "InvoiceType",
+    "POStatus",
+    "POType",
     "DeliveryNoteStatus",
-    "MatchDecision",
+    "MatchStatus",
+    "DecisionType",
     "ExceptionType",
     "ExceptionStatus",
 ]

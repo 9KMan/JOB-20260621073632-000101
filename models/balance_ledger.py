@@ -1,108 +1,122 @@
 # models/balance_ledger.py
-"""Balance Ledger SQLAlchemy model for tracking open balances."""
+"""Balance Ledger SQLAlchemy model."""
 
-import uuid
+from datetime import datetime
 from decimal import Decimal
-from datetime import date
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 from sqlalchemy import (
-    Date,
     ForeignKey,
     Index,
     Numeric,
     String,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from models.invoice import Invoice, InvoiceLine
+    from models.purchase_order import POLine
 
 
-class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Balance ledger for tracking PO line balances."""
+class BalanceLedger(Base, UUIDMixin, TimestampMixin):
+    """Balance Ledger model for tracking PO line balances."""
 
     __tablename__ = "balance_ledger"
 
-    # Reference to PO Line
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+    po_line_id: Mapped[UUID] = mapped_column(
+        PG_UUID,
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-
-    # Reference to PO Header
-    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=False,
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
-
-    # Vendor
-    vendor_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-
-    # Balances
-    original_quantity: Mapped[Decimal] = mapped_column(
+    invoice_line_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    transaction_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    quantity_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+        default=Decimal("0.000"),
+    )
+    quantity_change: Mapped[Decimal] = mapped_column(
         Numeric(15, 3),
         nullable=False,
     )
-    received_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        default=Decimal("0"),
-        nullable=False,
-    )
-    invoiced_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        default=Decimal("0"),
-        nullable=False,
-    )
-
-    # Calculated balances
-    open_quantity: Mapped[Decimal] = mapped_column(
+    quantity_after: Mapped[Decimal] = mapped_column(
         Numeric(15, 3),
         nullable=False,
     )
-    open_amount: Mapped[Decimal] = mapped_column(
+    amount_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    amount_change: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
-
-    # Financial
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-
-    # Dates
-    po_date: Mapped[date] = mapped_column(Date, nullable=False)
-    po_close_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-
-    # Status
-    status: Mapped[str] = mapped_column(
-        String(50),
-        default="open",
+    amount_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
-        index=True,
     )
-
-    # Last activity
-    last_invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="SET NULL"),
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="USD",
+    )
+    reference: Mapped[str | None] = mapped_column(
+        String(100),
         nullable=True,
     )
-    last_activity_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    transaction_date: Mapped[datetime] = mapped_column(
+        nullable=False,
+    )
+    metadata: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
 
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        foreign_keys=[po_line_id],
+    po_line: Mapped["POLine"] = relationship(
+        "POLine",
+        back_populates="balance_ledger_entries",
     )
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        foreign_keys=[purchase_order_id],
+    invoice: Mapped["Invoice | None"] = relationship(
+        "Invoice",
+        back_populates="balance_ledger_entries",
+    )
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine",
     )
 
     __table_args__ = (
-        Index("ix_balance_ledger_vendor_status", "vendor_id", "status"),
-        Index("ix_balance_ledger_open", "status", "open_amount"),
+        UniqueConstraint(
+            "po_line_id",
+            "transaction_type",
+            "reference",
+            name="uq_balance_ledger_po_ref",
+        ),
+        Index("ix_balance_ledger_po_date", "po_line_id", "transaction_date"),
+        Index("ix_balance_ledger_invoice", "invoice_id"),
     )

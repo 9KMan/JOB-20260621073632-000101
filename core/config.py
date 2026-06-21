@@ -1,6 +1,7 @@
 # core/config.py
 """Application configuration using pydantic-settings."""
 
+import os
 from functools import lru_cache
 from typing import Optional
 
@@ -8,80 +9,141 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+class DatabaseSettings(BaseSettings):
+    """Database connection settings."""
+
+    model_config = SettingsConfigDict(env_prefix="")
+
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        description="Async PostgreSQL connection string",
+    )
+    pgbouncer_host: Optional[str] = Field(
+        default=None,
+        description="PGBouncer host override",
+    )
+    pgbouncer_port: int = Field(
+        default=5432,
+        description="PGBouncer port",
+    )
+    echo_sql: bool = Field(
+        default=False,
+        description="Echo SQL statements (debug mode)",
+    )
+    pool_size: int = Field(
+        default=20,
+        description="Connection pool size",
+    )
+    max_overflow: int = Field(
+        default=10,
+        description="Maximum overflow connections",
+    )
+    pool_timeout: int = Field(
+        default=30,
+        description="Pool timeout in seconds",
+    )
+
+
+class JWTSettings(BaseSettings):
+    """JWT authentication settings."""
+
+    model_config = SettingsConfigDict(env_prefix="")
+
+    jwt_secret_key: str = Field(
+        default="changeme-in-production",
+        description="Secret key for JWT signing (HS256)",
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm",
+    )
+    access_token_expire_minutes: int = Field(
+        default=30,
+        description="Access token expiry in minutes",
+    )
+
+
+class ThresholdSettings(BaseSettings):
+    """Matching threshold configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="")
+
+    threshold_high: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold (score >= this value)",
+    )
+    threshold_mid: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="1-click review threshold (score >= this value)",
+    )
+    threshold_low: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold (score >= this value)",
+    )
+
+
+class ToleranceSettings(BaseSettings):
+    """Matching tolerance configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="")
+
+    tolerance_price: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Price match tolerance as decimal (2% = 0.02)",
+    )
+    tolerance_qty: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Quantity match tolerance as decimal (10% = 0.10)",
+    )
+
+
+class AppSettings(BaseSettings):
+    """Main application settings."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",
     )
 
-    # Application
-    app_name: str = "AP Automation Engine"
-    app_version: str = "0.1.0"
-    debug: bool = Field(default=False)
-
-    # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        alias="DATABASE_URL",
+    app_name: str = Field(
+        default="AP Automation Core Engine",
+        description="Application name",
     )
-    database_echo: bool = Field(default=False)
-    database_pool_size: int = Field(default=20)
-    database_max_overflow: int = Field(default=10)
-
-    # PGBouncer (optional)
-    pgbouncer_host: Optional[str] = Field(default=None)
-    pgbouncer_port: int = Field(default=5432)
-
-    # JWT Authentication
-    jwt_secret_key: str = Field(
-        default="change-me-in-production",
-        alias="JWT_SECRET_KEY",
+    app_version: str = Field(
+        default="0.1.0",
+        description="Application version",
     )
-    jwt_algorithm: str = Field(default="HS256")
-    jwt_access_token_expire_minutes: int = Field(default=30)
-    jwt_refresh_token_expire_days: int = Field(default=7)
-
-    # Matching Thresholds
-    threshold_high: float = Field(
-        default=95.0,
-        description="Auto-approve threshold (percentage)",
+    debug: bool = Field(
+        default=False,
+        description="Debug mode flag",
     )
-    threshold_mid: float = Field(
-        default=70.0,
-        description="1-click review threshold (percentage)",
-    )
-    threshold_low: float = Field(
-        default=40.0,
-        description="Exception threshold (percentage)",
+    api_v1_prefix: str = Field(
+        default="/api/v1",
+        description="API v1 prefix",
     )
 
-    # Matching Tolerances
-    tolerance_price: float = Field(
-        default=5.0,
-        description="Price match tolerance (percentage)",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        description="Quantity match tolerance (percentage)",
-    )
-
-    # API
-    api_v1_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default=["*"])
-
-    # Logging
-    log_level: str = Field(default="INFO")
+    # Compose sub-settings
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    threshold: ThresholdSettings = Field(default_factory=ThresholdSettings)
+    tolerance: ToleranceSettings = Field(default_factory=ToleranceSettings)
 
 
 @lru_cache
-def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+def get_settings() -> AppSettings:
+    """Get cached application settings singleton."""
+    return AppSettings()
 
 
-# Global settings instance
 settings = get_settings()

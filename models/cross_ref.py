@@ -1,115 +1,144 @@
 # models/cross_ref.py
-"""Cross-reference table for learning/promotion logic."""
+"""Cross Reference (Learning Loop) SQLAlchemy model."""
 
-import uuid
+from datetime import datetime
 from decimal import Decimal
-from datetime import date
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 from sqlalchemy import (
-    Date,
-    Float,
+    Boolean,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
-    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from models.invoice import Invoice, InvoiceLine
+    from models.purchase_order import POLine
 
 
-class CrossRef(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """
-    Learning loop / cross-reference table.
-    
-    Stores confirmed matches for future reference and automatic promotion.
-    This enables the system to learn from human decisions and improve
-    matching accuracy over time.
+class CrossRef(Base, UUIDMixin, TimestampMixin):
+    """Cross Reference model for learning/promotion logic.
+
+    Tracks confirmed matches between PO lines and Invoice lines
+    to improve future matching accuracy.
     """
 
     __tablename__ = "cross_ref"
 
-    # Product/Service Identification
-    vendor_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    vendor_product_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    vendor_product_name: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    # Reference Product (internal catalog)
-    internal_product_code: Mapped[str | None] = mapped_column(
+    po_line_id: Mapped[UUID] = mapped_column(
+        PG_UUID,
+        ForeignKey("po_lines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invoice_id: Mapped[UUID] = mapped_column(
+        PG_UUID,
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invoice_line_id: Mapped[UUID] = mapped_column(
+        PG_UUID,
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Matching characteristics
+    vendor_id: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    part_number: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         index=True,
     )
-    internal_product_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    # Reference PO Line
-    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-    # Pricing
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-
-    # Match Metrics
-    match_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
+    description_similarity: Mapped[float] = mapped_column(
+        Numeric(5, 4),
         nullable=False,
-    )
-    avg_match_score: Mapped[float] = mapped_column(
-        Float,
         default=0.0,
-        nullable=False,
     )
-    last_match_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-
-    # Promotion
-    is_promoted: Mapped[bool] = mapped_column(
+    quantity_match: Mapped[float] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=0.0,
+    )
+    price_match: Mapped[float] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=0.0,
+    )
+    overall_score: Mapped[float] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=0.0,
+    )
+    # Confirmation data
+    confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
         default=False,
-        nullable=False,
     )
-    promoted_at: Mapped[date | None] = mapped_column(Date, nullable=True)
-    promoted_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    # Status
-    status: Mapped[str] = mapped_column(
-        String(50),
-        default="active",
-        nullable=False,
-        index=True,
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        nullable=True,
     )
-
-    # Validation
-    min_match_score: Mapped[float] = mapped_column(
-        Float,
+    confirmed_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID,
+        nullable=True,
+    )
+    # Learning data
+    confirmation_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    rejection_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    # Promotion status
+    promoted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    promotion_score: Mapped[float] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
         default=0.0,
-        nullable=False,
     )
-    max_match_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
+    promotion_level: Mapped[int] = mapped_column(
+        Integer,
         nullable=False,
+        default=0,
+    )
+    metadata: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
     )
 
     # Relationships
-    po_line: Mapped["PurchaseOrderLine | None"] = relationship(
-        "PurchaseOrderLine",
-        foreign_keys=[po_line_id],
+    po_line: Mapped["POLine"] = relationship(
+        "POLine",
+        back_populates="cross_refs",
+    )
+    invoice: Mapped["Invoice"] = relationship(
+        "Invoice",
+        back_populates="cross_refs",
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "vendor_id",
-            "vendor_product_code",
-            name="uq_cross_ref_vendor_product",
-        ),
-        Index("ix_cross_ref_vendor_internal", "vendor_id", "internal_product_code"),
+        Index("ix_cross_ref_vendor_part", "vendor_id", "part_number"),
+        Index("ix_cross_ref_promoted", "promoted", "promotion_level"),
+        Index("ix_cross_ref_confirmed", "confirmed", "confirmation_count"),
     )
