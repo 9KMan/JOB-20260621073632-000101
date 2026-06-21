@@ -1,2 +1,4 @@
-# app/__init__.py
-"""FinaRo AP Automation Core Engine"""
+// app/__init__.py
+"""AP Automation Core Engine - FinaRo."""
+
+__version__ = "0.1.0"

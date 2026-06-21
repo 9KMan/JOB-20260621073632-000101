@@ -1,22 +1,61 @@
-# docker-compose.yml
+// docker-compose.yml
 version: "3.9"
 
 services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-automation-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - PGBOUNCER_HOST=${PGBOUNCER_HOST:-pgbouncer}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - JWT_ALGORITHM=HS256
+      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-0.95}
+      - THRESHOLD_MID=${THRESHOLD_MID:-0.75}
+      - THRESHOLD_LOW=${THRESHOLD_LOW:-0.50}
+      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-0.02}
+      - TOLERANCE_QTY=${TOLERANCE_QTY:-0.10}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ap-network
+
   postgres:
     image: postgres:15-alpine
-    container_name: ap-automation-db
+    container_name: ap-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
-      PGDATA: /var/lib/postgresql/data/pgdata
+      - POSTGRES_USER=${POSTGRES_USER:-apuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
+      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
     networks:
@@ -24,57 +63,59 @@ services:
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
+    container_name: ap-pgbouncer
     environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: "200"
-      DEFAULT_POOL_SIZE: "20"
-      RESERVE_POOL_SIZE: "5"
-      RESERVE_POOL_TIMEOUT: "3"
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=5
+      - RESERVE_POOL_TIMEOUT=3
+      - MAX_DB_CONNECTIONS=50
+      - ADMIN_USERS=postgres
     ports:
-      - "6432:5432"
+      - "${PGBOUNCER_PORT:-6432}:5432"
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgbouncer -c 'SHOW STATISTICS' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - ap-network
 
-  api:
+  tests:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
+    container_name: ap-automation-tests
     environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
-      DATABASE_POOL_SIZE: "20"
-      DATABASE_MAX_OVERFLOW: "10"
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-use-secure-random-key}
-      JWT_ALGORITHM: "HS256"
-      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "30"
-      THRESHOLD_HIGH: "90"
-      THRESHOLD_MID: "70"
-      THRESHOLD_LOW: "50"
-      TOLERANCE_PRICE: "5.0"
-      TOLERANCE_QTY: "5.0"
-      CORS_ORIGINS: "*"
-      LOG_LEVEL: "INFO"
-    ports:
-      - "8000:8000"
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}_test
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-test-secret}
+      - JWT_ALGORITHM=HS256
+      - THRESHOLD_HIGH=0.95
+      - THRESHOLD_MID=0.75
+      - THRESHOLD_LOW=0.50
+      - TOLERANCE_PRICE=0.02
+      - TOLERANCE_QTY=0.10
+      - LOG_LEVEL=DEBUG
     depends_on:
-      pgbouncer:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      postgres:
+        condition: service_healthy
+    command: pytest tests/ -v --tb=short
+    profiles:
+      - test
     networks:
       - ap-network
 
 volumes:
   postgres_data:
+    driver: local
 
 networks:
   ap-network:
