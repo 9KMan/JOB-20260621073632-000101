@@ -1,54 +1,59 @@
-# src/app/schemas/user.py
-"""User schemas."""
+// src/app/schemas/user.py
+"""User Pydantic schemas."""
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-from src.app.schemas.common import BaseSchema, TimestampMixin, UUIDMixin
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
-class UserBase(BaseSchema):
-    """Base user schema."""
-    email: EmailStr
-    full_name: str = Field(..., min_length=1, max_length=255)
-
-
-class UserCreate(UserBase):
-    """Schema for creating a user."""
-    password: str = Field(..., min_length=8, max_length=100)
-
-
-class UserUpdate(BaseSchema):
-    """Schema for updating a user."""
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
-    is_active: Optional[bool] = None
-
-
-class UserRead(UUIDMixin, TimestampMixin, UserBase):
-    """Schema for reading a user."""
-    is_active: bool
-    is_superuser: bool
-
-
-class UserLogin(BaseModel):
-    """Schema for user login."""
-    email: EmailStr
-    password: str
+class TokenData(BaseModel):
+    """Token data schema."""
+    user_id: Optional[str] = None
 
 
 class Token(BaseModel):
-    """JWT token response."""
+    """Token response schema."""
     access_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
-class TokenData(BaseModel):
-    """Token payload data."""
-    sub: Optional[str] = None
-    exp: Optional[datetime] = None
-    user_id: Optional[UUID] = None
+class UserBase(BaseModel):
+    """Base user schema."""
+    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=255)
+    role: str = Field(default="user", max_length=50)
+
+
+class UserCreate(UserBase):
+    """User creation schema."""
+    password: str = Field(..., min_length=8, max_length=100)
+
+
+class UserUpdate(BaseModel):
+    """User update schema."""
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = Field(None, max_length=255)
+    role: Optional[str] = Field(None, max_length=50)
+    is_active: Optional[bool] = None
+
+
+class UserResponse(UserBase):
+    """User response schema."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: UUID
+    is_active: bool
+    is_superuser: bool
+    last_login: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserLogin(BaseModel):
+    """User login schema."""
+    username: str
+    password: str

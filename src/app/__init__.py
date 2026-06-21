@@ -1,2 +1,1 @@
-# src/app/__init__.py
-"""FinaRo AP Automation Core Engine - FastAPI Application."""
+// src/app/__init__.py

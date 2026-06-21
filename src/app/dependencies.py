@@ -1,59 +1,48 @@
-# src/app/dependencies.py
-"""FastAPI dependencies for dependency injection."""
-from typing import Annotated, Optional
+// src/app/dependencies.py
+"""
+FastAPI dependencies for authentication and authorization.
+"""
+
+from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.database import get_async_session
-from src.app.security import decode_access_token
-from src.app.models.user import User
+from app.config import settings
+from app.database import get_db
+from app.models.user import User
+from app.schemas.user import TokenData
 
-security = HTTPBearer()
-
-
-async def get_db(
-    session: Annotated[AsyncSession, Depends(get_async_session)]
-) -> AsyncSession:
-    """Get database session."""
-    return session
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    session: Annotated[AsyncSession, Depends(get_async_session)],
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Get the current authenticated user."""
+    """
+    Validate JWT token and return the current user.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    
-    if payload is None:
-        raise credentials_exception
-    
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
-    
     try:
-        user_uuid = UUID(user_id)
-    except ValueError:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+        token_data = TokenData(user_id=user_id)
+    except JWTError:
         raise credentials_exception
     
-    result = await session.execute(
-        select(User)
-        .options(selectinload(User.decisions))
-        .where(User.id == user_uuid)
-    )
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     
     if user is None:
@@ -62,37 +51,47 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
+            detail="User account is disabled"
         )
     
     return user
 
 
-async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
-    """Get the current active user."""
-    if not current_user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
-        )
-    return current_user
+def create_access_token(
+    data: dict,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """
+    Create a JWT access token.
+    """
+    to_encode = data.copy()
+    
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    
+    return encoded_jwt
 
 
-async def get_current_superuser(
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
-    """Get the current superuser."""
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Superuser privileges required",
-        )
-    return current_user
-
-
-# Type aliases for cleaner dependency injection
-DbSession = Annotated[AsyncSession, Depends(get_db)]
-CurrentUser = Annotated[User, Depends(get_current_active_user)]
-SuperUser = Annotated[User, Depends(get_current_superuser)]
+def create_refresh_token(
+    data: dict,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """
+    Create a JWT refresh token.
+    """
+    to_encode = data.copy()
+    
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    
+    to_encode.update({"exp": expire, "type": "refresh"})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    
+    return encoded_jwt

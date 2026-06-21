@@ -1,13 +1,13 @@
-# src/app/database.py
-"""Database configuration and session management."""
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+// src/app/database.py
+"""
+Database configuration and session management for FinaRo.
+"""
 
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
-from src.app.config import get_settings
+from app.config import settings
 
 
 class Base(DeclarativeBase):
@@ -15,47 +15,32 @@ class Base(DeclarativeBase):
     pass
 
 
-settings = get_settings()
-
-# Async engine for FastAPI
-async_engine = create_async_engine(
-    settings.async_database_url,
-    echo=settings.DATABASE_ECHO,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+# Create async engine with connection pooling
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,
+    poolclass=AsyncAdaptedQueuePool,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=True,
 )
 
-# Async session factory
+# Create async session factory
 AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
+    engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
-
-# Sync engine for Alembic migrations
-sync_engine = create_engine(
-    settings.get_database_url_sync(),
-    echo=settings.DATABASE_ECHO,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    pool_pre_ping=True,
-)
-
-# Sync session factory
-SyncSessionLocal = sessionmaker(
-    bind=sync_engine,
     autocommit=False,
     autoflush=False,
 )
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to get async database session."""
+async def get_db() -> AsyncSession:
+    """
+    Dependency that provides a database session.
+    Automatically handles session cleanup.
+    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -65,39 +50,3 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
-
-
-def get_sync_session() -> Session:
-    """Get sync database session for Alembic migrations."""
-    with SyncSessionLocal() as session:
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-
-
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-async def init_db() -> None:
-    """Initialize database tables."""
-    async with async_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-async def close_db() -> None:
-    """Close database connections."""
-    await async_engine.dispose()

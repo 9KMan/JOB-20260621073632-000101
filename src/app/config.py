@@ -1,7 +1,12 @@
-# src/app/config.py
-"""Application configuration using Pydantic Settings."""
+// src/app/config.py
+"""
+Configuration management for FinaRo AP Automation Core Engine.
+All configuration is loaded from environment variables.
+"""
+
+import os
 from functools import lru_cache
-from typing import Any
+from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,61 +19,53 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
     )
 
     # Application
-    APP_NAME: str = "FinaRo AP Automation"
+    APP_NAME: str = "FinaRo AP Automation Core Engine"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = Field(default=False)
     
+    # Security
+    SECRET_KEY: str = Field(default="change-me-in-production")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    
     # Database
-    DATABASE_URL: str = Field(
-        default="postgresql://finaro:finaro_secret@localhost:5432/finaro_db",
-        description="PostgreSQL connection string"
-    )
-    DATABASE_POOL_SIZE: int = Field(default=10, ge=1)
-    DATABASE_MAX_OVERFLOW: int = Field(default=20, ge=0)
-    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
-    DATABASE_ECHO: bool = Field(default=False)
+    DATABASE_URL: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro")
+    DATABASE_SYNC_URL: str = Field(default="postgresql://postgres:postgres@localhost:5432/finaro")
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
     
-    # Redis
-    REDIS_URL: str = Field(default="redis://localhost:6379/0")
-    
-    # Authentication
-    SECRET_KEY: str = Field(
-        default="dev-secret-key-change-in-production",
-        description="Secret key for JWT signing"
-    )
-    ALGORITHM: str = Field(default="HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
-    
-    # Matching Engine Weights
-    MATCH_WEIGHT_LINE_LEVEL: float = Field(default=0.70)
-    MATCH_WEIGHT_AMOUNT: float = Field(default=0.20)
-    MATCH_WEIGHT_DATE: float = Field(default=0.10)
-    
-    # Decision Thresholds
-    MATCH_THRESHOLD_AUTO_APPROVE: float = Field(default=0.95)
-    MATCH_THRESHOLD_HUMAN_REVIEW: float = Field(default=0.70)
+    # CORS
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
     
     # API
     API_V1_PREFIX: str = "/api/v1"
     
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    # Matching Engine
+    MATCHING_LINE_WEIGHT: float = 0.70
+    MATCHING_AMOUNT_WEIGHT: float = 0.20
+    MATCHING_DATE_WEIGHT: float = 0.10
     
-    def get_database_url_sync(self) -> str:
-        """Get synchronous database URL."""
-        return self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    # Auto-approve threshold (0.0 - 1.0)
+    AUTO_APPROVE_THRESHOLD: float = 0.95
+    # Human review threshold (0.0 - 1.0)
+    HUMAN_REVIEW_THRESHOLD: float = 0.70
     
-    @property
-    def async_database_url(self) -> str:
-        """Get async database URL."""
-        return self.DATABASE_URL
+    # Tolerance percentages for matching
+    AMOUNT_TOLERANCE_PERCENT: float = 5.0
+    DATE_TOLERANCE_DAYS: int = 7
 
 
-@lru_cache
+@lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+settings = get_settings()

@@ -1,92 +1,105 @@
-# src/app/schemas/__init__.py
-"""Pydantic schemas for API request/response validation."""
-from src.app.schemas.user import (
+// src/app/schemas/__init__.py
+"""Pydantic schemas for FinaRo AP Automation Core Engine."""
+
+from app.schemas.user import (
     UserCreate,
-    UserRead,
     UserUpdate,
+    UserResponse,
     UserLogin,
     Token,
     TokenData,
 )
-from src.app.schemas.purchase_order import (
+from app.schemas.supplier import (
+    SupplierCreate,
+    SupplierUpdate,
+    SupplierResponse,
+)
+from app.schemas.purchase_order import (
     PurchaseOrderCreate,
-    PurchaseOrderRead,
     PurchaseOrderUpdate,
+    PurchaseOrderResponse,
     PurchaseOrderLineCreate,
-    PurchaseOrderLineRead,
+    PurchaseOrderLineUpdate,
+    PurchaseOrderLineResponse,
 )
-from src.app.schemas.invoice import (
+from app.schemas.invoice import (
     InvoiceCreate,
-    InvoiceRead,
     InvoiceUpdate,
+    InvoiceResponse,
     InvoiceLineCreate,
-    InvoiceLineRead,
+    InvoiceLineUpdate,
+    InvoiceLineResponse,
 )
-from src.app.schemas.delivery_note import (
+from app.schemas.delivery_note import (
     DeliveryNoteCreate,
-    DeliveryNoteRead,
     DeliveryNoteUpdate,
+    DeliveryNoteResponse,
     DeliveryNoteLineCreate,
-    DeliveryNoteLineRead,
+    DeliveryNoteLineUpdate,
+    DeliveryNoteLineResponse,
 )
-from src.app.schemas.matching import (
-    MatchResultCreate,
-    MatchResultRead,
-    MatchResultUpdate,
-    CrossReferenceCreate,
-    CrossReferenceRead,
-    MatchDecisionCreate,
-    MatchDecisionRead,
+from app.schemas.match import (
+    MatchCreate,
+    MatchUpdate,
+    MatchResponse,
+    MatchLineCreate,
+    MatchLineUpdate,
+    MatchLineResponse,
+    MatchDecisionUpdate,
 )
-from src.app.schemas.balances import (
-    BalanceLedgerCreate,
-    BalanceLedgerRead,
-)
-from src.app.schemas.common import (
-    PaginatedResponse,
-    ErrorResponse,
-    SuccessResponse,
+from app.schemas.balance import (
+    BalanceCreate,
+    BalanceUpdate,
+    BalanceResponse,
+    BalanceTransactionCreate,
+    BalanceTransactionResponse,
 )
 
 __all__ = [
     # User
     "UserCreate",
-    "UserRead",
     "UserUpdate",
+    "UserResponse",
     "UserLogin",
     "Token",
     "TokenData",
+    # Supplier
+    "SupplierCreate",
+    "SupplierUpdate",
+    "SupplierResponse",
     # Purchase Order
     "PurchaseOrderCreate",
-    "PurchaseOrderRead",
     "PurchaseOrderUpdate",
+    "PurchaseOrderResponse",
     "PurchaseOrderLineCreate",
-    "PurchaseOrderLineRead",
+    "PurchaseOrderLineUpdate",
+    "PurchaseOrderLineResponse",
     # Invoice
     "InvoiceCreate",
-    "InvoiceRead",
     "InvoiceUpdate",
+    "InvoiceResponse",
     "InvoiceLineCreate",
-    "InvoiceLineRead",
+    "InvoiceLineUpdate",
+    "InvoiceLineResponse",
     # Delivery Note
     "DeliveryNoteCreate",
-    "DeliveryNoteRead",
     "DeliveryNoteUpdate",
+    "DeliveryNoteResponse",
     "DeliveryNoteLineCreate",
-    "DeliveryNoteLineRead",
-    # Matching
-    "MatchResultCreate",
-    "MatchResultRead",
-    "MatchResultUpdate",
-    "CrossReferenceCreate",
-    "CrossReferenceRead",
-    "MatchDecisionCreate",
-    "MatchDecisionRead",
-    # Balances
-    "BalanceLedgerCreate",
-    "BalanceLedgerRead",
-    # Common
-    "PaginatedResponse",
-    "ErrorResponse",
-    "SuccessResponse",
+    "DeliveryNoteLineUpdate",
+    "DeliveryNoteLineResponse",
+    # Match
+    "MatchCreate",
+    "MatchUpdate",
+    "MatchResponse",
+    "MatchLineCreate",
+    "MatchLineUpdate",
+    "MatchLineResponse",
+    "MatchDecisionUpdate",
+    # Balance
+    "BalanceCreate",
+    "BalanceUpdate",
+    "BalanceResponse",
+    "BalanceTransactionCreate",
+    "BalanceTransactionResponse",
 ]

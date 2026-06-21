@@ -1,55 +1,56 @@
-# src/app/models/base.py
-"""Base models with common mixins."""
+// src/app/models/base.py
+"""
+Base model classes with common attributes for all entities.
+"""
+
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Optional
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
 
 
-class Base(DeclarativeBase):
-    """Base class for all models."""
-    pass
-
-
-class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
+class BaseModel(Base):
+    """Base model with common fields for all entities."""
+    
+    __abstract__ = True
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
+    
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
     )
-
-
-class UUIDMixin:
-    """Mixin for UUID primary key."""
     
-    id: Mapped[uuid.UUID] = mapped_column(
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
-
-
-class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
-    
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
         nullable=True,
-        default=None,
     )
+    
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    
     is_deleted: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
+        index=True,
     )

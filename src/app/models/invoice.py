@@ -1,174 +1,220 @@
-# src/app/models/invoice.py
-"""Invoice models."""
-import decimal
-import uuid
-from datetime import date
-from typing import TYPE_CHECKING, Optional
+// src/app/models/invoice.py
+"""Invoice and Invoice Line models."""
 
-from sqlalchemy import DECIMAL, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import UniqueConstraint
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Optional, List
+
+from sqlalchemy import String, Date, Numeric, Integer, ForeignKey, Text, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
-from src.app.models.enums import DocumentStatus, LineStatus
-
-if TYPE_CHECKING:
-    from src.app.models.purchase_order import PurchaseOrderLine
-    from src.app.models.delivery_note import DeliveryNoteLine
-    from src.app.models.matching import MatchResult, CrossReference
+from app.database import Base
+from app.models.base import BaseModel
 
 
-class Invoice(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Invoice header."""
+class Invoice(BaseModel):
+    """Invoice model - one of the three documents in 3-way matching."""
     
     __tablename__ = "invoices"
     __table_args__ = (
-        UniqueConstraint("supplier_id", "invoice_number", name="uq_inv_supplier_inv"),
-        {"schema": "documents"},
+        Index("ix_invoices_supplier_invoice_number", "supplier_id", "invoice_number"),
+        Index("ix_invoices_status", "status"),
+        Index("ix_invoices_invoice_date", "invoice_date"),
     )
     
-    # Supplier reference
-    supplier_id: Mapped[str] = mapped_column(
-        String(100),
+    invoice_number: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
         nullable=False,
         index=True,
     )
+    
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    
     supplier_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
     
-    # Invoice details
-    invoice_number: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        index=True,
+    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
     )
+    
+    po_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    
     invoice_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
     )
+    
     due_date: Mapped[Optional[date]] = mapped_column(
         Date,
         nullable=True,
     )
     
-    # Financial
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
+    
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
     currency: Mapped[str] = mapped_column(
         String(3),
         default="USD",
         nullable=False,
     )
-    total_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(precision=15, scale=2),
-        nullable=False,
-    )
-    tax_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(precision=15, scale=2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
+    
+    payment_terms: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
     )
     
-    # Status
-    status: Mapped[DocumentStatus] = mapped_column(
-        SQLEnum(DocumentStatus, name="document_status", create_type=False),
-        default=DocumentStatus.RECEIVED,
-        nullable=False,
-        index=True,
-    )
-    
-    # Metadata
     notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
-    metadata: Mapped[Optional[dict]] = mapped_column(
-        JSON,
-        nullable=True,
+    
+    matched_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    open_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
     )
     
     # Relationships
-    lines: Mapped[list["InvoiceLine"]] = relationship(
+    supplier = relationship("Supplier", back_populates="invoices")
+    purchase_order = relationship("PurchaseOrder", foreign_keys=[po_id])
+    lines = relationship(
         "InvoiceLine",
         back_populates="invoice",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
-    match_results: Mapped[list["MatchResult"]] = relationship(
-        "MatchResult",
-        back_populates="invoice",
-        lazy="selectin",
-    )
+    match = relationship("Match", back_populates="invoice", uselist=False)
     
     def __repr__(self) -> str:
-        return f"<Invoice(id={self.id}, invoice_number={self.invoice_number})>"
+        return f"<Invoice {self.invoice_number}>"
 
 
-class InvoiceLine(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Invoice Line item."""
+class InvoiceLine(BaseModel):
+    """Line item on an Invoice."""
     
     __tablename__ = "invoice_lines"
     __table_args__ = (
-        UniqueConstraint("invoice_id", "line_number", name="uq_il_inv_line"),
-        {"schema": "documents"},
+        Index("ix_invoice_lines_invoice_id", "invoice_id"),
     )
     
-    # Foreign key
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("documents.invoices.id", ondelete="CASCADE"),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     
-    # Line details
+    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    dn_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
     line_number: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
     )
+    
+    item_code: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+    
     description: Mapped[str] = mapped_column(
         String(500),
         nullable=False,
     )
-    sku: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
     
-    # Quantities and amounts
-    quantity_invoiced: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(precision=12, scale=3),
-        nullable=False,
-    )
-    unit_price: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(precision=12, scale=4),
-        nullable=False,
-    )
-    line_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(precision=15, scale=2),
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
         nullable=False,
     )
     
-    # Status
-    status: Mapped[LineStatus] = mapped_column(
-        SQLEnum(LineStatus, name="line_status", create_type=False),
-        default=LineStatus.PENDING,
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(20),
+        default="EA",
+        nullable=False,
+    )
+    
+    unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),
+        nullable=False,
+    )
+    
+    line_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
         nullable=False,
     )
     
     # Relationships
-    invoice: Mapped["Invoice"] = relationship(
-        "Invoice",
-        back_populates="lines",
+    invoice = relationship("Invoice", back_populates="lines")
+    po_line = relationship(
+        "PurchaseOrderLine",
+        back_populates="invoice_lines",
+        foreign_keys=[po_line_id],
     )
-    cross_references: Mapped[list["CrossReference"]] = relationship(
-        "CrossReference",
-        back_populates="invoice_line",
-        lazy="selectin",
+    dn_line = relationship(
+        "DeliveryNoteLine",
+        back_populates="invoice_lines",
+        foreign_keys=[dn_line_id],
     )
     
     def __repr__(self) -> str:
-        return f"<InvoiceLine(id={self.id}, line_number={self.line_number})>"
+        return f"<InvoiceLine {self.invoice_id}:{self.line_number}>"
