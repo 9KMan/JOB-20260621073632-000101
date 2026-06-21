@@ -1,11 +1,13 @@
-// Dockerfile
-# syntax=docker/dockerfile:1
-FROM python:3.11-slim as base
+# Dockerfile - Production Container
+# AP Automation Core Engine — FinaRo
+# Python 3.11 slim base
 
-# Prevent Python from writing pyc files and buffering stdout/stderr
+FROM python:3.11-slim
+
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
+    PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -16,28 +18,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser
+# Create non-root user for security
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
+# Set working directory
 WORKDIR /app
 
 # Install Python dependencies
 COPY pyproject.toml ./
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-cache-dir -e ".[dev]" && \
+    pip install gunicorn uvicorn[standard]
 
 # Copy application code
-COPY core/ ./core/
-COPY models/ ./models/
-COPY api/ ./api/
-COPY services/ ./services/
-COPY workers/ ./workers/
-COPY migrations/ ./migrations/
-COPY alembic.ini ./
-
-# Create necessary directories
-RUN mkdir -p /app/logs /app/uploads && \
-    chown -R appuser:appuser /app
+COPY --chown=appuser:appgroup . .
 
 # Switch to non-root user
 USER appuser
@@ -49,5 +43,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command - development
-CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default command - production server
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

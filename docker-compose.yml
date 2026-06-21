@@ -1,5 +1,5 @@
-// docker-compose.yml
-version: "3.9"
+# docker-compose.yml - Local Development Stack
+# AP Automation Core Engine — FinaRo
 
 services:
   api:
@@ -7,34 +7,42 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ap-automation-api
-    ports:
-      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
-      - DATABASE_URL_SYNC=postgresql://apuser:appass@postgres:5432/apautomation
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass123@postgres:5432/apautomation
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
       - JWT_ALGORITHM=HS256
-      - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=70
-      - THRESHOLD_LOW=40
-      - TOLERANCE_PRICE=5
-      - TOLERANCE_QTY=10
-      - PGBOUNCER_HOST=pgbouncer
-      - PGBOUNCER_PORT=5432
+      - THRESHOLD_HIGH=0.95
+      - THRESHOLD_MID=0.75
+      - THRESHOLD_LOW=0.50
+      - TOLERANCE_PRICE=0.05
+      - TOLERANCE_QTY=0.10
       - LOG_LEVEL=INFO
-      - ENVIRONMENT=development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./core:/app/core
+      - ./models:/app/models
+      - ./api:/app/api
+      - ./services:/app/services
+      - ./workers:/app/workers
+      - ./migrations:/app/migrations
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
-        condition: service_healthy
+        condition: service_started
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    restart: unless-stopped
     networks:
       - ap-network
 
@@ -43,19 +51,17 @@ services:
     container_name: ap-automation-postgres
     environment:
       - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appass
+      - POSTGRES_PASSWORD=appass123
       - POSTGRES_DB=apautomation
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
     networks:
       - ap-network
 
@@ -70,42 +76,14 @@ services:
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
       - RESERVE_POOL_SIZE=5
-      - RESERVE_POOL_TIMEOUT=3
-      - LOG_DISCONNECTIONS=0
-      - LOG_ERRORS=1
-      - SERVER_RESET_ON_RETURN=pool
-      - SERVER_LIFETIME=3600
-      - SERVER_IDLE_TIMEOUT=600
+      - USER=apuser
     ports:
       - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo show stats | nc localhost 6432 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
     networks:
       - ap-network
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ap-automation-pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-      - PGADMIN_LISTEN_PORT=5050
-    ports:
-      - "5050:5050"
-    depends_on:
-      - postgres
-    restart: unless-stopped
-    networks:
-      - ap-network
-    profiles:
-      - debug
 
 volumes:
   postgres_data:
@@ -114,4 +92,3 @@ volumes:
 networks:
   ap-network:
     driver: bridge
-    name: ap-automation-network

@@ -1,65 +1,58 @@
-// models/enums.py
-"""SQLAlchemy enums for status fields and decision types.
+# models/enums.py
+# Status enums and decision types
+# AP Automation Core Engine — FinaRo
 
-This module defines all enumerated types used across models:
-- Document status (draft, submitted, approved, etc.)
-- Matching status and decisions
-- Exception types and resolutions
+"""SQLAlchemy enum types for status fields and decision types.
+
+Uses PostgreSQL ENUM types for type safety and database-level constraints.
 """
 
-import uuid
-from enum import Enum as PyEnum
+from enum import Enum
 
-from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Enum as SQLEnum
 
 
-def uuid_enum_parameter() -> uuid.UUID:
-    """Generate UUID for enum parameter."""
-    return uuid.uuid4()
+class InvoiceStatus(str, Enum):
+    """Invoice status enumeration.
 
-
-# Use PostgreSQL enum type for database storage
-# Status enums
-DocumentStatus = UUID  # Will be used as string enum in Python
-
-
-class DocumentStatusType(str, PyEnum):
-    """Document status enumeration.
-
-    Represents the lifecycle status of documents.
+    Attributes:
+        DRAFT: Invoice is in draft state, not yet submitted.
+        SUBMITTED: Invoice has been submitted for processing.
+        PENDING_MATCHING: Invoice is awaiting matching engine processing.
+        MATCHING_IN_PROGRESS: Matching engine is currently processing the invoice.
+        MATCHED: Invoice has been matched to PO and/or delivery note.
+        PARTIALLY_MATCHED: Invoice has been partially matched.
+        EXCEPTION: Invoice has matching exceptions requiring review.
+        APPROVED: Invoice has been approved for payment.
+        REJECTED: Invoice has been rejected.
+        PAID: Invoice has been paid.
+        CANCELLED: Invoice has been cancelled.
     """
 
     DRAFT = "draft"
     SUBMITTED = "submitted"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    ARCHIVED = "archived"
-
-
-class InvoiceStatusType(str, PyEnum):
-    """Invoice-specific status enumeration.
-
-    Extends document status for invoice-specific states.
-    """
-
-    DRAFT = "draft"
-    RECEIVED = "received"
-    PENDING_MATCH = "pending_match"
+    PENDING_MATCHING = "pending_matching"
+    MATCHING_IN_PROGRESS = "matching_in_progress"
     MATCHED = "matched"
     PARTIALLY_MATCHED = "partially_matched"
-    UNMATCHED = "unmatched"
-    PENDING_APPROVAL = "pending_approval"
+    EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatusType(str, PyEnum):
-    """Purchase Order status enumeration."""
+class PurchaseOrderStatus(str, Enum):
+    """Purchase order status enumeration.
+
+    Attributes:
+        DRAFT: PO is in draft state.
+        ISSUED: PO has been issued to vendor.
+        PARTIALLY_RECEIVED: Some goods have been received.
+        RECEIVED: All goods have been received.
+        CLOSED: PO has been closed.
+        CANCELLED: PO has been cancelled.
+    """
 
     DRAFT = "draft"
     ISSUED = "issued"
@@ -69,68 +62,231 @@ class PurchaseOrderStatusType(str, PyEnum):
     CANCELLED = "cancelled"
 
 
-class MatchStatusType(str, PyEnum):
-    """Matching process status enumeration."""
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status enumeration.
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    NO_MATCH_FOUND = "no_match_found"
+    Attributes:
+        DRAFT: Delivery note is in draft state.
+        CONFIRMED: Delivery note has been confirmed.
+        PARTIALLY_INVOICED: Some items have been invoiced.
+        INVOICED: All items have been invoiced.
+        CANCELLED: Delivery note has been cancelled.
+    """
+
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    INVOICED = "invoiced"
+    CANCELLED = "cancelled"
 
 
-class MatchDecisionType(str, PyEnum):
-    """Matching decision result enumeration.
+class MatchingDecision(str, Enum):
+    """Matching engine decision enumeration.
 
-    Determines how an invoice should be processed based on matching score.
+    Attributes:
+        AUTO_APPROVED: High confidence match, auto-approved.
+        REVIEW_APPROVED: Medium confidence, approved after review.
+        REVIEW_REJECTED: Medium confidence, rejected after review.
+        EXCEPTION: Low confidence, requires exception handling.
+        NO_MATCH: Unable to find matching records.
+        MANUAL_REQUIRED: Manual matching required.
     """
 
     AUTO_APPROVED = "auto_approved"
-    REVIEW_REQUIRED = "review_required"
+    REVIEW_APPROVED = "review_approved"
+    REVIEW_REJECTED = "review_rejected"
     EXCEPTION = "exception"
-    MANUAL_REVIEW = "manual_review"
-    REJECTED = "rejected"
+    NO_MATCH = "no_match"
+    MANUAL_REQUIRED = "manual_required"
 
 
-class ExceptionTypeType(str, PyEnum):
-    """Exception type enumeration.
+class ExceptionType(str, Enum):
+    """Matching exception type enumeration.
 
-    Categorizes different types of matching exceptions.
+    Attributes:
+        PRICE_VARIANCE: Price doesn't match within tolerance.
+        QUANTITY_VARIANCE: Quantity doesn't match within tolerance.
+        MISSING_PO: PO reference is missing or invalid.
+        MISSING_DELIVERY: Delivery note reference is missing or invalid.
+        DUPLICATE_INVOICE: Potential duplicate invoice detected.
+        MULTIPLE_MATCHES: Multiple potential matches found.
+        DATE_VARIANCE: Date mismatch detected.
+        VENDOR_MISMATCH: Vendor doesn't match across documents.
     """
 
     PRICE_VARIANCE = "price_variance"
     QUANTITY_VARIANCE = "quantity_variance"
-    DUPLICATE_INVOICE = "duplicate_invoice"
     MISSING_PO = "missing_po"
-    MISSING_LINE_ITEM = "missing_line_item"
-    PARTIAL_MATCH = "partial_match"
-    OVER_INVOICED = "over_invoiced"
-    UNDER_INVOICED = "under_invoiced"
+    MISSING_DELIVERY = "missing_delivery"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    MULTIPLE_MATCHES = "multiple_matches"
     DATE_VARIANCE = "date_variance"
     VENDOR_MISMATCH = "vendor_mismatch"
-    UNKNOWN = "unknown"
 
 
-class ExceptionResolutionType(str, PyEnum):
-    """Exception resolution enumeration.
+class ExceptionStatus(str, Enum):
+    """Exception status enumeration.
 
-    Represents how an exception was resolved.
+    Attributes:
+        OPEN: Exception is open and awaiting resolution.
+        UNDER_REVIEW: Exception is being reviewed.
+        RESOLVED: Exception has been resolved.
+        DISMISSED: Exception has been dismissed.
+        ESCALATED: Exception has been escalated.
+    """
+
+    OPEN = "open"
+    UNDER_REVIEW = "under_review"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+    ESCALATED = "escalated"
+
+
+class LineStatus(str, Enum):
+    """Line item status enumeration.
+
+    Attributes:
+        PENDING: Line item is pending.
+        MATCHED: Line item has been matched.
+        PARTIALLY_MATCHED: Line item has been partially matched.
+        EXCEPTION: Line item has exceptions.
     """
 
     PENDING = "pending"
-    APPROVED_AS_IS = "approved_as_is"
-    ADJUSTED = "adjusted"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
-    WRITE_OFF = "write_off"
-    MANUAL_OVERRIDE = "manual_override"
+    MATCHED = "matched"
+    PARTIALLY_MATCHED = "partially_matched"
+    EXCEPTION = "exception"
 
 
-# SQLAlchemy Enum columns for database
-InvoiceStatus = InvoiceStatusType
-PurchaseOrderStatus = PurchaseOrderStatusType
-MatchStatus = MatchStatusType
-MatchDecision = MatchDecisionType
-ExceptionType = ExceptionTypeType
-ExceptionResolution = ExceptionResolutionType
-DocumentStatus = DocumentStatusType
+class BalanceType(str, Enum):
+    """Balance ledger transaction type.
+
+    Attributes:
+        PO_INITIAL: Initial PO balance created.
+        PO_CANCELLED: PO cancelled, balance released.
+        DELIVERY_RECEIVED: Goods received, reduces PO balance.
+        INVOICE_MATCHED: Invoice matched, reduces available balance.
+        CREDIT_MEMO: Credit memo applied.
+        ADJUSTMENT: Manual adjustment.
+    """
+
+    PO_INITIAL = "po_initial"
+    PO_CANCELLED = "po_cancelled"
+    DELIVERY_RECEIVED = "delivery_received"
+    INVOICE_MATCHED = "invoice_matched"
+    CREDIT_MEMO = "credit_memo"
+    ADJUSTMENT = "adjustment"
+
+
+class MatchConfidence(str, Enum):
+    """Match confidence level from learning system.
+
+    Attributes:
+        HIGH: High confidence match (>90%).
+        MEDIUM: Medium confidence match (70-90%).
+        LOW: Low confidence match (50-70%).
+        UNCERTAIN: Uncertain match (<50%).
+    """
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNCERTAIN = "uncertain"
+
+
+class LearningStatus(str, Enum):
+    """Learning loop status for cross-reference records.
+
+    Attributes:
+        ACTIVE: Cross-reference is active and being used.
+        PROMOTED: Cross-reference has been promoted to confirmed.
+        DEMOTED: Cross-reference has been demoted.
+        ARCHIVED: Cross-reference has been archived.
+    """
+
+    ACTIVE = "active"
+    PROMOTED = "promoted"
+    DEMOTED = "demoted"
+    ARCHIVED = "archived"
+
+
+# SQLAlchemy enum types for use in column definitions
+InvoiceStatusType = SQLEnum(
+    InvoiceStatus,
+    name="invoice_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+PurchaseOrderStatusType = SQLEnum(
+    PurchaseOrderStatus,
+    name="purchase_order_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+DeliveryNoteStatusType = SQLEnum(
+    DeliveryNoteStatus,
+    name="delivery_note_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+MatchingDecisionType = SQLEnum(
+    MatchingDecision,
+    name="matching_decision",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+ExceptionTypeSQL = SQLEnum(
+    ExceptionType,
+    name="exception_type",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+ExceptionStatusType = SQLEnum(
+    ExceptionStatus,
+    name="exception_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+LineStatusType = SQLEnum(
+    LineStatus,
+    name="line_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+BalanceTypeSQL = SQLEnum(
+    BalanceType,
+    name="balance_type",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+MatchConfidenceType = SQLEnum(
+    MatchConfidence,
+    name="match_confidence",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)
+
+LearningStatusType = SQLEnum(
+    LearningStatus,
+    name="learning_status",
+    create_constraint=True,
+    create_type=True,
+    values_callable=lambda x: [e.value for e in x],
+)

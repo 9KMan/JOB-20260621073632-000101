@@ -1,81 +1,93 @@
-// models/base.py
-"""SQLAlchemy declarative base.
+# models/base.py
+# SQLAlchemy declarative base and mixins
+# AP Automation Core Engine — FinaRo
 
-All models inherit from this base class which provides:
-- UUID primary key
-- created_at / updated_at timestamps
-- Common table arguments
-"""
+"""SQLAlchemy declarative base and common mixins."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models.
+    """SQLAlchemy declarative base class.
 
-    Provides:
-    - UUID primary key with default generation
-    - created_at timestamp (set on insert)
-    - updated_at timestamp (set on insert and update)
+    All ORM models should inherit from this class.
+    Provides type-safe column definitions and common functionality.
     """
 
-    __abstract__ = True
-    __table_args__ = {"schema": "public"}
+    pass
+
+
+class TimestampMixin:
+    """Mixin that adds created_at and updated_at timestamp columns.
+
+    Automatically maintains timestamps on insert and update operations.
+    Uses UTC timezone for all timestamps.
+
+    Attributes:
+        created_at: Timestamp when the record was created.
+        updated_at: Timestamp when the record was last updated.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the record was created",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the record was last updated",
+    )
+
+
+class UUIDMixin:
+    """Mixin that adds a UUID primary key column.
+
+    Uses PostgreSQL's UUID type with a randomly generated default value.
+
+    Attributes:
+        id: UUID primary key.
+    """
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        doc="Unique identifier (UUID)",
+        doc="UUID primary key",
     )
-    created_at: Mapped[datetime] = mapped_column(
+
+
+class SoftDeleteMixin:
+    """Mixin that adds soft delete functionality.
+
+    Adds a deleted_at timestamp column that is NULL for active records
+    and set to the deletion timestamp for deleted records.
+
+    Attributes:
+        deleted_at: Timestamp when the record was soft deleted, or NULL if active.
+    """
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        nullable=False,
-        doc="Timestamp when record was created",
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
-        doc="Timestamp when record was last updated",
+        nullable=True,
+        default=None,
+        doc="Timestamp when the record was soft deleted",
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model instance to dictionary.
 
-        Returns:
-            dict: Dictionary representation of the model
-        """
-        result: dict[str, Any] = {}
-        for column in self.__table__.columns:
-            value = getattr(self, column.name)
-            if isinstance(value, uuid.UUID):
-                value = str(value)
-            elif isinstance(value, datetime):
-                value = value.isoformat()
-            result[column.name] = value
-        return result
+def generate_uuid() -> uuid.UUID:
+    """Generate a new random UUID.
 
-
-class TimestampMixin:
-    """Mixin for adding timestamp columns to models."""
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
+    Returns:
+        uuid.UUID: A new randomly generated UUID.
+    """
+    return uuid.uuid4()
