@@ -1,87 +1,77 @@
 // src/app/schemas/user.py
-"""
-User schemas for API request/response validation.
-"""
-from datetime import datetime
-from typing import Optional
+"""User schemas."""
+from datetime import date, datetime
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
-
-from app.schemas.base import BaseSchema, TimestampSchema
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
-# Request schemas
-class UserCreate(BaseSchema):
-    """Schema for creating a user."""
+class UserBase(BaseModel):
+    """Base user schema."""
+
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=100)
-    password: str = Field(..., min_length=8, max_length=100)
-    full_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(default="user")
+    username: str = Field(min_length=3, max_length=100)
+    full_name: str | None = Field(default=None, max_length=255)
+    is_active: bool = True
+
+
+class UserCreate(UserBase):
+    """Schema for creating a user."""
+
+    password: str = Field(min_length=8, max_length=100)
     
-    @field_validator("username")
+    @field_validator("password")
     @classmethod
-    def validate_username(cls, v):
-        if not v.isalnum() and "_" not in v:
-            raise ValueError("Username must be alphanumeric with optional underscores")
-        return v.lower()
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 
-class UserUpdate(BaseSchema):
+class UserUpdate(BaseModel):
     """Schema for updating a user."""
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
+
+    email: EmailStr | None = None
+    username: str | None = Field(default=None, min_length=3, max_length=100)
+    full_name: str | None = Field(default=None, max_length=255)
+    password: str | None = Field(default=None, min_length=8, max_length=100)
+    is_active: bool | None = None
 
 
-class UserPasswordUpdate(BaseSchema):
-    """Schema for password update."""
-    current_password: str
-    new_password: str = Field(..., min_length=8, max_length=100)
+class UserInDB(UserBase):
+    """Schema for user stored in database."""
 
+    model_config = ConfigDict(from_attributes=True)
 
-# Response schemas
-class UserResponse(TimestampSchema):
-    """User response schema."""
     id: UUID
-    email: str
-    username: str
-    full_name: str
-    is_active: bool
-    is_superuser: bool
-    role: str
+    hashed_password: str
+    is_superuser: bool = False
+    created_at: datetime
+    updated_at: datetime
 
 
-class UserBrief(BaseSchema):
-    """Brief user information."""
+class UserResponse(UserBase):
+    """Schema for user response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
-    username: str
-    full_name: str
+    is_superuser: bool = False
+    created_at: datetime
+    updated_at: datetime
 
 
-# Auth schemas
-class Token(BaseSchema):
-    """Token response schema."""
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+class UserListResponse(BaseModel):
+    """Schema for paginated user list."""
 
-
-class TokenPayload(BaseSchema):
-    """JWT token payload schema."""
-    sub: str
-    exp: datetime
-    type: str
-
-
-class LoginRequest(BaseSchema):
-    """Login request schema."""
-    username: str
-    password: str
-
-
-class RefreshTokenRequest(BaseSchema):
-    """Refresh token request schema."""
-    refresh_token: str
+    items: list[UserResponse]
+    total: int
+    skip: int
+    limit: int

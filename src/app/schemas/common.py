@@ -1,74 +1,101 @@
 // src/app/schemas/common.py
-"""Common Pydantic schemas."""
-from typing import Any, Generic, Optional, TypeVar
+"""Common Pydantic schemas and utilities."""
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Generic, TypeVar
+from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
+# Generic type for paginated responses
 T = TypeVar("T")
+
+
+class UUIDMixin(BaseModel):
+    """Schema mixin for UUID fields."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+
+
+class TimestampMixin(BaseModel):
+    """Schema mixin for timestamp fields."""
+
+    created_at: datetime
+    updated_at: datetime
+
+
+class SoftDeleteMixin(BaseModel):
+    """Schema mixin for soft delete fields."""
+
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
+
+
+class BaseSchema(UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Base schema combining common mixins."""
+
+    pass
 
 
 class PaginationParams(BaseModel):
     """Pagination parameters."""
-    
-    page: int = Field(default=1, ge=1, description="Page number")
-    page_size: int = Field(default=20, ge=1, le=100, description="Items per page")
-    
-    @property
-    def offset(self) -> int:
-        """Calculate offset."""
-        return (self.page - 1) * self.page_size
-    
-    @property
-    def limit(self) -> int:
-        """Get limit."""
-        return self.page_size
 
-
-class ResponseMeta(BaseModel):
-    """Response metadata."""
-    
-    total: int = 0
-    page: int = 1
-    page_size: int = 20
-    total_pages: int = 0
-
-
-class APIResponse(BaseModel, Generic[T]):
-    """Standard API response wrapper."""
-    
-    success: bool = True
-    data: Optional[T] = None
-    message: Optional[str] = None
-    meta: Optional[ResponseMeta] = None
-    
-    model_config = ConfigDict(from_attributes=True)
+    skip: int = Field(default=0, ge=0, description="Number of records to skip")
+    limit: int = Field(default=100, ge=1, le=1000, description="Max records to return")
+    order_by: str | None = Field(default=None, description="Field to order by")
+    order_dir: str = Field(default="desc", pattern="^(asc|desc)$", description="Sort direction")
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
     """Paginated response wrapper."""
-    
-    success: bool = True
-    data: list[T] = []
-    message: Optional[str] = None
-    meta: ResponseMeta
-    
-    model_config = ConfigDict(from_attributes=True)
+
+    items: list[T]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+
+class ErrorDetail(BaseModel):
+    """Error detail schema."""
+
+    field: str | None = None
+    message: str
+    code: str | None = None
 
 
 class ErrorResponse(BaseModel):
     """Error response schema."""
-    
-    success: bool = False
-    error: str
-    detail: Optional[str] = None
-    code: Optional[str] = None
+
+    detail: str | list[ErrorDetail]
+    error_code: str | None = None
 
 
-class HealthResponse(BaseModel):
-    """Health check response."""
+class SuccessResponse(BaseModel):
+    """Generic success response."""
+
+    message: str
+    data: dict | None = None
+
+
+class DecimalField(BaseModel):
+    """Schema for decimal fields."""
+
+    value: Decimal = Field(ge=0)
     
-    status: str = "healthy"
-    version: str
-    environment: str
-    database: str = "connected"
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_decimal(cls, v: Any) -> Decimal:
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        if isinstance(v, Decimal):
+            return v
+        raise ValueError("Invalid decimal value")
+
+
+class DateField(BaseModel):
+    """Schema for date fields."""
+
+    value: date

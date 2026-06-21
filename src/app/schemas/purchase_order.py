@@ -1,111 +1,133 @@
 // src/app/schemas/purchase_order.py
-"""
-Purchase Order schemas for API request/response validation.
-"""
+"""Purchase Order schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
-
-from app.schemas.base import BaseSchema, TimestampSchema, PaginationParams, PaginatedResponse
-from app.schemas.supplier import SupplierBrief
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-# Line item schemas
-class PurchaseOrderLineCreate(BaseSchema):
-    """Schema for creating a PO line."""
-    line_number: int = Field(..., ge=1)
-    description: str = Field(..., min_length=1, max_length=500)
-    sku: Optional[str] = Field(None, max_length=100)
-    quantity: Decimal = Field(..., gt=0)
-    unit_of_measure: str = Field(default="EA")
-    unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0)
+class PurchaseOrderLineBase(BaseModel):
+    """Base schema for PO line items."""
+
+    line_number: int = Field(ge=1)
+    item_code: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    quantity: Decimal = Field(gt=0, decimal_places=3)
+    unit_of_measure: str = Field(default="EA", max_length=20)
+    unit_price: Decimal = Field(ge=0, decimal_places=2)
+    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0, decimal_places=2)
+    expected_delivery_date: date | None = None
+    notes: str | None = None
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def validate_quantity(cls, v: Decimal | float | int) -> Decimal:
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        return v
+
+    @property
+    def line_amount(self) -> Decimal:
+        """Calculate line amount."""
+        return (self.quantity * self.unit_price) + self.tax_amount
 
 
-class PurchaseOrderLineUpdate(BaseSchema):
-    """Schema for updating a PO line."""
-    description: Optional[str] = Field(None, min_length=1, max_length=500)
-    sku: Optional[str] = Field(None, max_length=100)
-    quantity: Optional[Decimal] = Field(None, gt=0)
-    unit_of_measure: Optional[str] = None
-    unit_price: Optional[Decimal] = Field(None, ge=0)
-    tax_rate: Optional[Decimal] = Field(None, ge=0)
+class PurchaseOrderLineCreate(PurchaseOrderLineBase):
+    """Schema for creating PO line items."""
 
-
-class PurchaseOrderLineResponse(BaseSchema):
-    """PO line response schema."""
-    id: UUID
-    line_number: int
-    description: str
-    sku: Optional[str]
-    quantity: Decimal
-    unit_of_measure: str
-    unit_price: Decimal
-    tax_rate: Decimal
-    line_amount: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
-    quantity_received: Decimal
-
-
-# Header schemas
-class PurchaseOrderCreate(BaseSchema):
-    """Schema for creating a PO."""
-    po_number: str = Field(..., min_length=1, max_length=50)
-    supplier_id: UUID
-    order_date: date
-    expected_delivery_date: Optional[date] = None
-    currency: str = Field(default="USD", max_length=3)
-    notes: Optional[str] = None
-    lines: List[PurchaseOrderLineCreate]
-
-
-class PurchaseOrderUpdate(BaseSchema):
-    """Schema for updating a PO."""
-    supplier_id: Optional[UUID] = None
-    order_date: Optional[date] = None
-    expected_delivery_date: Optional[date] = None
-    status: Optional[str] = None
-    currency: Optional[str] = Field(None, max_length=3)
-    notes: Optional[str] = None
-
-
-class PurchaseOrderResponse(TimestampSchema):
-    """PO response schema."""
-    id: UUID
-    po_number: str
-    supplier_id: UUID
-    order_date: date
-    expected_delivery_date: Optional[date]
-    status: str
-    currency: str
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
-    notes: Optional[str]
-    approved_by: Optional[UUID]
-    approved_at: Optional[datetime]
-    lines: List[PurchaseOrderLineResponse] = []
-    supplier: Optional[SupplierBrief] = None
-
-
-class PurchaseOrderBrief(BaseSchema):
-    """Brief PO information."""
-    id: UUID
-    po_number: str
-    total_amount: Decimal
-    status: str
-
-
-class PurchaseOrderListResponse(PaginatedResponse[PurchaseOrderResponse]):
-    """Paginated PO list response."""
     pass
 
 
-# Status update schema
-class PurchaseOrderStatusUpdate(BaseSchema):
-    """Schema for updating PO status."""
-    status: str = Field(..., description="New status: draft, approved, closed, cancelled")
+class PurchaseOrderLineResponse(PurchaseOrderLineBase):
+    """Schema for PO line item response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    po_id: UUID
+    line_amount: Decimal
+    created_at: datetime
+    updated_at: datetime
+
+
+class PurchaseOrderBase(BaseModel):
+    """Base schema for purchase orders."""
+
+    po_number: str = Field(min_length=1, max_length=50)
+    supplier_id: str = Field(min_length=1, max_length=50)
+    supplier_name: str = Field(min_length=1, max_length=255)
+    order_date: date
+    expected_delivery_date: date | None = None
+    currency: str = Field(default="USD", max_length=3)
+    notes: str | None = None
+
+
+class PurchaseOrderCreate(PurchaseOrderBase):
+    """Schema for creating a purchase order."""
+
+    lines: list[PurchaseOrderLineCreate] = Field(min_length=1)
+    created_by: UUID | None = None
+
+    @model_validator(mode="after")
+    def calculate_totals(self) -> Self:
+        """Calculate total amounts from lines."""
+        subtotal = sum(line.quantity * line.unit_price for line in self.lines)
+        tax_total = sum(line.tax_amount for line in self.lines)
+        self._subtotal = subtotal
+        self._tax_total = tax_total
+        return self
+
+
+class PurchaseOrderUpdate(BaseModel):
+    """Schema for updating a purchase order."""
+
+    supplier_id: str | None = Field(default=None, max_length=50)
+    supplier_name: str | None = Field(default=None, max_length=255)
+    expected_delivery_date: date | None = None
+    status: str | None = None
+    notes: str | None = None
+    lines: list[PurchaseOrderLineCreate] | None = None
+
+
+class PurchaseOrderResponse(PurchaseOrderBase):
+    """Schema for purchase order response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    total_amount: Decimal
+    status: str
+    created_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    lines: list[PurchaseOrderLineResponse] = []
+
+    @field_validator("total_amount", mode="before")
+    @classmethod
+    def validate_total(cls, v: Decimal | None) -> Decimal:
+        return v or Decimal("0.00")
+
+
+class PurchaseOrderListResponse(BaseModel):
+    """Schema for paginated PO list."""
+
+    items: list[PurchaseOrderResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+class PurchaseOrderSummary(BaseModel):
+    """Schema for PO summary in matching."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    po_number: str
+    supplier_id: str
+    supplier_name: str
+    total_amount: Decimal
+    open_amount: Decimal
+    status: str

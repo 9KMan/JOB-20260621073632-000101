@@ -1,26 +1,35 @@
 // src/app/models/base.py
-"""
-Base Model Class
-Provides common fields and functionality for all models.
-"""
+"""Base model with common fields and mixins."""
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, declared_attr
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.database import Base
+from src.app.database import Base
+
+
+class UUIDMixin:
+    """Mixin providing UUID primary key."""
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
 
 
 class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
-    
+    """Mixin providing created_at and updated_at timestamps."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -30,49 +39,34 @@ class TimestampMixin:
     )
 
 
-class UUIDMixin:
-    """Mixin for UUID primary key."""
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
-
-
 class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
-    
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+    """Mixin providing soft delete functionality."""
+
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        default=None,
     )
-    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
 
 
 class BaseModel(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Base model with common mixins."""
-    
+    """Base model combining all common mixins."""
+
     __abstract__ = True
-    
-    @declared_attr
-    def __tablename__(cls) -> str:
-        """Auto-generate table name from class name."""
-        import re
-        name = cls.__name__
-        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
-
-class AuditableMixin(TimestampMixin):
-    """Mixin for tracking who created/updated records."""
-    
-    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        result = {}
+        for column in self.__table__.columns:
+            value = getattr(self, column.name)
+            if isinstance(value, uuid.UUID):
+                value = str(value)
+            elif isinstance(value, datetime):
+                value = value.isoformat()
+            result[column.name] = value
+        return result

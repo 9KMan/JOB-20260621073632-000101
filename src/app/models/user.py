@@ -1,19 +1,16 @@
 // src/app/models/user.py
-"""
-User Model
-Authentication and authorization for the system.
-"""
-from sqlalchemy import String, Boolean
-from sqlalchemy.orm import Mapped, mapped_column
+"""User model for authentication."""
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import BaseModel
+from src.app.models.base import BaseModel
 
 
 class User(BaseModel):
-    """User model for authentication."""
-    
+    """User model for system authentication and authorization."""
+
     __tablename__ = "users"
-    
+
     email: Mapped[str] = mapped_column(
         String(255),
         unique=True,
@@ -30,25 +27,35 @@ class User(BaseModel):
         String(255),
         nullable=False,
     )
-    full_name: Mapped[str] = mapped_column(
+    full_name: Mapped[str | None] = mapped_column(
         String(255),
-        nullable=False,
+        nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(
-        Boolean,
         default=True,
         nullable=False,
     )
     is_superuser: Mapped[bool] = mapped_column(
-        Boolean,
         default=False,
         nullable=False,
     )
-    role: Mapped[str] = mapped_column(
-        String(50),
-        default="user",
-        nullable=False,
+
+    # Relationships
+    purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(
+        back_populates="created_by_user",
+        foreign_keys="PurchaseOrder.created_by",
     )
-    
+    invoices: Mapped[list["Invoice"]] = relationship(
+        back_populates="created_by_user",
+        foreign_keys="Invoice.created_by",
+    )
+    delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
+        back_populates="created_by_user",
+        foreign_keys="DeliveryNote.created_by",
+    )
+    match_confirmations: Mapped[list["MatchConfirmation"]] = relationship(
+        back_populates="confirmed_by_user",
+    )
+
     def __repr__(self) -> str:
         return f"<User {self.username}>"
