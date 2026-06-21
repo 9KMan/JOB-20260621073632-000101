@@ -1,29 +1,40 @@
 // src/app/database.py
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+"""Database connection and session management."""
 from contextlib import contextmanager
 from typing import Generator
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from sqlalchemy.pool import QueuePool
 
 from src.app.config import get_settings
 
 settings = get_settings()
 
+# Create engine with connection pooling
 engine = create_engine(
-    settings.DATABASE_URL,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
+    settings.database_url,
+    poolclass=QueuePool,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
     pool_pre_ping=True,
-    echo=settings.DEBUG,
+    echo=settings.db_echo,
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Session factory
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
 
+# Base class for models
 Base = declarative_base()
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Dependency for getting database sessions."""
+    """Dependency that provides a database session."""
     db = SessionLocal()
     try:
         yield db

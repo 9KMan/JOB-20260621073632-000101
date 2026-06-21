@@ -1,53 +1,54 @@
 // src/models/invoice.py
-"""Invoice and Invoice Line models."""
+"""Invoice models."""
 import uuid
 import decimal
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import (
-    String,
-    Date,
-    DateTime,
-    Numeric,
-    Integer,
-    ForeignKey,
-    Text,
-    Index,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import String, Integer, Numeric, Date, ForeignKey, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import BaseModel, SoftDeleteMixin
+from src.models.base import Base, TimestampMixin, UUIDMixin, SoftDeleteMixin
 from src.models.enums import DocumentStatus
 
 if TYPE_CHECKING:
-    from src.models.supplier import Supplier
-    from src.models.match import MatchLine, BalanceLedger
+    from src.models.purchase_order import PurchaseOrderLine
+    from src.models.delivery_note import DeliveryNoteLine
+    from src.models.matching import MatchRecord, BalanceLedger
 
 
-class Invoice(BaseModel, SoftDeleteMixin):
-    """Invoice header from supplier."""
-
+class Invoice(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Invoice model."""
+    
     __tablename__ = "invoices"
     __table_args__ = (
-        Index("ix_invoice_supplier_status", "supplier_id", "status"),
-        Index("ix_invoice_number", "invoice_number"),
+        Index("ix_invoice_supplier_number", "supplier_id", "invoice_number", unique=True),
+        Index("ix_invoice_status", "status"),
+        Index("ix_invoice_invoice_date", "invoice_date"),
+        Index("ix_invoice_po_id", "purchase_order_id"),
     )
 
     invoice_number: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
+        String(100),
+        unique=True,
         index=True,
-    )
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
-    po_reference: Mapped[str] = mapped_column(
-        String(50),
+    supplier_id: Mapped[str] = mapped_column(
+        String(100),
+        index=True,
+        nullable=False,
+    )
+    supplier_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    supplier_reference: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -55,19 +56,14 @@ class Invoice(BaseModel, SoftDeleteMixin):
         Date,
         nullable=False,
     )
-    due_date: Mapped[date] = mapped_column(
+    due_date: Mapped[Optional[date]] = mapped_column(
         Date,
         nullable=True,
     )
-    status: Mapped[DocumentStatus] = mapped_column(
-        DocumentStatus.enum,
-        default=DocumentStatus.SUBMITTED,
-        nullable=False,
-    )
     subtotal: Mapped[decimal.Decimal] = mapped_column(
         Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
         nullable=False,
+        default=decimal.Decimal("0.00"),
     )
     tax_amount: Mapped[decimal.Decimal] = mapped_column(
         Numeric(15, 2),
@@ -75,6 +71,11 @@ class Invoice(BaseModel, SoftDeleteMixin):
         nullable=False,
     )
     total_amount: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=decimal.Decimal("0.00"),
+    )
+    amount_paid: Mapped[decimal.Decimal] = mapped_column(
         Numeric(15, 2),
         default=decimal.Decimal("0.00"),
         nullable=False,
@@ -84,60 +85,60 @@ class Invoice(BaseModel, SoftDeleteMixin):
         default="USD",
         nullable=False,
     )
-    payment_terms: Mapped[str] = mapped_column(
+    status: Mapped[DocumentStatus] = mapped_column(
+        String(50),
+        default=DocumentStatus.SUBMITTED,
+        nullable=False,
+        index=True,
+    )
+    payment_terms: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
     )
-    notes: Mapped[str] = mapped_column(
-        Text,
+    notes: Mapped[Optional[str]] = mapped_column(
+        String(1000),
         nullable=True,
     )
-    attachment_url: Mapped[str] = mapped_column(
-        String(500),
+    metadata: Mapped[Optional[str]] = mapped_column(
+        String(2000),
         nullable=True,
     )
 
     # Relationships
-    supplier: Mapped["Supplier"] = relationship(
-        "Supplier",
-        back_populates="invoices",
-    )
-    lines: Mapped[list["InvoiceLine"]] = relationship(
+    lines: Mapped[List["InvoiceLine"]] = relationship(
         "InvoiceLine",
         back_populates="invoice",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    matched_lines: Mapped[list["MatchLine"]] = relationship(
-        "MatchLine",
-        back_populates="invoice_line",
-        foreign_keys="MatchLine.invoice_line_id",
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[purchase_order_id],
     )
-    balance_entries: Mapped[list["BalanceLedger"]] = relationship(
+    matched_records: Mapped[List["MatchRecord"]] = relationship(
+        "MatchRecord",
+        back_populates="invoice",
+        foreign_keys="MatchRecord.invoice_id",
+    )
+    balance_ledger: Mapped[List["BalanceLedger"]] = relationship(
         "BalanceLedger",
         back_populates="invoice",
         foreign_keys="BalanceLedger.invoice_id",
     )
 
-    def calculate_totals(self) -> None:
-        """Calculate subtotal, tax, and total amounts from lines."""
-        self.subtotal = sum((line.line_total for line in self.lines), decimal.Decimal("0.00"))
-        self.tax_amount = sum((line.tax_amount for line in self.lines), decimal.Decimal("0.00"))
-        self.total_amount = self.subtotal + self.tax_amount
-
     def __repr__(self) -> str:
         return f"<Invoice {self.invoice_number}>"
 
 
-class InvoiceLine(BaseModel):
-    """Invoice Line Item."""
-
+class InvoiceLine(Base, UUIDMixin, TimestampMixin):
+    """Invoice Line Item model."""
+    
     __tablename__ = "invoice_lines"
     __table_args__ = (
         Index("ix_il_invoice_line", "invoice_id", "line_number", unique=True),
     )
 
     invoice_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -167,7 +168,7 @@ class InvoiceLine(BaseModel):
         Numeric(15, 4),
         nullable=False,
     )
-    line_total: Mapped[decimal.Decimal] = mapped_column(
+    line_amount: Mapped[decimal.Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
     )
@@ -181,22 +182,31 @@ class InvoiceLine(BaseModel):
         default=decimal.Decimal("0.00"),
         nullable=False,
     )
+    is_matched: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    matched_quantity: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=decimal.Decimal("0.0000"),
+        nullable=False,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
 
     # Relationships
     invoice: Mapped["Invoice"] = relationship(
         "Invoice",
         back_populates="lines",
     )
-    matched_lines: Mapped[list["MatchLine"]] = relationship(
-        "MatchLine",
+    matched_records: Mapped[List["MatchRecord"]] = relationship(
+        "MatchRecord",
         back_populates="invoice_line",
-        foreign_keys="MatchLine.invoice_line_id",
+        foreign_keys="MatchRecord.invoice_line_id",
     )
 
     def __repr__(self) -> str:
         return f"<InvoiceLine {self.line_number}: {self.product_code}>"
-
-    def calculate_totals(self) -> None:
-        """Calculate line total from quantity and unit price."""
-        self.line_total = self.quantity * self.unit_price
-        self.tax_amount = self.line_total * self.tax_rate

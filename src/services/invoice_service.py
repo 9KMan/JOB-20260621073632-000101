@@ -1,11 +1,11 @@
 // src/services/invoice_service.py
 """Invoice service."""
 import uuid
-from typing import Optional
+import decimal
+from datetime import date
+from typing import Optional, List
 
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from src.models.invoice import Invoice, InvoiceLine
 from src.models.enums import DocumentStatus
@@ -15,28 +15,52 @@ from src.schemas.invoice import InvoiceCreate, InvoiceUpdate
 class InvoiceService:
     """Service for Invoice operations."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    @staticmethod
+    def calculate_totals(lines: List[dict]) -> tuple[decimal.Decimal, decimal.Decimal]:
+        """Calculate subtotal and tax amount from lines."""
+        subtotal = decimal.Decimal("0.00")
+        tax_amount = decimal.Decimal("0.00")
+        
+        for line in lines:
+            subtotal += decimal.Decimal(str(line.get("line_amount", 0)))
+            tax_amount += decimal.Decimal(str(line.get("tax_amount", 0)))
+        
+        return subtotal, tax_amount
 
-    async def create_invoice(self, invoice_data: InvoiceCreate) -> Invoice:
-        """Create a new invoice with lines."""
+    @staticmethod
+    def create_invoice(db: Session, invoice_data: InvoiceCreate) -> Invoice:
+        """Create a new Invoice with lines."""
+        subtotal = invoice_data.subtotal
+        tax_amount = invoice_data.tax_amount
+        total_amount = invoice_data.total_amount
+
+        if invoice_data.lines:
+            subtotal, tax_amount = InvoiceService.calculate_totals(
+                [line.model_dump() for line in invoice_data.lines]
+            )
+            total_amount = subtotal + tax_amount
+
         invoice = Invoice(
             invoice_number=invoice_data.invoice_number,
             supplier_id=invoice_data.supplier_id,
-            po_reference=invoice_data.po_reference,
+            supplier_name=invoice_data.supplier_name,
+            supplier_reference=invoice_data.supplier_reference,
+            purchase_order_id=invoice_data.purchase_order_id,
             invoice_date=invoice_data.invoice_date,
             due_date=invoice_data.due_date,
+            subtotal=subtotal,
+            tax_amount=tax_amount,
+            total_amount=total_amount,
+            amount_paid=invoice_data.amount_paid,
             currency=invoice_data.currency,
+            status=invoice_data.status,
             payment_terms=invoice_data.payment_terms,
             notes=invoice_data.notes,
-            attachment_url=invoice_data.attachment_url,
-            status=DocumentStatus.SUBMITTED,
+            metadata=invoice_data.metadata,
         )
-        
-        self.db.add(invoice)
-        await self.db.flush()  # Get the invoice ID
-        
-        # Create lines
+        db.add(invoice)
+        db.flush()
+
         for line_data in invoice_data.lines:
             line = InvoiceLine(
                 invoice_id=invoice.id,
@@ -46,151 +70,109 @@ class InvoiceService:
                 quantity=line_data.quantity,
                 unit_of_measure=line_data.unit_of_measure,
                 unit_price=line_data.unit_price,
+                line_amount=line_data.line_amount,
                 tax_rate=line_data.tax_rate,
+                tax_amount=line_data.tax_amount,
+                notes=line_data.notes,
             )
-            line.calculate_totals()
-            self.db.add(line)
-        
-        await self.db.flush()
-        
-        # Recalculate totals
-        invoice.calculate_totals()
-        
-        await self.db.commit()
-        await self.db.refresh(invoice)
-        
+            db.add(line)
+
+        db.commit()
+        db.refresh(invoice)
         return invoice
 
-    async def get_invoice_by_id(
-        self,
-        invoice_id: uuid.UUID,
-        include_lines: bool = True
-    ) -> Optional[Invoice]:
-        """Get an invoice by ID."""
-        query = select(Invoice).where(
-            Invoice.id == invoice_id,
-            Invoice.is_deleted == False
+    @staticmethod
+    def get_invoice(db: Session, invoice_id: uuid.UUID) -> Optional[Invoice]:
+        """Get an Invoice by ID."""
+        return (
+            db.query(Invoice)
+            .options(joinedload(Invoice.lines))
+            .filter(Invoice.id == invoice_id)
+            .first()
         )
-        
-        if include_lines:
-            query = query.options(selectinload(Invoice.lines))
-        
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none()
 
-    async def get_invoice_by_number(self, invoice_number: str) -> Optional[Invoice]:
-        """Get an invoice by number."""
-        result = await self.db.execute(
-            select(Invoice).where(
-                Invoice.invoice_number == invoice_number,
-                Invoice.is_deleted == False
-            ).options(selectinload(Invoice.lines))
+    @staticmethod
+    def get_invoice_by_number(db: Session, invoice_number: str) -> Optional[Invoice]:
+        """Get an Invoice by invoice number."""
+        return (
+            db.query(Invoice)
+            .options(joinedload(Invoice.lines))
+            .filter(Invoice.invoice_number == invoice_number)
+            .first()
         )
-        return result.scalar_one_or_none()
 
-    async def update_invoice(
-        self,
-        invoice_id: uuid.UUID,
-        invoice_data: InvoiceUpdate
-    ) -> Optional[Invoice]:
-        """Update an existing invoice."""
-        invoice = await self.get_invoice_by_id(invoice_id)
-        if not invoice:
-            return None
-        
-        update_data = invoice_data.model_dump(exclude_unset=True)
-        
-        for field, value in update_data.items():
-            setattr(invoice, field, value)
-        
-        await self.db.commit()
-        await self.db.refresh(invoice)
-        
-        return invoice
-
-    async def update_invoice_status(
-        self,
-        invoice_id: uuid.UUID,
-        status: DocumentStatus
-    ) -> Optional[Invoice]:
-        """Update invoice status."""
-        invoice = await self.get_invoice_by_id(invoice_id)
-        if not invoice:
-            return None
-        
-        invoice.status = status
-        await self.db.commit()
-        await self.db.refresh(invoice)
-        
-        return invoice
-
-    async def delete_invoice(self, invoice_id: uuid.UUID) -> bool:
-        """Soft delete an invoice."""
-        invoice = await self.get_invoice_by_id(invoice_id)
-        if not invoice:
-            return False
-        
-        invoice.soft_delete()
-        await self.db.commit()
-        
-        return True
-
-    async def list_invoices(
-        self,
+    @staticmethod
+    def get_invoices(
+        db: Session,
         skip: int = 0,
         limit: int = 100,
-        supplier_id: Optional[uuid.UUID] = None,
+        supplier_id: Optional[str] = None,
         status: Optional[DocumentStatus] = None,
-        invoice_number: Optional[str] = None,
-        po_reference: Optional[str] = None
-    ) -> tuple[list[Invoice], int]:
-        """List invoices with pagination and filtering."""
-        query = select(Invoice).where(Invoice.is_deleted == False)
+        po_id: Optional[uuid.UUID] = None,
+    ) -> List[Invoice]:
+        """Get a list of Invoices with optional filtering."""
+        query = db.query(Invoice).options(joinedload(Invoice.lines))
         
         if supplier_id:
-            query = query.where(Invoice.supplier_id == supplier_id)
+            query = query.filter(Invoice.supplier_id == supplier_id)
         if status:
-            query = query.where(Invoice.status == status)
-        if invoice_number:
-            query = query.where(Invoice.invoice_number.ilike(f"%{invoice_number}%"))
-        if po_reference:
-            query = query.where(Invoice.po_reference.ilike(f"%{po_reference}%"))
+            query = query.filter(Invoice.status == status)
+        if po_id:
+            query = query.filter(Invoice.purchase_order_id == po_id)
         
-        # Get total count
-        count_query = select(func.count(Invoice.id)).where(Invoice.is_deleted == False)
-        if supplier_id:
-            count_query = count_query.where(Invoice.supplier_id == supplier_id)
-        if status:
-            count_query = count_query.where(Invoice.status == status)
-        
-        count_result = await self.db.execute(count_query)
-        total = count_result.scalar()
-        
-        # Get paginated results with lines
-        query = query.options(
-            selectinload(Invoice.lines),
-            selectinload(Invoice.supplier)
-        ).offset(skip).limit(limit).order_by(Invoice.invoice_date.desc())
-        
-        result = await self.db.execute(query)
-        invoices = result.scalars().all()
-        
-        return list(invoices), total
+        return query.offset(skip).limit(limit).all()
 
-    async def find_invoices_by_po_reference(
-        self,
-        po_number: str,
-        supplier_id: uuid.UUID
-    ) -> list[Invoice]:
-        """Find invoices referencing a PO number for a supplier."""
-        result = await self.db.execute(
-            select(Invoice)
-            .where(
-                Invoice.po_reference == po_number,
-                Invoice.supplier_id == supplier_id,
-                Invoice.is_deleted == False
+    @staticmethod
+    def update_invoice(
+        db: Session,
+        invoice: Invoice,
+        invoice_data: InvoiceUpdate,
+    ) -> Invoice:
+        """Update an Invoice."""
+        update_data = invoice_data.model_dump(exclude_unset=True)
+        
+        for key, value in update_data.items():
+            setattr(invoice, key, value)
+        
+        db.commit()
+        db.refresh(invoice)
+        return invoice
+
+    @staticmethod
+    def delete_invoice(db: Session, invoice: Invoice) -> None:
+        """Soft delete an Invoice."""
+        invoice.is_deleted = True
+        invoice.deleted_at = date.today()
+        invoice.status = DocumentStatus.CANCELLED
+        db.commit()
+
+    @staticmethod
+    def update_status(db: Session, invoice: Invoice, status: DocumentStatus) -> Invoice:
+        """Update an Invoice status."""
+        invoice.status = status
+        db.commit()
+        db.refresh(invoice)
+        return invoice
+
+    @staticmethod
+    def get_unmatched_invoices(
+        db: Session,
+        supplier_id: Optional[str] = None,
+    ) -> List[Invoice]:
+        """Get invoices that haven't been fully matched."""
+        query = (
+            db.query(Invoice)
+            .options(joinedload(Invoice.lines))
+            .filter(
+                Invoice.is_deleted == False,
+                Invoice.status.in_([
+                    DocumentStatus.SUBMITTED,
+                    DocumentStatus.PARTIALLY_MATCHED,
+                ])
             )
-            .options(selectinload(Invoice.lines))
-            .order_by(Invoice.invoice_date.desc())
         )
-        return list(result.scalars().all())
+        
+        if supplier_id:
+            query = query.filter(Invoice.supplier_id == supplier_id)
+        
+        return query.all()

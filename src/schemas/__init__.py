@@ -1,17 +1,11 @@
 // src/schemas/__init__.py
 """Pydantic schemas package."""
-from src.schemas.auth import (
-    Token,
-    TokenData,
+from src.schemas.user import (
     UserCreate,
     UserUpdate,
     UserResponse,
     UserLogin,
-)
-from src.schemas.supplier import (
-    SupplierCreate,
-    SupplierUpdate,
-    SupplierResponse,
+    TokenResponse,
 )
 from src.schemas.purchase_order import (
     PurchaseOrderCreate,
@@ -37,70 +31,43 @@ from src.schemas.delivery_note import (
     DeliveryNoteLineUpdate,
     DeliveryNoteLineResponse,
 )
-from src.schemas.match import (
-    MatchCreate,
-    MatchUpdate,
-    MatchResponse,
-    MatchLineCreate,
-    MatchLineUpdate,
-    MatchLineResponse,
+from src.schemas.matching import (
+    MatchRecordCreate,
+    MatchRecordUpdate,
+    MatchRecordResponse,
+    MatchDecisionRequest,
     BalanceLedgerResponse,
-    MatchResultResponse,
-    ConfirmMatchRequest,
-    RejectMatchRequest,
-)
-from src.schemas.common import (
-    PaginatedResponse,
-    MessageResponse,
-    ErrorResponse,
+    MatchingResult,
 )
 
 __all__ = [
-    # Auth
-    "Token",
-    "TokenData",
     "UserCreate",
     "UserUpdate",
     "UserResponse",
     "UserLogin",
-    # Supplier
-    "SupplierCreate",
-    "SupplierUpdate",
-    "SupplierResponse",
-    # Purchase Order
+    "TokenResponse",
     "PurchaseOrderCreate",
     "PurchaseOrderUpdate",
     "PurchaseOrderResponse",
     "PurchaseOrderLineCreate",
     "PurchaseOrderLineUpdate",
     "PurchaseOrderLineResponse",
-    # Invoice
     "InvoiceCreate",
     "InvoiceUpdate",
     "InvoiceResponse",
     "InvoiceLineCreate",
     "InvoiceLineUpdate",
     "InvoiceLineResponse",
-    # Delivery Note
     "DeliveryNoteCreate",
     "DeliveryNoteUpdate",
     "DeliveryNoteResponse",
     "DeliveryNoteLineCreate",
     "DeliveryNoteLineUpdate",
     "DeliveryNoteLineResponse",
-    # Match
-    "MatchCreate",
-    "MatchUpdate",
-    "MatchResponse",
-    "MatchLineCreate",
-    "MatchLineUpdate",
-    "MatchLineResponse",
+    "MatchRecordCreate",
+    "MatchRecordUpdate",
+    "MatchRecordResponse",
+    "MatchDecisionRequest",
     "BalanceLedgerResponse",
-    "MatchResultResponse",
-    "ConfirmMatchRequest",
-    "RejectMatchRequest",
-    # Common
-    "PaginatedResponse",
-    "MessageResponse",
-    "ErrorResponse",
+    "MatchingResult",
 ]

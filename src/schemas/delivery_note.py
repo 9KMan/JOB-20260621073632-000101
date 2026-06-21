@@ -1,95 +1,104 @@
 // src/schemas/delivery_note.py
 """Delivery Note schemas."""
+import uuid
+import decimal
 from datetime import date, datetime
-from decimal import Decimal
-from typing import Optional
-from uuid import UUID
+from typing import Optional, List
 
-from pydantic import Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
-from src.schemas.common import BaseSchema
-from src.schemas.supplier import SupplierResponse
 from src.models.enums import DocumentStatus
 
 
-class DeliveryNoteLineBase(BaseSchema):
-    """Base DN line schema."""
+class DeliveryNoteLineBase(BaseModel):
+    """Base schema for Delivery Note line."""
     line_number: int = Field(..., ge=1)
-    product_code: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    quantity_delivered: Decimal = Field(..., ge=0)
-    quantity_accepted: Optional[Decimal] = Field(None, ge=0)
-    quantity_rejected: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    product_code: Optional[str] = Field(None, max_length=100)
+    description: str = Field(..., min_length=1, max_length=500)
+    quantity_delivered: decimal.Decimal = Field(..., ge=0)
+    quantity_accepted: Optional[decimal.Decimal] = Field(None, ge=0)
+    quantity_rejected: decimal.Decimal = Field(default=decimal.Decimal("0.0000"), ge=0)
     unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=0)
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class DeliveryNoteLineCreate(DeliveryNoteLineBase):
-    """DN line creation schema."""
+    """Schema for creating a Delivery Note line."""
     pass
 
 
-class DeliveryNoteLineUpdate(BaseSchema):
-    """DN line update schema."""
-    line_number: Optional[int] = Field(None, ge=1)
-    product_code: Optional[str] = Field(None, min_length=1, max_length=100)
+class DeliveryNoteLineUpdate(BaseModel):
+    """Schema for updating a Delivery Note line."""
+    product_code: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    quantity_delivered: Optional[Decimal] = Field(None, ge=0)
-    quantity_accepted: Optional[Decimal] = Field(None, ge=0)
-    quantity_rejected: Optional[Decimal] = Field(None, ge=0)
+    quantity_delivered: Optional[decimal.Decimal] = Field(None, ge=0)
+    quantity_accepted: Optional[decimal.Decimal] = Field(None, ge=0)
+    quantity_rejected: Optional[decimal.Decimal] = Field(None, ge=0)
     unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=0)
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class DeliveryNoteLineResponse(DeliveryNoteLineBase):
-    """DN line response schema."""
-    id: UUID
-    delivery_note_id: UUID
-    line_total: Decimal
+    """Schema for Delivery Note line response."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    delivery_note_id: uuid.UUID
+    is_matched: bool
+    matched_quantity: decimal.Decimal
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
 
-
-class DeliveryNoteBase(BaseSchema):
-    """Base DN schema."""
-    delivery_note_number: str = Field(..., min_length=1, max_length=50)
-    supplier_id: UUID
-    po_reference: Optional[str] = Field(None, max_length=50)
+class DeliveryNoteBase(BaseModel):
+    """Base schema for Delivery Note."""
+    dn_number: str = Field(..., min_length=1, max_length=100)
+    supplier_id: str = Field(..., min_length=1, max_length=100)
+    supplier_name: str = Field(..., min_length=1, max_length=255)
+    supplier_reference: Optional[str] = Field(None, max_length=100)
+    purchase_order_id: Optional[uuid.UUID] = None
     delivery_date: date
     received_by: Optional[str] = Field(None, max_length=255)
-    currency: str = Field(default="USD", max_length=3)
-    notes: Optional[str] = None
-    attachment_url: Optional[str] = Field(None, max_length=500)
+    status: DocumentStatus = DocumentStatus.SUBMITTED
+    notes: Optional[str] = Field(None, max_length=1000)
+    metadata: Optional[str] = Field(None, max_length=2000)
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """DN creation schema."""
-    lines: list[DeliveryNoteLineCreate] = Field(default_factory=list)
+    """Schema for creating a Delivery Note."""
+    total_quantity: decimal.Decimal = Field(default=decimal.Decimal("0.0000"), ge=0)
+    total_lines: int = Field(default=0, ge=0)
+    lines: List[DeliveryNoteLineCreate] = Field(default_factory=list)
 
 
-class DeliveryNoteUpdate(BaseSchema):
-    """DN update schema."""
-    delivery_note_number: Optional[str] = Field(None, min_length=1, max_length=50)
-    supplier_id: Optional[UUID] = None
-    po_reference: Optional[str] = Field(None, max_length=50)
+class DeliveryNoteUpdate(BaseModel):
+    """Schema for updating a Delivery Note."""
+    supplier_id: Optional[str] = Field(None, max_length=100)
+    supplier_name: Optional[str] = Field(None, max_length=255)
+    supplier_reference: Optional[str] = Field(None, max_length=100)
+    purchase_order_id: Optional[uuid.UUID] = None
     delivery_date: Optional[date] = None
     received_by: Optional[str] = Field(None, max_length=255)
+    total_quantity: Optional[decimal.Decimal] = Field(None, ge=0)
+    total_lines: Optional[int] = Field(None, ge=0)
     status: Optional[DocumentStatus] = None
-    currency: Optional[str] = Field(None, max_length=3)
-    notes: Optional[str] = None
-    attachment_url: Optional[str] = Field(None, max_length=500)
+    notes: Optional[str] = Field(None, max_length=1000)
+    metadata: Optional[str] = Field(None, max_length=2000)
 
 
 class DeliveryNoteResponse(DeliveryNoteBase):
-    """DN response schema."""
-    id: UUID
-    status: DocumentStatus
-    subtotal: Decimal
+    """Schema for Delivery Note response."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    total_quantity: decimal.Decimal
+    total_lines: int
     created_at: datetime
     updated_at: datetime
-    lines: list[DeliveryNoteLineResponse] = Field(default_factory=list)
-    supplier: Optional[SupplierResponse] = None
+    is_deleted: bool
+    lines: List[DeliveryNoteLineResponse] = Field(default_factory=list)
 
-    model_config = ConfigDict(from_attributes=True)
+    @field_validator("lines", mode="before")
+    @classmethod
+    def validate_lines(cls, v):
+        return v if v else []

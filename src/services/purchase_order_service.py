@@ -1,11 +1,11 @@
 // src/services/purchase_order_service.py
 """Purchase Order service."""
 import uuid
-from typing import Optional
+import decimal
+from datetime import date
+from typing import Optional, List
 
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from src.models.enums import DocumentStatus
@@ -15,28 +15,39 @@ from src.schemas.purchase_order import PurchaseOrderCreate, PurchaseOrderUpdate
 class PurchaseOrderService:
     """Service for Purchase Order operations."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    @staticmethod
+    def calculate_totals(lines: List[dict]) -> decimal.Decimal:
+        """Calculate total amount from lines."""
+        return sum(
+            (decimal.Decimal(str(line.get("line_amount", 0))) for line in lines),
+            decimal.Decimal("0.00")
+        )
 
-    async def create_purchase_order(
-        self,
-        po_data: PurchaseOrderCreate
-    ) -> PurchaseOrder:
-        """Create a new purchase order with lines."""
+    @staticmethod
+    def create_purchase_order(db: Session, po_data: PurchaseOrderCreate) -> PurchaseOrder:
+        """Create a new Purchase Order with lines."""
+        total_amount = po_data.total_amount
+        if po_data.lines:
+            total_amount = PurchaseOrderService.calculate_totals(
+                [line.model_dump() for line in po_data.lines]
+            )
+
         po = PurchaseOrder(
             po_number=po_data.po_number,
             supplier_id=po_data.supplier_id,
+            supplier_name=po_data.supplier_name,
+            supplier_reference=po_data.supplier_reference,
             order_date=po_data.order_date,
             expected_delivery_date=po_data.expected_delivery_date,
+            total_amount=total_amount,
             currency=po_data.currency,
+            status=po_data.status,
             notes=po_data.notes,
-            status=DocumentStatus.DRAFT,
+            metadata=po_data.metadata,
         )
-        
-        self.db.add(po)
-        await self.db.flush()  # Get the PO ID
-        
-        # Create lines
+        db.add(po)
+        db.flush()
+
         for line_data in po_data.lines:
             line = PurchaseOrderLine(
                 purchase_order_id=po.id,
@@ -46,152 +57,105 @@ class PurchaseOrderService:
                 quantity=line_data.quantity,
                 unit_of_measure=line_data.unit_of_measure,
                 unit_price=line_data.unit_price,
+                line_amount=line_data.line_amount,
                 tax_rate=line_data.tax_rate,
+                tax_amount=line_data.tax_amount,
                 expected_delivery_date=line_data.expected_delivery_date,
+                notes=line_data.notes,
             )
-            line.calculate_totals()
-            self.db.add(line)
-        
-        await self.db.flush()
-        
-        # Recalculate totals
-        po.calculate_totals()
-        
-        await self.db.commit()
-        await self.db.refresh(po)
-        
+            db.add(line)
+
+        db.commit()
+        db.refresh(po)
         return po
 
-    async def get_purchase_order_by_id(
-        self,
-        po_id: uuid.UUID,
-        include_lines: bool = True
-    ) -> Optional[PurchaseOrder]:
-        """Get a purchase order by ID."""
-        query = select(PurchaseOrder).where(
-            PurchaseOrder.id == po_id,
-            PurchaseOrder.is_deleted == False
+    @staticmethod
+    def get_purchase_order(db: Session, po_id: uuid.UUID) -> Optional[PurchaseOrder]:
+        """Get a Purchase Order by ID."""
+        return (
+            db.query(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.lines))
+            .filter(PurchaseOrder.id == po_id)
+            .first()
         )
-        
-        if include_lines:
-            query = query.options(selectinload(PurchaseOrder.lines))
-        
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none()
 
-    async def get_purchase_order_by_number(self, po_number: str) -> Optional[PurchaseOrder]:
-        """Get a purchase order by PO number."""
-        result = await self.db.execute(
-            select(PurchaseOrder).where(
-                PurchaseOrder.po_number == po_number,
-                PurchaseOrder.is_deleted == False
-            ).options(selectinload(PurchaseOrder.lines))
+    @staticmethod
+    def get_purchase_order_by_number(db: Session, po_number: str) -> Optional[PurchaseOrder]:
+        """Get a Purchase Order by PO number."""
+        return (
+            db.query(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.lines))
+            .filter(PurchaseOrder.po_number == po_number)
+            .first()
         )
-        return result.scalar_one_or_none()
 
-    async def update_purchase_order(
-        self,
-        po_id: uuid.UUID,
-        po_data: PurchaseOrderUpdate
-    ) -> Optional[PurchaseOrder]:
-        """Update an existing purchase order."""
-        po = await self.get_purchase_order_by_id(po_id)
-        if not po:
-            return None
-        
-        update_data = po_data.model_dump(exclude_unset=True)
-        
-        for field, value in update_data.items():
-            setattr(po, field, value)
-        
-        await self.db.commit()
-        await self.db.refresh(po)
-        
-        return po
-
-    async def approve_purchase_order(
-        self,
-        po_id: uuid.UUID,
-        approved_by_id: uuid.UUID
-    ) -> Optional[PurchaseOrder]:
-        """Approve a purchase order."""
-        po = await self.get_purchase_order_by_id(po_id)
-        if not po:
-            return None
-        
-        from datetime import datetime
-        po.status = DocumentStatus.APPROVED
-        po.approved_at = datetime.utcnow()
-        po.approved_by_id = approved_by_id
-        
-        await self.db.commit()
-        await self.db.refresh(po)
-        
-        return po
-
-    async def delete_purchase_order(self, po_id: uuid.UUID) -> bool:
-        """Soft delete a purchase order."""
-        po = await self.get_purchase_order_by_id(po_id)
-        if not po:
-            return False
-        
-        po.soft_delete()
-        await self.db.commit()
-        
-        return True
-
-    async def list_purchase_orders(
-        self,
+    @staticmethod
+    def get_purchase_orders(
+        db: Session,
         skip: int = 0,
         limit: int = 100,
-        supplier_id: Optional[uuid.UUID] = None,
+        supplier_id: Optional[str] = None,
         status: Optional[DocumentStatus] = None,
-        po_number: Optional[str] = None
-    ) -> tuple[list[PurchaseOrder], int]:
-        """List purchase orders with pagination and filtering."""
-        query = select(PurchaseOrder).where(PurchaseOrder.is_deleted == False)
+    ) -> List[PurchaseOrder]:
+        """Get a list of Purchase Orders with optional filtering."""
+        query = db.query(PurchaseOrder).options(joinedload(PurchaseOrder.lines))
         
         if supplier_id:
-            query = query.where(PurchaseOrder.supplier_id == supplier_id)
+            query = query.filter(PurchaseOrder.supplier_id == supplier_id)
         if status:
-            query = query.where(PurchaseOrder.status == status)
-        if po_number:
-            query = query.where(PurchaseOrder.po_number.ilike(f"%{po_number}%"))
+            query = query.filter(PurchaseOrder.status == status)
         
-        # Get total count
-        count_query = select(func.count(PurchaseOrder.id)).where(PurchaseOrder.is_deleted == False)
-        if supplier_id:
-            count_query = count_query.where(PurchaseOrder.supplier_id == supplier_id)
-        if status:
-            count_query = count_query.where(PurchaseOrder.status == status)
-        
-        count_result = await self.db.execute(count_query)
-        total = count_result.scalar()
-        
-        # Get paginated results with lines
-        query = query.options(
-            selectinload(PurchaseOrder.lines),
-            selectinload(PurchaseOrder.supplier)
-        ).offset(skip).limit(limit).order_by(PurchaseOrder.order_date.desc())
-        
-        result = await self.db.execute(query)
-        purchase_orders = result.scalars().all()
-        
-        return list(purchase_orders), total
+        return query.offset(skip).limit(limit).all()
 
-    async def find_open_pos_by_supplier(
-        self,
-        supplier_id: uuid.UUID
-    ) -> list[PurchaseOrder]:
-        """Find open (approved) POs for a supplier."""
-        result = await self.db.execute(
-            select(PurchaseOrder)
-            .where(
+    @staticmethod
+    def update_purchase_order(
+        db: Session,
+        po: PurchaseOrder,
+        po_data: PurchaseOrderUpdate,
+    ) -> PurchaseOrder:
+        """Update a Purchase Order."""
+        update_data = po_data.model_dump(exclude_unset=True)
+        
+        for key, value in update_data.items():
+            setattr(po, key, value)
+        
+        db.commit()
+        db.refresh(po)
+        return po
+
+    @staticmethod
+    def delete_purchase_order(db: Session, po: PurchaseOrder) -> None:
+        """Soft delete a Purchase Order."""
+        po.is_deleted = True
+        po.deleted_at = date.today()
+        po.status = DocumentStatus.CANCELLED
+        db.commit()
+
+    @staticmethod
+    def update_status(db: Session, po: PurchaseOrder, status: DocumentStatus) -> PurchaseOrder:
+        """Update a Purchase Order status."""
+        po.status = status
+        db.commit()
+        db.refresh(po)
+        return po
+
+    @staticmethod
+    def get_open_pos_by_supplier(
+        db: Session,
+        supplier_id: str,
+    ) -> List[PurchaseOrder]:
+        """Get open (unmatched) POs for a supplier."""
+        return (
+            db.query(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.lines))
+            .filter(
                 PurchaseOrder.supplier_id == supplier_id,
-                PurchaseOrder.status == DocumentStatus.APPROVED,
-                PurchaseOrder.is_deleted == False
+                PurchaseOrder.is_deleted == False,
+                PurchaseOrder.status.in_([
+                    DocumentStatus.SUBMITTED,
+                    DocumentStatus.APPROVED,
+                    DocumentStatus.PARTIALLY_MATCHED,
+                ])
             )
-            .options(selectinload(PurchaseOrder.lines))
-            .order_by(PurchaseOrder.order_date.desc())
+            .all()
         )
-        return list(result.scalars().all())
