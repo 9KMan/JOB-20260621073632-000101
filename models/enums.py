@@ -1,198 +1,115 @@
-# models/enums.py
-"""
-Status enums, decision types, and domain constants.
+// models/enums.py
+"""SQLAlchemy enums for status fields and decision types."""
 
-Using SQLAlchemy native Enum types for database storage
-and Python Enum classes for code clarity.
-"""
-
-from __future__ import annotations
-
+import uuid
 from enum import Enum
 
+from sqlalchemy import String
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import TypeDecorator
 
-class InvoiceStatus(str, Enum):
+
+class UUIDType(TypeDecorator):
+    """Platform-independent UUID type.
+
+    Uses PostgreSQL's UUID type, otherwise uses CHAR(36).
     """
-    Invoice lifecycle status.
-    
-    DRAFT -> PENDING_MATCHING -> MATCHING_IN_PROGRESS -> 
-    MATCHED -> EXCEPTION -> APPROVED -> REJECTED -> PAID
-    """
+
+    impl = String(36)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(UUID(as_uuid=True))
+        return dialect.type_descriptor(String(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == "postgresql":
+            return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+        return str(value) if isinstance(value, uuid.UUID) else value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+
+
+class DocumentStatus(str, Enum):
+    """Status for documents (invoices, POs, delivery notes)."""
 
     DRAFT = "draft"
-    PENDING_MATCHING = "pending_matching"
-    MATCHING_IN_PROGRESS = "matching_in_progress"
+    SUBMITTED = "submitted"
+    PENDING_MATCH = "pending_match"
     MATCHED = "matched"
-    EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
-    PAID = "paid"
-
-    @classmethod
-    def active_statuses(cls) -> list["InvoiceStatus"]:
-        """Return statuses that represent an active (non-terminal) invoice."""
-        return [
-            cls.DRAFT,
-            cls.PENDING_MATCHING,
-            cls.MATCHING_IN_PROGRESS,
-            cls.MATCHED,
-            cls.EXCEPTION,
-        ]
-
-    @classmethod
-    def terminal_statuses(cls) -> list["InvoiceStatus"]:
-        """Return statuses that represent a terminal state."""
-        return [
-            cls.APPROVED,
-            cls.REJECTED,
-            cls.PAID,
-        ]
-
-    @classmethod
-    def matching_final_states(cls) -> list["InvoiceStatus"]:
-        """Statuses an invoice can reach after matching."""
-        return [
-            cls.MATCHED,
-            cls.EXCEPTION,
-        ]
-
-
-class POStatus(str, Enum):
-    """
-    Purchase Order lifecycle status.
-    
-    DRAFT -> PENDING_APPROVAL -> APPROVED -> PARTIALLY_INVOICED -> 
-    FULLY_INVOICED -> CLOSED -> CANCELLED
-    """
-
-    DRAFT = "draft"
-    PENDING_APPROVAL = "pending_approval"
-    APPROVED = "approved"
-    PARTIALLY_INVOICED = "partially_invoiced"
-    FULLY_INVOICED = "fully_invoiced"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-    @classmethod
-    def active_statuses(cls) -> list["POStatus"]:
-        """Return statuses that represent an active PO."""
-        return [
-            cls.DRAFT,
-            cls.PENDING_APPROVAL,
-            cls.APPROVED,
-            cls.PARTIALLY_INVOICED,
-        ]
-
-    @classmethod
-    def open_statuses(cls) -> list["POStatus"]:
-        """Return statuses that allow invoice matching."""
-        return [
-            cls.APPROVED,
-            cls.PARTIALLY_INVOICED,
-        ]
-
-
-class DeliveryNoteStatus(str, Enum):
-    """
-    Delivery Note status.
-    
-    RECEIVED -> PARTIALLY_MATCHED -> FULLY_MATCHED -> CANCELLED
-    """
-
-    RECEIVED = "received"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    CANCELLED = "cancelled"
-
-
-class MatchDecision(str, Enum):
-    """
-    Final matching decision for an invoice-PO match.
-    
-    AUTO_APPROVED: Score >= THRESHOLD_HIGH -> Auto-approved
-    ONE_CLICK_REVIEW: Score >= THRESHOLD_MID -> Approve/reject in one click
-    EXCEPTION: Score >= THRESHOLD_LOW -> Manual review required
-    REJECTED: Score < THRESHOLD_LOW -> Automatically rejected
-    """
-
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_REVIEW = "one_click_review"
     EXCEPTION = "exception"
-    REJECTED = "rejected"
-    PENDING = "pending"
-
-    @classmethod
-    def from_score(cls, score: float, high: float, mid: float, low: float) -> "MatchDecision":
-        """
-        Determine decision based on matching score and thresholds.
-        
-        Args:
-            score: Matching score (0-100)
-            high: Auto-approve threshold
-            mid: One-click review threshold  
-            low: Exception threshold
-            
-        Returns:
-            Appropriate MatchDecision
-        """
-        if score >= high:
-            return cls.AUTO_APPROVED
-        elif score >= mid:
-            return cls.ONE_CLICK_REVIEW
-        elif score >= low:
-            return cls.EXCEPTION
-        else:
-            return cls.REJECTED
+    CANCELLED = "cancelled"
+    ARCHIVED = "archived"
 
 
 class MatchStatus(str, Enum):
-    """Status of an individual line match record."""
+    """Status for matching results."""
 
     PENDING = "pending"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    DISMISSED = "dismissed"
-
-
-class ExceptionType(str, Enum):
-    """
-    Types of matching exceptions that require manual review.
-    
-    PRICE_VARIANCE: Invoice price differs from PO price beyond tolerance
-    QTY_VARIANCE: Invoice quantity differs from PO quantity beyond tolerance
-    MISSING_PO: No matching PO found for invoice
-    MULTIPLE_MATCHES: Invoice matches multiple POs (ambiguous)
-    DUPLICATE_INVOICE: Potential duplicate invoice detected
-    PARTIAL_MATCH: Only some invoice lines matched to PO
-    BALANCE_EXCEEDED: Invoice amount exceeds available PO balance
-    LEARNING_CONFLICT: Learning loop conflicting decision
-    """
-
-    PRICE_VARIANCE = "price_variance"
-    QTY_VARIANCE = "qty_variance"
-    MISSING_PO = "missing_po"
-    MULTIPLE_MATCHES = "multiple_matches"
-    DUPLICATE_INVOICE = "duplicate_invoice"
+    IN_PROGRESS = "in_progress"
+    MATCHED = "matched"
     PARTIAL_MATCH = "partial_match"
-    BALANCE_EXCEEDED = "balance_exceeded"
+    NO_MATCH = "no_match"
+    EXCEPTION = "exception"
+    CANCELLED = "cancelled"
+
+
+class MatchType(str, Enum):
+    """Type of matching performed."""
+
+    EXACT = "exact"
+    FUZZY = "fuzzy"
+    LEARNED = "learned"
+    MANUAL = "manual"
+
+
+class DecisionType(str, Enum):
+    """Decision type for invoice matching."""
+
+    AUTO_APPROVED = "auto_approved"
+    AUTO_REJECTED = "auto_rejected"
+    REVIEW_REQUIRED = "review_required"
+    EXCEPTION = "exception"
+
+
+class ExceptionReason(str, Enum):
+    """Reason for exception in matching."""
+
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DATE_MISMATCH = "date_mismatch"
+    VENDOR_MISMATCH = "vendor_mismatch"
+    MULTIPLE_MATCHES = "multiple_matches"
+    NO_MATCH_FOUND = "no_match_found"
+    PARTIAL_MATCH = "partial_match"
     LEARNING_CONFLICT = "learning_conflict"
 
 
-class ExceptionResolution(str, Enum):
-    """
-    How an exception was resolved.
-    
-    AUTO_APPROVED: Automatically approved after review
-    MANUAL_APPROVED: Manually approved by user
-    REJECTED: Rejected
-    DISMISSED: Dismissed (not a real exception)
-    SPLIT_APPROVAL: Partially approved, partially rejected
-    ESCALATED: Escalated to higher authority
-    """
+class ExceptionStatus(str, Enum):
+    """Status for exceptions."""
 
-    AUTO_APPROVED = "auto_approved"
-    MANUAL_APPROVED = "manual_approved"
-    REJECTED = "rejected"
+    OPEN = "open"
+    UNDER_REVIEW = "under_review"
+    RESOLVED = "resolved"
     DISMISSED = "dismissed"
-    SPLIT_APPROVAL = "split_approval"
     ESCALATED = "escalated"
+
+
+class LearningStatus(str, Enum):
+    """Status for learning/cross-reference entries."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    PROMOTED = "promoted"
+    DEMOTED = "demoted"
+    ARCHIVED = "archived"

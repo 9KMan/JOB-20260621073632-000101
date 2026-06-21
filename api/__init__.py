@@ -1,6 +1,7 @@
-# api/__init__.py
-"""API package."""
+// api/__init__.py
+"""API module for AP Automation Core Engine.
 
-from api.schemas import HealthResponse
+This module contains FastAPI routes, schemas, and API utilities.
+"""
 
-__all__ = ["HealthResponse"]
+__all__ = ["schemas"]

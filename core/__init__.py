@@ -1,44 +1,16 @@
-# core/__init__.py
-"""
-AP Automation Core Engine — Core Module
+// core/__init__.py
+"""Core module for AP Automation Core Engine.
 
-This module contains configuration, database, and security utilities
-for the FinaRo AP Automation system.
+This module contains configuration, database, and security utilities.
 """
 
 __version__ = "0.1.0"
-__all__ = [
-    "config",
-    "database",
-    "security",
-    "exceptions",
-]
 
 from core.config import settings
-from core.database import (
-    AsyncSessionLocal,
-    async_engine,
-    async_session_factory,
-    get_db,
-)
-from core.security import (
-    create_access_token,
-    verify_password,
-    get_password_hash,
-    get_current_user,
-    JWTPayload,
-)
+from core.database import get_db, init_db
 
 __all__ = [
-    "__version__",
     "settings",
-    "AsyncSessionLocal",
-    "async_engine",
-    "async_session_factory",
     "get_db",
-    "create_access_token",
-    "verify_password",
-    "get_password_hash",
-    "get_current_user",
-    "JWTPayload",
+    "init_db",
 ]

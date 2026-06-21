@@ -1,28 +1,39 @@
+// -SUMMARY-01.md
 # Phase 2 Summary — Technical Stack
 
-## AP Automation Core Engine — FinaRo
-
-### Technology Choices
-
-| Component | Choice | Version |
-|---|---|---|
+## Stack Overview
+| Component | Technology | Version |
+|-----------|------------|---------|
 | Language | Python | 3.11+ |
-| Web Framework | FastAPI | 0.110+ |
+| Framework | FastAPI | 0.110+ |
 | Database | PostgreSQL | 15+ |
-| ORM | SQLAlchemy (async) | 2.0+ |
+| ORM | SQLAlchemy | 2.0 (async) |
 | Migrations | Alembic | 1.13+ |
-| Connection Pooling | PGBouncer | - |
-| Authentication | JWT (HS256) + bcrypt | - |
-| Testing | pytest + pytest-asyncio | 8.1+ / 0.23+ |
+| Auth | JWT (HS256) + bcrypt | - |
 
-### Configuration
+## Key Architecture Decisions
 
-All settings via environment variables using `pydantic-settings`:
+### Database
+- UUID primary keys (not auto-increment)
+- `created_at` / `updated_at` timestamps on all tables
+- Async SQLAlchemy with connection pooling via PGBouncer
+- Indexes on FKs and high-cardinality columns
 
-- `DATABASE_URL` — PostgreSQL connection string
-- `JWT_SECRET_KEY` / `JWT_ALGORITHM` — Token signing
-- `THRESHOLD_HIGH` / `THRESHOLD_MID` / `THRESHOLD_LOW` — Decision thresholds
-- `TOLERANCE_PRICE` / `TOLERANCE_QTY` — Matching tolerances
+### API
+- RESTful endpoints under `/api/v1/`
+- Pydantic request/response validation
+- Auto-generated OpenAPI docs at `/docs`
 
-### Project Structure
+### Testing
+- pytest for unit and integration tests
+- Async test fixtures with pytest-asyncio
+- FastAPI TestClient for API tests
 
+## Configuration
+Environment variables manage all settings:
+- `DATABASE_URL` — PostgreSQL connection
+- `JWT_SECRET_KEY` — HS256 signing secret
+- `THRESHOLD_*` — Matching decision thresholds
+- `TOLERANCE_*` — Price/quantity tolerance %
+
+## Project Structure

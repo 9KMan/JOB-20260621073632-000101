@@ -1,133 +1,18 @@
-# core/config.py
-"""
-Environment configuration via pydantic-settings.
+// core/config.py
+"""Application configuration using pydantic-settings.
 
-All configuration is loaded from environment variables (no hardcoded secrets).
-Supports development, testing, and production environments.
+All configuration is loaded from environment variables.
 """
 
-from __future__ import annotations
-
-import os
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import (
-    BaseModel,
-    Field,
-    PostgresDsn,
-    RedisDsn,
-    field_validator,
-    model_validator,
-    SecretStr,
-)
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseModel):
-    """Database connection configuration."""
-
-    url: PostgresDsn = Field(
-        default=PostgresDsn(
-            "postgresql+asyncpg://apuser:appass@localhost:5432/apautomation"
-        ),
-        description="Async PostgreSQL connection URL for SQLAlchemy.",
-    )
-    pool_size: int = Field(default=20, ge=1, le=100, description="Connection pool size.")
-    max_overflow: int = Field(default=10, ge=0, le=50, description="Max pool overflow connections.")
-    pool_timeout: int = Field(default=30, ge=5, description="Pool timeout in seconds.")
-    pool_recycle: int = Field(default=3600, ge=300, description="Pool recycle in seconds.")
-    echo: bool = Field(default=False, description="Echo SQL queries (debug only).")
-
-    @property
-    def sync_url(self) -> str:
-        """Return synchronous driver URL for Alembic migrations."""
-        return str(self.url).replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
-
-
-class JWTSettings(BaseModel):
-    """JWT authentication configuration."""
-
-    secret_key: SecretStr = Field(
-        default=SecretStr("insecure-dev-secret-change-in-production"),
-        description="Secret key for HS256 JWT signing. MUST be overridden in production.",
-    )
-    algorithm: Literal["HS256", "HS384", "HS512"] = Field(
-        default="HS256",
-        description="JWT algorithm.",
-    )
-    access_token_expire_minutes: int = Field(
-        default=30, ge=5, le=1440, description="Access token expiry in minutes."
-    )
-    refresh_token_expire_days: int = Field(
-        default=7, ge=1, le=30, description="Refresh token expiry in days."
-    )
-
-
-class MatchingThresholds(BaseModel):
-    """Matching score thresholds for routing decisions."""
-
-    high: float = Field(default=95.0, ge=0, le=100, description="Auto-approve threshold (%)")
-    mid: float = Field(default=75.0, ge=0, le=100, description="One-click review threshold (%)")
-    low: float = Field(default=50.0, ge=0, le=100, description="Exception threshold (%)")
-
-    @model_validator(mode="after")
-    def validate_thresholds(self) -> MatchingThresholds:
-        """Ensure thresholds are in descending order."""
-        if not (self.high >= self.mid >= self.low):
-            raise ValueError("Threshold values must satisfy: high >= mid >= low")
-        return self
-
-
-class ToleranceSettings(BaseModel):
-    """Matching tolerance settings for price and quantity comparisons."""
-
-    price: float = Field(default=0.02, ge=0, le=1, description="Price tolerance as decimal (2% default).")
-    qty: float = Field(default=0.05, ge=0, le=1, description="Quantity tolerance as decimal (5% default).")
-
-
-class CorsSettings(BaseModel):
-    """CORS configuration."""
-
-    allowed_origins: list[str] = Field(
-        default=["*"],
-        description="Allowed CORS origins.",
-    )
-    allow_credentials: bool = Field(default=True, description="Allow credentials in CORS.")
-    allowed_methods: list[str] = Field(
-        default=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        description="Allowed HTTP methods.",
-    )
-    allowed_headers: list[str] = Field(
-        default=["*"],
-        description="Allowed HTTP headers.",
-    )
-
-    @property
-    def is_allow_all(self) -> bool:
-        """Check if CORS allows all origins."""
-        return "*" in self.allowed_origins
-
-
-class ServerSettings(BaseModel):
-    """Server configuration."""
-
-    host: str = Field(default="0.0.0.0", description="Server host.")
-    port: int = Field(default=8000, ge=1, le=65535, description="Server port.")
-    workers: int = Field(default=4, ge=1, le=16, description="Number of workers.")
-    reload: bool = Field(default=False, description="Enable auto-reload (dev only).")
-    log_level: Literal["debug", "info", "warning", "error", "critical"] = Field(
-        default="info", description="Log level."
-    )
-
-
 class Settings(BaseSettings):
-    """
-    Main application settings.
-
-    All values are loaded from environment variables with sensible defaults
-    for development. Production deployments MUST override sensitive values.
-    """
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -136,85 +21,111 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application metadata
-    app_name: str = Field(default="AP Automation Engine", description="Application name.")
-    app_version: str = Field(default="0.1.0", description="Application version.")
-    debug: bool = Field(default=False, description="Debug mode flag.")
-    environment: Literal["development", "testing", "staging", "production"] = Field(
-        default="development",
-        description="Deployment environment.",
+    # Application
+    app_name: str = "AP Automation Core Engine"
+    app_version: str = "0.1.0"
+    environment: Literal["development", "staging", "production"] = "development"
+    debug: bool = False
+    api_port: int = 8000
+
+    # Database
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
+        description="PostgreSQL connection string with asyncpg driver",
+    )
+    postgres_user: str = "apuser"
+    postgres_password: str = "appassword"
+    postgres_db: str = "apautomation"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+
+    # PGBouncer
+    pgbouncer_host: str = "localhost"
+    pgbouncer_port: int = 6432
+
+    # JWT Authentication
+    jwt_secret_key: str = Field(
+        default="change-this-secret-key-in-production",
+        description="Secret key for JWT signing (HS256)",
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+
+    # Matching Thresholds (0.0 - 1.0)
+    threshold_high: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold",
+    )
+    threshold_mid: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="1-click review threshold",
+    )
+    threshold_low: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold",
     )
 
-    # Sub-configurations
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    jwt: JWTSettings = Field(default_factory=JWTSettings)
-    thresholds: MatchingThresholds = Field(default_factory=MatchingThresholds)
-    tolerance: ToleranceSettings = Field(default_factory=ToleranceSettings)
-    cors: CorsSettings = Field(default_factory=CorsSettings)
-    server: ServerSettings = Field(default_factory=ServerSettings)
-
-    # Redis (optional, for Celery/broker)
-    redis_url: RedisDsn | None = Field(
-        default=None,
-        description="Redis URL for task queue (optional).",
+    # Tolerance Settings
+    tolerance_price: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Price match tolerance percentage",
     )
-    redis_enabled: bool = Field(
-        default=False,
-        description="Enable Redis-based task queue.",
+    tolerance_qty: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Quantity match tolerance percentage",
     )
 
-    @field_validator("environment")
+    # CORS
+    cors_origins: str = "*"
+
+    # Logging
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @field_validator("cors_origins")
     @classmethod
-    def validate_environment(cls, v: str) -> str:
-        """Validate environment name."""
-        allowed = {"development", "testing", "staging", "production"}
-        v_lower = v.lower()
-        if v_lower not in allowed:
-            raise ValueError(f"Environment must be one of: {allowed}")
-        return v_lower
+    def parse_cors_origins(cls, v: str) -> str:
+        """Parse CORS origins from string."""
+        if v == "*":
+            return "*"
+        return v
 
     @property
-    def is_production(self) -> bool:
-        """Check if running in production environment."""
-        return self.environment == "production"
+    def cors_origins_list(self) -> list[str]:
+        """Get CORS origins as list."""
+        if self.cors_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",")]
 
     @property
-    def is_development(self) -> bool:
-        """Check if running in development environment."""
-        return self.environment == "development"
+    def database_url_sync(self) -> str:
+        """Get synchronous database URL for Alembic."""
+        return self.database_url.replace("+asyncpg", "")
 
-    @property
-    def is_testing(self) -> bool:
-        """Check if running in testing environment."""
-        return self.environment == "testing"
-
-    def model_dump_env(self) -> dict[str, str]:
-        """Dump settings as environment variable dict (for subprocesses)."""
-        result = {}
-        result["DATABASE_URL"] = str(self.database.url)
-        result["DATABASE_POOL_SIZE"] = str(self.database.pool_size)
-        result["DATABASE_MAX_OVERFLOW"] = str(self.database.max_overflow)
-        result["JWT_SECRET_KEY"] = self.jwt.secret_key.get_secret_value()
-        result["JWT_ALGORITHM"] = self.jwt.algorithm
-        result["JWT_ACCESS_TOKEN_EXPIRE_MINUTES"] = str(self.jwt.access_token_expire_minutes)
-        result["THRESHOLD_HIGH"] = str(self.thresholds.high)
-        result["THRESHOLD_MID"] = str(self.thresholds.mid)
-        result["THRESHOLD_LOW"] = str(self.thresholds.low)
-        result["TOLERANCE_PRICE"] = str(self.tolerance.price)
-        result["TOLERANCE_QTY"] = str(self.tolerance.qty)
-        result["LOG_LEVEL"] = self.server.log_level
-        result["ENVIRONMENT"] = self.environment
-        return result
+    def get_decision_threshold(
+        self, decision: Literal["approve", "review", "exception"]
+    ) -> float:
+        """Get threshold value for a decision type."""
+        thresholds = {
+            "approve": self.threshold_high,
+            "review": self.threshold_mid,
+            "exception": self.threshold_low,
+        }
+        return thresholds[decision]
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """
-    Get cached application settings.
-    
-    Uses lru_cache for singleton pattern — settings are loaded once
-    and reused across the application lifetime.
-    """
+    """Get cached settings instance."""
     return Settings()
 
 
