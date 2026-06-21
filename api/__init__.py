@@ -1,16 +1,19 @@
 # api/__init__.py
-"""API package initialization."""
+"""API module for AP Automation Engine.
+
+This module contains API routes, schemas, and versioned endpoints.
+"""
 
 from api.schemas import (
     BaseResponse,
-    PaginatedResponse,
     ErrorResponse,
-    HealthResponse,
+    PaginatedResponse,
+    PaginationParams,
 )
 
 __all__ = [
     "BaseResponse",
-    "PaginatedResponse",
     "ErrorResponse",
-    "HealthResponse",
+    "PaginatedResponse",
+    "PaginationParams",
 ]

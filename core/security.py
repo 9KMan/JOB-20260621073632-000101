@@ -1,5 +1,5 @@
 # core/security.py
-"""JWT and password hashing security utilities."""
+"""Security utilities for JWT and password hashing."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -9,23 +9,17 @@ from passlib.context import CryptContext
 
 from core.config import settings
 
-
 # Password hashing context using bcrypt
-pwd_context: CryptContext = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=12,
-)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify a plain password against a hashed password.
-    
+    """Verify a plain password against a hashed password.
+
     Args:
         plain_password: The plain text password
         hashed_password: The hashed password to verify against
-    
+
     Returns:
         True if password matches, False otherwise
     """
@@ -33,12 +27,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def get_password_hash(password: str) -> str:
-    """
-    Hash a password using bcrypt.
-    
+    """Hash a password using bcrypt.
+
     Args:
         password: The plain text password to hash
-    
+
     Returns:
         The hashed password string
     """
@@ -49,105 +42,78 @@ def create_access_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
 ) -> str:
-    """
-    Create a JWT access token.
-    
+    """Create a JWT access token.
+
     Args:
-        data: The payload data to encode
+        data: The payload data to encode in the token
         expires_delta: Optional custom expiration time
-    
+
     Returns:
         Encoded JWT token string
     """
     to_encode = data.copy()
-    
+
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.app.jwt.access_token_expire_minutes
+            minutes=settings.access_token_expire_minutes
         )
-    
+
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    
+
     encoded_jwt = jwt.encode(
         to_encode,
-        settings.app.jwt.secret_key,
-        algorithm=settings.app.jwt.algorithm,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
     )
-    
     return encoded_jwt
+
+
+def decode_access_token(token: str) -> dict[str, Any] | None:
+    """Decode and verify a JWT access token.
+
+    Args:
+        token: The JWT token string to decode
+
+    Returns:
+        The decoded payload dict or None if invalid
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        return payload
+    except JWTError:
+        return None
 
 
 def create_refresh_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
 ) -> str:
-    """
-    Create a JWT refresh token.
-    
+    """Create a JWT refresh token.
+
     Args:
-        data: The payload data to encode
-        expires_delta: Optional custom expiration time
-    
+        data: The payload data to encode in the token
+        expires_delta: Optional custom expiration time (default: 7 days)
+
     Returns:
         Encoded JWT refresh token string
     """
+    if expires_delta is None:
+        expires_delta = timedelta(days=7)
+
     to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.app.jwt.refresh_token_expire_days
-        )
-    
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-        "type": "refresh",
-    })
-    
+    to_encode["type"] = "refresh"
+    expire = datetime.now(timezone.utc) + expires_delta
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+
     encoded_jwt = jwt.encode(
         to_encode,
-        settings.app.jwt.secret_key,
-        algorithm=settings.app.jwt.algorithm,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
     )
-    
     return encoded_jwt
-
-
-def decode_token(token: str) -> dict[str, Any]:
-    """
-    Decode and validate a JWT token.
-    
-    Args:
-        token: The JWT token string to decode
-    
-    Returns:
-        Decoded token payload
-    
-    Raises:
-        JWTError: If token is invalid or expired
-    """
-    return jwt.decode(
-        token,
-        settings.app.jwt.secret_key,
-        algorithms=[settings.app.jwt.algorithm],
-    )
-
-
-def verify_token(token: str) -> dict[str, Any] | None:
-    """
-    Verify a JWT token and return payload if valid.
-    
-    Args:
-        token: The JWT token string to verify
-    
-    Returns:
-        Decoded token payload if valid, None otherwise
-    """
-    try:
-        return decode_token(token)
-    except JWTError:
-        return None
