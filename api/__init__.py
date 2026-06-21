@@ -1,9 +1,4 @@
 // api/__init__.py
-"""API package initialization.
+"""API routes and schemas for FinaRo AP Automation."""
 
-This module exports the API router and schemas for version 1.
-"""
-
-from api.v1.router import api_router
-
-__all__ = ["api_router"]
+__all__ = ["routes", "schemas"]

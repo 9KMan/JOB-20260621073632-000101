@@ -1,56 +1,63 @@
-# app/config.py
-"""Configuration management using Pydantic Settings."""
+// app/config.py
+"""Application configuration using Pydantic Settings."""
+
 from functools import lru_cache
 from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
-
+    
     # Application
-    APP_NAME: str = "FinaRo AP Automation Engine"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
-
+    app_name: str = "FinaRo AP Automation"
+    app_version: str = "1.0.0"
+    debug: bool = False
+    
+    # Security
+    secret_key: str = "dev-secret-key-change-in-production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    
     # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/finaro_ap"
-    DB_POOL_SIZE: int = 5
-    DB_MAX_OVERFLOW: int = 10
-    DB_POOL_TIMEOUT: int = 30
-    DB_POOL_RECYCLE: int = 3600
-
-    # Authentication
-    SECRET_KEY: str = "change-me-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-
+    database_url: str = "postgresql://postgres:postgres@localhost:5432/finaro"
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
-
-    # Matching Engine Weights
-    MATCHING_LINE_WEIGHT: float = 0.70
-    MATCHING_AMOUNT_WEIGHT: float = 0.20
-    MATCHING_DATE_WEIGHT: float = 0.10
-
-    # Decision Thresholds
-    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
-    MATCH_THRESHOLD_HUMAN_REVIEW: float = 0.70
-
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-
-    @property
-    def database_url_async(self) -> str:
-        """Return async database URL for SQLAlchemy."""
-        return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    cors_origins: List[str] = ["*"]
+    
+    # Pagination
+    default_page_size: int = 20
+    max_page_size: int = 100
+    
+    # File uploads
+    upload_dir: str = "uploads"
+    max_file_size_mb: int = 10
+    
+    # Matching thresholds
+    match_confidence_threshold: float = 0.85
+    match_auto_approve_threshold: float = 0.95
+    match_pending_review_threshold: float = 0.70
+    
+    # Weighting for scoring
+    line_level_weight: float = 0.70
+    amount_weight: float = 0.20
+    date_weight: float = 0.10
+    
+    # Date tolerance (in days)
+    date_tolerance_days: int = 3
+    
+    # Amount tolerance (as percentage)
+    amount_tolerance_percent: float = 2.0
 
 
 @lru_cache()
