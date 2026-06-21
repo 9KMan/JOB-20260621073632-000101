@@ -1,83 +1,193 @@
 // src/api/schemas/matching.py
-"""Matching-related schemas."""
-import decimal
-from datetime import date, datetime
+"""Matching schemas for request/response validation."""
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from src.models.matching import MatchConfidence, MatchDecision, MatchResult
-
-
-class MatchScoreResponse(BaseModel):
-    """Schema for match score breakdown."""
-
-    line_score: decimal.Decimal = Field(..., description="Line-level match score")
-    amount_score: decimal.Decimal = Field(..., description="Amount match score")
-    date_score: decimal.Decimal = Field(..., description="Date match score")
-    overall_score: decimal.Decimal = Field(..., description="Overall match score")
-    confidence: MatchConfidence = Field(..., description="Match confidence level")
+from src.api.schemas.document import DocumentResponse
 
 
-class MatchingRecordResponse(BaseModel):
-    """Schema for matching record response."""
+class LineMatchDetail(BaseModel):
+    """Details of a matched line between documents."""
+    source_line_id: UUID
+    target_line_id: UUID
+    match_score: float
+    quantity_match: bool
+    amount_match: bool
+    item_code_match: bool
 
-    model_config = ConfigDict(from_attributes=True)
 
-    id: str = Field(..., description="Record ID")
-    document_id: str = Field(..., description="Primary document ID")
-    matched_document_id: str = Field(..., description="Matched document ID")
-    matched_document_number: str | None = Field(default=None, description="Matched document number")
-    matched_document_type: str | None = Field(default=None, description="Matched document type")
-    match_type: str = Field(..., description="Match type")
-    score: MatchScoreResponse = Field(..., description="Match scores")
-    confidence: MatchConfidence = Field(..., description="Match confidence")
-    decision: MatchDecision = Field(..., description="Match decision")
-    result: MatchResult = Field(..., description="Match result")
-    matched_line_count: int = Field(..., description="Number of matched lines")
-    total_line_count: int = Field(..., description="Total number of lines")
-    matched_amount: decimal.Decimal = Field(..., description="Matched amount")
-    balance_after_match: decimal.Decimal = Field(..., description="Balance after match")
-    is_confirmed: bool = Field(..., description="Is confirmed by human")
-    reviewed_by: str | None = Field(default=None, description="Reviewer ID")
-    reviewed_at: date | None = Field(default=None, description="Review timestamp")
-    review_notes: str | None = Field(default=None, description="Review notes")
-    created_at: datetime = Field(..., description="Creation timestamp")
+class MatchResults(BaseModel):
+    """Internal model for match results."""
+    overall_score: float
+    line_matches: list[LineMatchDetail]
+    amount_variance: Decimal
+    quantity_variance: Decimal
+    date_variance_days: int
+    balance_status: str
+    has_warnings: bool
+    warnings: list[str]
+    invoice_po_match: float
+    dn_po_match: float
+    invoice_dn_match: float
+
+
+class MatchRequest(BaseModel):
+    """Request to perform 3-way matching."""
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID] = None
+    purchase_order_id: UUID
+
+
+class MatchDecision(BaseModel):
+    """Decision result from the matching engine."""
+    status: str
+    action: str
+    reason: str
+    confidence: float
+    requires_approval: bool
+    approver_roles: Optional[list[str]] = None
+
+
+class MatchResponse(BaseModel):
+    """Response from a matching operation."""
+    match_id: UUID
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID]
+    purchase_order_id: UUID
+    status: str
+    overall_score: float
+    line_matches: list[LineMatchDetail]
+    amount_variance: Decimal
+    quantity_variance: Decimal
+    date_variance: int
+    balance_status: str
+    warnings: list[str]
+    decision: MatchDecision
+    created_at: datetime
+
+
+class MatchResultLineMatch(BaseModel):
+    """Line match for stored match result."""
+    id: UUID
+    match_result_id: UUID
+    source_document_type: str
+    source_line_number: int
+    target_document_type: str
+    target_line_number: int
+    match_score: float
+    quantity_variance: Decimal
+    amount_variance: Decimal
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CrossReferenceResponse(BaseModel):
+    """Cross reference for human confirmation."""
+    id: UUID
+    match_result_id: UUID
+    source_document_id: UUID
+    source_document_type: str
+    source_line_number: int
+    target_document_id: UUID
+    target_document_type: str
+    target_line_number: int
+    match_type: str
+    confirmed: Optional[bool]
+    confirmed_by: Optional[str]
+    confirmed_at: Optional[datetime]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class MatchResultResponse(BaseModel):
-    """Schema for complete match result."""
+    """Full match result with all details."""
+    id: UUID
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID]
+    purchase_order_id: UUID
+    status: str
+    overall_score: float
+    amount_variance: Decimal
+    quantity_variance: Decimal
+    date_variance_days: int
+    balance_status: str
+    warnings: list[str]
+    line_matches: list[MatchResultLineMatch]
+    cross_references: list[CrossReferenceResponse]
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
-
-    document_id: str = Field(..., description="Document ID")
-    document_number: str = Field(..., description="Document number")
-    document_type: str = Field(..., description="Document type")
-    status: str = Field(..., description="Document status")
-    overall_score: decimal.Decimal = Field(..., description="Overall match score")
-    result: MatchResult = Field(..., description="Match result")
-    matches: list[MatchingRecordResponse] = Field(default_factory=list, description="Matching records")
-    total_matches: int = Field(..., description="Total number of matches")
-    confirmed_matches: int = Field(..., description="Number of confirmed matches")
-    pending_matches: int = Field(..., description="Number of pending matches")
-
-
-class MatchReviewRequest(BaseModel):
-    """Schema for reviewing a match."""
-
-    decision: MatchDecision = Field(..., description="Review decision")
-    notes: str | None = Field(default=None, description="Review notes")
+    class Config:
+        from_attributes = True
 
 
-class MatchResultDetailResponse(BaseModel):
-    """Schema for detailed match result with line-level breakdown."""
+class BatchMatchItem(BaseModel):
+    """Single match request in a batch."""
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID] = None
+    purchase_order_id: UUID
 
-    model_config = ConfigDict(from_attributes=True)
 
-    id: str = Field(..., description="Record ID")
-    document_id: str = Field(..., description="Document ID")
-    matched_document_id: str = Field(..., description="Matched document ID")
-    match_type: str = Field(..., description="Match type")
-    score: MatchScoreResponse = Field(..., description="Match scores")
-    matched_line_ids: list[str] = Field(default_factory=list, description="Matched line IDs")
-    line_matches: list[dict] = Field(default_factory=list, description="Line-level matches")
-    created_at: datetime = Field(..., description="Creation timestamp")
+class BatchMatchRequest(BaseModel):
+    """Request for batch matching."""
+    matches: list[BatchMatchItem] = Field(..., min_length=1, max_length=100)
+
+
+class BatchMatchResultItem(BaseModel):
+    """Result of a single batch match item."""
+    match_id: Optional[str] = None
+    status: Optional[str] = None
+    score: Optional[float] = None
+    request: Optional[dict] = None
+    error: Optional[str] = None
+
+
+class BatchMatchResponse(BaseModel):
+    """Response from batch matching operation."""
+    total: int
+    successful: int
+    failed: int
+    auto_approved: int
+    pending_review: int
+    rejected: int
+    results: list[BatchMatchResultItem]
+
+
+class BalanceResponse(BaseModel):
+    """Balance ledger entry response."""
+    id: UUID
+    document_id: UUID
+    document_type: str
+    reference_document_id: Optional[UUID]
+    reference_document_type: Optional[str]
+    original_amount: Decimal
+    matched_amount: Decimal
+    balance_amount: Decimal
+    balance_type: str
+    currency: str
+    status: str
+    resolved_at: Optional[datetime]
+    resolution_notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MatchStatusEnum(str):
+    """Match status enum values."""
+    AUTO_APPROVED = "AUTO_APPROVED"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"

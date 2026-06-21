@@ -1,155 +1,115 @@
 // src/api/schemas/document.py
-"""Document-related schemas."""
-import decimal
-from datetime import date, datetime
+"""Document schemas for request/response validation."""
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
-from src.models.document import DocumentStatus, DocumentType
+from src.models.document import DocumentType, DocumentStatus
+
+
+class DocumentTypeEnum(str, DocumentType):
+    """Document type enum."""
+    INVOICE = "INVOICE"
+    DELIVERY_NOTE = "DELIVERY_NOTE"
+    PURCHASE_ORDER = "PURCHASE_ORDER"
 
 
 class DocumentLineCreate(BaseModel):
     """Schema for creating a document line."""
+    line_number: int = Field(..., ge=1)
+    item_code: Optional[str] = Field(None, max_length=50)
+    description: str = Field(..., max_length=500)
+    quantity: Decimal = Field(..., gt=0)
+    unit_price: Decimal = Field(..., ge=0)
+    total_amount: Decimal = Field(..., ge=0)
+    uom: Optional[str] = Field(None, max_length=20)
+    tax_code: Optional[str] = Field(None, max_length=20)
 
-    line_number: int = Field(..., ge=1, description="Line number")
-    external_line_reference: str | None = Field(default=None, description="External reference")
-    item_code: str = Field(..., min_length=1, max_length=50, description="Item code")
-    item_description: str | None = Field(default=None, max_length=500, description="Item description")
-    quantity: decimal.Decimal = Field(..., gt=0, description="Quantity")
-    unit_of_measure: str | None = Field(default=None, max_length=20, description="Unit of measure")
-    unit_price: decimal.Decimal = Field(..., ge=0, description="Unit price")
-    tax_rate: decimal.Decimal = Field(default=decimal.Decimal("0"), ge=0, le=1, description="Tax rate")
-    linked_po_line_id: str | None = Field(default=None, description="Linked PO line ID")
-
-    @model_validator(mode="after")
-    def calculate_line_amount(self) -> "DocumentLineCreate":
-        """Calculate line amount from quantity and unit price."""
-        self.line_amount = self.quantity * self.unit_price
-        self.tax_amount = self.line_amount * self.tax_rate
-        return self
-
-    line_amount: decimal.Decimal = Field(default=decimal.Decimal("0"), description="Line amount (calculated)")
-    tax_amount: decimal.Decimal = Field(default=decimal.Decimal("0"), description="Tax amount (calculated)")
+    @field_validator("total_amount", mode="before")
+    @classmethod
+    def calculate_total(cls, v, info):
+        if v is None:
+            values = info.data
+            qty = values.get("quantity", Decimal("0"))
+            price = values.get("unit_price", Decimal("0"))
+            return qty * price
+        return v
 
 
 class DocumentLineResponse(BaseModel):
     """Schema for document line response."""
+    id: UUID
+    document_id: UUID
+    line_number: int
+    item_code: Optional[str]
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    total_amount: Decimal
+    uom: Optional[str]
+    tax_code: Optional[str]
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str = Field(..., description="Line ID")
-    line_number: int = Field(..., description="Line number")
-    external_line_reference: str | None = Field(default=None, description="External reference")
-    item_code: str = Field(..., description="Item code")
-    item_description: str | None = Field(default=None, description="Item description")
-    quantity: decimal.Decimal = Field(..., description="Quantity")
-    unit_of_measure: str | None = Field(default=None, description="Unit of measure")
-    unit_price: decimal.Decimal = Field(..., description="Unit price")
-    line_amount: decimal.Decimal = Field(..., description="Line amount")
-    tax_rate: decimal.Decimal = Field(..., description="Tax rate")
-    tax_amount: decimal.Decimal = Field(..., description="Tax amount")
-    is_matched: bool = Field(..., description="Is line matched")
-    matched_quantity: decimal.Decimal = Field(..., description="Matched quantity")
-    linked_po_line_id: str | None = Field(default=None, description="Linked PO line ID")
+    class Config:
+        from_attributes = True
 
 
 class DocumentCreate(BaseModel):
     """Schema for creating a document."""
-
-    document_number: str = Field(..., min_length=1, max_length=100, description="Document number")
-    document_type: DocumentType = Field(..., description="Document type")
-    supplier_code: str = Field(..., min_length=1, max_length=50, description="Supplier code")
-    supplier_name: str | None = Field(default=None, max_length=255, description="Supplier name")
-    supplier_reference: str | None = Field(default=None, max_length=100, description="Supplier reference")
-    document_date: date = Field(..., description="Document date")
-    due_date: date | None = Field(default=None, description="Due date")
-    delivery_date: date | None = Field(default=None, description="Delivery date")
-    currency: str = Field(default="USD", min_length=3, max_length=3, description="Currency code")
-    notes: str | None = Field(default=None, description="Notes")
-    metadata_json: dict | None = Field(default=None, description="Additional metadata")
-    lines: list[DocumentLineCreate] = Field(default_factory=list, description="Document lines")
-
-    @field_validator("currency")
-    @classmethod
-    def validate_currency(cls, v: str) -> str:
-        """Validate currency code."""
-        return v.upper()
-
-    @model_validator(mode="after")
-    def calculate_totals(self) -> "DocumentCreate":
-        """Calculate document totals from lines."""
-        subtotal = sum(line.line_amount for line in self.lines)
-        tax_amount = sum(line.tax_amount for line in self.lines)
-        self.subtotal = subtotal
-        self.tax_amount = tax_amount
-        self.total_amount = subtotal + tax_amount
-        return self
-
-    subtotal: decimal.Decimal = Field(default=decimal.Decimal("0"), description="Subtotal (calculated)")
-    tax_amount: decimal.Decimal = Field(default=decimal.Decimal("0"), description="Tax amount (calculated)")
-    total_amount: decimal.Decimal = Field(default=decimal.Decimal("0"), description="Total amount (calculated)")
+    document_type: DocumentTypeEnum
+    document_number: str = Field(..., max_length=100)
+    supplier_id: UUID
+    supplier_name: str = Field(..., max_length=255)
+    supplier_reference: Optional[str] = Field(None, max_length=100)
+    currency: str = Field(default="USD", max_length=3)
+    subtotal: Decimal = Field(..., ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    total_amount: Decimal = Field(..., ge=0)
+    document_date: datetime
+    due_date: Optional[datetime] = None
+    status: str = Field(default="DRAFT", max_length=50)
+    lines: list[DocumentLineCreate] = Field(default_factory=list)
+    metadata: Optional[dict[str, Any]] = None
 
 
 class DocumentUpdate(BaseModel):
     """Schema for updating a document."""
-
-    document_number: str | None = Field(default=None, max_length=100, description="Document number")
-    supplier_code: str | None = Field(default=None, max_length=50, description="Supplier code")
-    supplier_name: str | None = Field(default=None, max_length=255, description="Supplier name")
-    supplier_reference: str | None = Field(default=None, max_length=100, description="Supplier reference")
-    document_date: date | None = Field(default=None, description="Document date")
-    due_date: date | None = Field(default=None, description="Due date")
-    delivery_date: date | None = Field(default=None, description="Delivery date")
-    currency: str | None = Field(default=None, min_length=3, max_length=3, description="Currency code")
-    status: DocumentStatus | None = Field(default=None, description="Document status")
-    notes: str | None = Field(default=None, description="Notes")
-    metadata_json: dict | None = Field(default=None, description="Additional metadata")
+    document_number: Optional[str] = Field(None, max_length=100)
+    supplier_name: Optional[str] = Field(None, max_length=255)
+    supplier_reference: Optional[str] = Field(None, max_length=100)
+    currency: Optional[str] = Field(None, max_length=3)
+    subtotal: Optional[Decimal] = Field(None, ge=0)
+    tax_amount: Optional[Decimal] = Field(None, ge=0)
+    total_amount: Optional[Decimal] = Field(None, ge=0)
+    document_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    status: Optional[str] = Field(None, max_length=50)
+    metadata: Optional[dict[str, Any]] = None
 
 
 class DocumentResponse(BaseModel):
     """Schema for document response."""
+    id: UUID
+    document_type: str
+    document_number: str
+    supplier_id: UUID
+    supplier_name: str
+    supplier_reference: Optional[str]
+    currency: str
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+    document_date: datetime
+    due_date: Optional[datetime]
+    status: str
+    metadata: Optional[dict[str, Any]]
+    lines: list[DocumentLineResponse]
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str = Field(..., description="Document ID")
-    document_number: str = Field(..., description="Document number")
-    document_type: DocumentType = Field(..., description="Document type")
-    status: DocumentStatus = Field(..., description="Document status")
-    supplier_code: str = Field(..., description="Supplier code")
-    supplier_name: str | None = Field(default=None, description="Supplier name")
-    supplier_reference: str | None = Field(default=None, description="Supplier reference")
-    document_date: date = Field(..., description="Document date")
-    due_date: date | None = Field(default=None, description="Due date")
-    delivery_date: date | None = Field(default=None, description="Delivery date")
-    subtotal: decimal.Decimal = Field(..., description="Subtotal")
-    tax_amount: decimal.Decimal = Field(..., description="Tax amount")
-    total_amount: decimal.Decimal = Field(..., description="Total amount")
-    currency: str = Field(..., description="Currency code")
-    linked_po_id: str | None = Field(default=None, description="Linked PO ID")
-    is_fully_matched: bool = Field(..., description="Is fully matched")
-    matched_amount: decimal.Decimal = Field(..., description="Matched amount")
-    remaining_balance: decimal.Decimal = Field(..., description="Remaining balance")
-    notes: str | None = Field(default=None, description="Notes")
-    metadata_json: dict | None = Field(default=None, description="Metadata")
-    lines: list[DocumentLineResponse] = Field(default_factory=list, description="Document lines")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
-
-
-class DocumentListResponse(BaseModel):
-    """Schema for document list response (without lines for performance)."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str = Field(..., description="Document ID")
-    document_number: str = Field(..., description="Document number")
-    document_type: DocumentType = Field(..., description="Document type")
-    status: DocumentStatus = Field(..., description="Document status")
-    supplier_code: str = Field(..., description="Supplier code")
-    supplier_name: str | None = Field(default=None, description="Supplier name")
-    document_date: date = Field(..., description="Document date")
-    total_amount: decimal.Decimal = Field(..., description="Total amount")
-    currency: str = Field(..., description="Currency code")
-    is_fully_matched: bool = Field(..., description="Is fully matched")
-    remaining_balance: decimal.Decimal = Field(..., description="Remaining balance")
-    created_at: datetime = Field(..., description="Creation timestamp")
+    class Config:
+        from_attributes = True

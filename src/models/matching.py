@@ -1,265 +1,326 @@
 // src/models/matching.py
-"""Matching and balance tracking models."""
-import decimal
+"""Matching models for 3-way matching operations."""
 import enum
-import uuid
-from typing import TYPE_CHECKING
+from decimal import Decimal
 
-from sqlalchemy import (
-    Boolean,
-    Enum,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    Text,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import String, Numeric, DateTime, ForeignKey, Index, Enum, Boolean, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from src.models.document import Document, DocumentLine
+from src.models.base import BaseModel
 
 
-class MatchConfidence(str, enum.Enum):
-    """Match confidence level."""
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
-
-
-class MatchDecision(str, enum.Enum):
-    """Match decision status."""
-
-    PENDING = "pending"
-    AUTO_APPROVED = "auto_approved"
-    HUMAN_APPROVED = "human_approved"
-    HUMAN_REJECTED = "human_rejected"
-    DISPUTED = "disputed"
+class MatchStatus(str, enum.Enum):
+    """Match result status."""
+    AUTO_APPROVED = "AUTO_APPROVED"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
 
 
-class MatchResult(str, enum.Enum):
-    """Overall match result."""
+class MatchType(str, enum.Enum):
+    """Type of line match."""
+    EXACT = "EXACT"
+    PARTIAL = "PARTIAL"
+    CLOSE = "CLOSE"
+    NO_MATCH = "NO_MATCH"
 
-    CONFIRMED = "confirmed"
-    PENDING = "pending"
-    REJECTED = "rejected"
+
+class BalanceType(str, enum.Enum):
+    """Balance type enumeration."""
+    OVER = "OVER"
+    UNDER = "UNDER"
+    MATCHED = "MATCHED"
 
 
-class MatchingRecord(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """
-    Record of a matching operation between documents.
-    Tracks the matching score and decision.
-    """
+class BalanceStatus(str, enum.Enum):
+    """Balance status enumeration."""
+    BALANCED = "BALANCED"
+    PARTIAL_BALANCE = "PARTIAL_BALANCE"
+    UNBALANCED = "UNBALANCED"
 
-    __tablename__ = "matching_records"
 
-    # Primary document being matched
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+class MatchResult(BaseModel):
+    """Result of a 3-way matching operation."""
+    __tablename__ = "match_results"
+
+    invoice_id: Mapped[str] = mapped_column(
+        String(100),
         nullable=False,
-        index=True,
+        index=True
     )
-    document: Mapped["Document"] = relationship(
-        "Document",
-        back_populates="matching_records",
-        foreign_keys=[document_id],
+    delivery_note_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True
     )
-
-    # Matched document
-    matched_document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+    purchase_order_id: Mapped[str] = mapped_column(
+        String(100),
         nullable=False,
-        index=True,
+        index=True
     )
-    matched_document: Mapped["Document"] = relationship(
-        "Document",
-        foreign_keys=[matched_document_id],
+    status: Mapped[str] = mapped_column(
+        Enum(MatchStatus),
+        default=MatchStatus.PENDING_REVIEW,
+        nullable=False,
+        index=True
+    )
+    overall_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    invoice_po_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    dn_po_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    invoice_dn_match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    amount_variance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0"),
+        nullable=False
+    )
+    quantity_variance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    date_variance_days: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False
+    )
+    balance_status: Mapped[str] = mapped_column(
+        String(50),
+        default=BalanceStatus.BALANCED.value,
+        nullable=False
+    )
+    warnings: Mapped[list | None] = mapped_column(
+        JSON,
+        nullable=True
+    )
+    match_details: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True
     )
 
-    # Match type
+    # Relationships
+    line_matches: Mapped[list["MatchResultLineMatch"]] = relationship(
+        "MatchResultLineMatch",
+        back_populates="match_result",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    cross_references: Mapped[list["CrossReference"]] = relationship(
+        "CrossReference",
+        back_populates="match_result",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
+    __table_args__ = (
+        Index("ix_match_results_status_date", "status", "created_at"),
+    )
+
+
+class MatchResultLineMatch(BaseModel):
+    """Line-level match details within a match result."""
+    __tablename__ = "match_result_line_matches"
+
+    match_result_id: Mapped[str] = mapped_column(
+        ForeignKey("match_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    source_document_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+    source_line_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True
+    )
+    source_line_number: Mapped[int] = mapped_column(
+        nullable=False
+    )
+    target_document_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+    target_line_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True
+    )
+    target_line_number: Mapped[int] = mapped_column(
+        nullable=False
+    )
+    match_type: Mapped[str] = mapped_column(
+        Enum(MatchType),
+        default=MatchType.NO_MATCH,
+        nullable=False
+    )
+    match_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    quantity_variance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    amount_variance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0"),
+        nullable=False
+    )
+
+    # Relationships
+    match_result: Mapped["MatchResult"] = relationship(
+        "MatchResult",
+        back_populates="line_matches"
+    )
+
+
+class CrossReference(BaseModel):
+    """Cross-reference table for human confirmations that feed into matching."""
+    __tablename__ = "cross_references"
+
+    match_result_id: Mapped[str] = mapped_column(
+        ForeignKey("match_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    source_document_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True
+    )
+    source_document_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+    source_line_number: Mapped[int] = mapped_column(
+        nullable=False
+    )
+    target_document_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True
+    )
+    target_document_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+    target_line_number: Mapped[int] = mapped_column(
+        nullable=False
+    )
     match_type: Mapped[str] = mapped_column(
         String(50),
-        nullable=False,
+        nullable=False
     )
-
-    # Scoring
-    line_score: Mapped[decimal.Decimal] = mapped_column(
+    match_score: Mapped[Decimal] = mapped_column(
         Numeric(5, 4),
-        default=decimal.Decimal("0"),
-        nullable=False,
+        nullable=False
     )
-    amount_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0"),
-        nullable=False,
+    confirmed: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True
     )
-    date_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0"),
-        nullable=False,
+    confirmed_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True
     )
-    overall_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0"),
-        nullable=False,
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
     )
-
-    # Confidence
-    confidence: Mapped[MatchConfidence] = mapped_column(
-        Enum(MatchConfidence),
-        default=MatchConfidence.NONE,
-        nullable=False,
-    )
-
-    # Decision
-    decision: Mapped[MatchDecision] = mapped_column(
-        Enum(MatchDecision),
-        default=MatchDecision.PENDING,
-        nullable=False,
-    )
-    result: Mapped[MatchResult] = mapped_column(
-        Enum(MatchResult),
-        default=MatchResult.PENDING,
-        nullable=False,
-    )
-
-    # Matched amounts
-    matched_line_count: Mapped[int] = mapped_column(
-        default=0,
-        nullable=False,
-    )
-    total_line_count: Mapped[int] = mapped_column(
-        default=0,
-        nullable=False,
-    )
-    matched_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
-    )
-
-    # Balance tracking
-    balance_after_match: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
-    )
-
-    # Review information
-    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    reviewed_at: Mapped[date | None] = mapped_column(
-        nullable=True,
-    )
-    review_notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[str | None] = mapped_column(
         Text,
-        nullable=True,
+        nullable=True
     )
 
-    # Confirmation for learning loop
-    is_confirmed: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-
-    # Matched line references
-    matched_line_ids: Mapped[list[uuid.UUID]] = mapped_column(
-        nullable=True,
+    # Relationships
+    match_result: Mapped["MatchResult"] = relationship(
+        "MatchResult",
+        back_populates="cross_references"
     )
 
     __table_args__ = (
-        Index("ix_matching_records_document", "document_id", "matched_document_id"),
-        Index("ix_matching_records_decision", "decision", "result"),
+        Index("ix_cross_ref_source", "source_document_id", "source_document_type"),
+        Index("ix_cross_ref_target", "target_document_id", "target_document_type"),
     )
 
-    def __repr__(self) -> str:
-        return f"<MatchingRecord {self.id}: score={self.overall_score}>"
 
+class BalanceLedger(BaseModel):
+    """Ledger for tracking balances across partial matches."""
+    __tablename__ = "balance_ledger"
 
-class BalanceRecord(Base, UUIDMixin, TimestampMixin):
-    """
-    Tracks balance amounts for partial matching scenarios.
-    Enables split invoices, partial shipments, and multi-delivery matching.
-    """
-
-    __tablename__ = "balance_records"
-
-    # Document this balance belongs to
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+    document_id: Mapped[str] = mapped_column(
+        String(100),
         nullable=False,
-        index=True,
+        index=True
     )
-    document: Mapped["Document"] = relationship(
-        "Document",
-        back_populates="balance_records",
-    )
-
-    # Related matching record
-    matching_record_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matching_records.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    # Balance type
-    balance_type: Mapped[str] = mapped_column(
+    document_type: Mapped[str] = mapped_column(
         String(50),
-        nullable=False,
+        nullable=False
     )
-
-    # Amounts
-    original_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    matched_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
-    )
-    remaining_balance: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-
-    # Status
-    is_settled: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-    settled_at: Mapped[date | None] = mapped_column(
+    reference_document_id: Mapped[str | None] = mapped_column(
+        String(100),
         nullable=True,
+        index=True
     )
-
-    # Reference to settlement document
-    settled_by_document_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="SET NULL"),
-        nullable=True,
+    reference_document_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False
+    )
+    matched_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0"),
+        nullable=False
+    )
+    balance_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False
+    )
+    balance_type: Mapped[str] = mapped_column(
+        Enum(BalanceType),
+        nullable=False
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="USD",
+        nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="OPEN",
+        nullable=False,
+        index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    resolution_notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
     )
 
     __table_args__ = (
-        Index("ix_balance_records_document_settled", "document_id", "is_settled"),
+        Index("ix_balance_ledger_doc_ref", "document_id", "reference_document_id"),
     )
-
-    def __repr__(self) -> str:
-        return f"<BalanceRecord {self.id}: remaining={self.remaining_balance}>"
-
-
-# Import date for reviewed_at field
-from datetime import date

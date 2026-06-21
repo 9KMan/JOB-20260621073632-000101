@@ -1,6 +1,3 @@
-# src/app/__init__.py
-"""FastAPI application package."""
-
-from src.app.main import app
-
-__all__ = ["app"]
+// src/app/__init__.py
+"""FinaRo AP Automation Core Engine"""
+__version__ = "1.0.0"

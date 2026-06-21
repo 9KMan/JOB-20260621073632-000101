@@ -1,49 +1,51 @@
 // src/models/base.py
-"""Base model classes and mixins."""
-import uuid
-from datetime import datetime, timezone
+"""Base model with common fields."""
+from datetime import datetime
+from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.database import Base
+from src.app.database import Base
 
 
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps."""
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
+        default=datetime.utcnow,
+        nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
     )
 
 
 class UUIDMixin:
     """Mixin for UUID primary key."""
-
-    id: Mapped[uuid.UUID] = mapped_column(
+    id: Mapped[UUID] = mapped_column(
         primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
+        default=uuid4,
+        nullable=False
     )
 
 
 class SoftDeleteMixin:
     """Mixin for soft delete functionality."""
-
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=True,
-        default=None,
+        nullable=True
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-    )
+
+
+class BaseModel(Base, UUIDMixin, TimestampMixin):
+    """Base model combining common mixins."""
+    __abstract__ = True

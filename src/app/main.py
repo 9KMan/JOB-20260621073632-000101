@@ -1,52 +1,43 @@
-# src/app/main.py
-"""
-AP Automation Core Engine - Main Application Entry Point
-"""
+// src/app/main.py
+"""FinaRo AP Automation Core Engine - FastAPI Application."""
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core.config import settings
-from core.database import engine, init_db
-from api.v1.router import api_router
+from src.app.config import get_settings
+from src.app.database import close_db, init_db
+from src.api.routes import documents, matching, health
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan handler for startup and shutdown events."""
-    logger.info("Starting AP Automation Core Engine...")
+async def lifespan(app: FastAPI):
+    """Application lifespan handler."""
+    logger.info("Starting FinaRo AP Automation Engine...")
     await init_db()
     logger.info("Database initialized successfully")
     yield
-    logger.info("Shutting down AP Automation Core Engine...")
-    await engine.dispose()
+    logger.info("Shutting down FinaRo AP Automation Engine...")
+    await close_db()
     logger.info("Database connections closed")
 
 
-# Create FastAPI application
 app = FastAPI(
-    title="AP Automation Core Engine",
-    description="Invoice matching and accounts payable automation for FinaRo",
-    version="0.1.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
+    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
-    lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -56,50 +47,46 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    """Handle request validation errors."""
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "detail": "Validation Error",
-            "errors": exc.errors(),
-        },
-    )
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests."""
+    logger.info(f"Request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    logger.info(f"Response: {response.status_code}")
+    return response
 
 
+# Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
-    """Handle unexpected exceptions."""
-    logger.exception(f"Unexpected error: {exc}")
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error"},
+        content={
+            "detail": "Internal server error",
+            "type": type(exc).__name__
+        }
     )
 
 
-@app.get("/health", tags=["health"])
-async def health_check() -> dict:
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "ap-automation-core"}
+# Include routers
+app.include_router(health.router, tags=["Health"])
+app.include_router(documents.router, prefix=settings.API_V1_PREFIX, tags=["Documents"])
+app.include_router(matching.router, prefix=settings.API_V1_PREFIX, tags=["Matching"])
 
 
-@app.get("/", tags=["root"])
-async def root() -> dict:
+@app.get("/", tags=["Root"])
+async def root():
     """Root endpoint."""
     return {
-        "service": "AP Automation Core Engine",
-        "version": "0.1.0",
-        "docs": "/docs",
+        "name": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "status": "operational"
     }
 
 
-# Include API router
-app.include_router(api_router, prefix="/api/v1")
-
-
-__all__ = ["app"]
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("src.app.main:app", host="0.0.0.0", port=8000, reload=True)
