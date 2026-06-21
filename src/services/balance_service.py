@@ -1,343 +1,201 @@
 // src/services/balance_service.py
+"""Balance tracking service for partial matches."""
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Optional, Tuple
+from typing import Optional
 from uuid import UUID
-from sqlalchemy.orm import Session
 
-from src.models.models import (
-    PurchaseOrder,
-    Invoice,
-    DeliveryNote,
-    MatchRecord,
-    BalanceRecord,
-)
-from src.app.config import get_settings
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.balance import BalanceLedger, BalanceLedgerEntry
+from src.models.delivery_note import DeliveryNote
+from src.models.invoice import Invoice
+from src.models.purchase_order import PurchaseOrder
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class BalanceService:
-    """
-    Balance Service - Layer 3 of the matching architecture.
+    """Service for tracking document balances."""
     
-    Tracks partial matches and balances across all three document types.
-    Handles:
-    - Partial shipments
-    - Split invoices
-    - Multi-delivery scenarios
-    """
-
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
-        self.tolerance_amount = settings.BALANCE_TOLERANCE_AMOUNT
-        self.tolerance_percent = settings.BALANCE_TOLERANCE_PERCENT
-
-    def create_balance_records(
-        self, match_record: MatchRecord
-    ) -> List[BalanceRecord]:
-        """
-        Create balance records for a match.
-        
-        Tracks how much of each document has been matched.
-        """
-        balance_records = []
-        
-        # Create PO balance record
-        if match_record.po_id and match_record.po_amount:
-            po_balance = self._create_document_balance(
-                match_record=match_record,
-                document_type="PO",
-                document_id=match_record.po_id,
-                original_amount=float(match_record.po_amount),
-            )
-            balance_records.append(po_balance)
-        
-        # Create Invoice balance record
-        if match_record.invoice_id and match_record.invoice_amount:
-            inv_balance = self._create_document_balance(
-                match_record=match_record,
-                document_type="Invoice",
-                document_id=match_record.invoice_id,
-                original_amount=float(match_record.invoice_amount),
-            )
-            balance_records.append(inv_balance)
-        
-        # Create DN balance record
-        if match_record.dn_id and match_record.dn_amount:
-            dn_balance = self._create_document_balance(
-                match_record=match_record,
-                document_type="DN",
-                document_id=match_record.dn_id,
-                original_amount=float(match_record.dn_amount),
-            )
-            balance_records.append(dn_balance)
-        
-        for record in balance_records:
-            self.db.add(record)
-        
-        self.db.flush()
-        
-        logger.info(
-            f"Created {len(balance_records)} balance records for match {match_record.id}"
-        )
-        
-        return balance_records
-
-    def _create_document_balance(
+    
+    async def create_balance_entry(
         self,
-        match_record: MatchRecord,
         document_type: str,
         document_id: UUID,
-        original_amount: float,
-    ) -> BalanceRecord:
-        """Create a balance record for a single document."""
-        # Calculate matched amount from other documents in the match
-        matched_amount = self._calculate_matched_amount(
-            match_record, document_type
-        )
-        
-        balance_amount = original_amount - matched_amount
-        
-        # Check if essentially resolved (within tolerance)
-        is_resolved = abs(balance_amount) <= self.tolerance_amount
-        
-        return BalanceRecord(
-            match_record_id=match_record.id,
+        document_number: str,
+        original_amount: Decimal,
+    ) -> BalanceLedger:
+        """Create initial balance entry for a document."""
+        balance = BalanceLedger(
             document_type=document_type,
             document_id=document_id,
+            document_number=document_number,
             original_amount=original_amount,
-            matched_amount=matched_amount,
-            balance_amount=balance_amount if not is_resolved else 0,
-            is_resolved=is_resolved,
+            matched_amount=Decimal("0.00"),
+            pending_amount=original_amount,
+            balance_status="OPEN",
         )
-
-    def _calculate_matched_amount(
-        self, match_record: MatchRecord, document_type: str
-    ) -> float:
-        """Calculate how much of a document has been matched."""
-        matched_amount = 0.0
-        
-        if document_type == "PO":
-            # PO is matched by invoice and/or DN
-            if match_record.invoice_amount:
-                matched_amount += float(match_record.invoice_amount)
-            if match_record.dn_amount:
-                matched_amount += float(match_record.dn_amount)
-            # Cap at PO amount
-            if match_record.po_amount:
-                matched_amount = min(matched_amount, float(match_record.po_amount))
-                
-        elif document_type == "Invoice":
-            # Invoice is matched by PO
-            if match_record.po_amount:
-                matched_amount = float(match_record.po_amount)
-            # Cap at invoice amount
-            if match_record.invoice_amount:
-                matched_amount = min(matched_amount, float(match_record.invoice_amount))
-                
-        elif document_type == "DN":
-            # DN is matched by PO
-            if match_record.po_amount:
-                matched_amount = float(match_record.po_amount)
-            # Cap at DN amount
-            if match_record.dn_amount:
-                matched_amount = min(matched_amount, float(match_record.dn_amount))
-        
-        return matched_amount
-
-    def update_balance_for_partial_match(
+        self.db.add(balance)
+        await self.db.flush()
+        await self.db.refresh(balance)
+        return balance
+    
+    async def record_match(
         self,
         document_type: str,
         document_id: UUID,
-        match_amount: float,
-        match_record_id: UUID,
-    ) -> BalanceRecord:
-        """
-        Update balance record for a partial match.
-        
-        This is used when a document is matched incrementally.
-        """
-        balance = self._get_or_create_balance(document_type, document_id)
-        
-        balance.matched_amount = float(Decimal(str(balance.matched_amount)) + Decimal(str(match_amount)))
-        balance.balance_amount = float(
-            Decimal(str(balance.original_amount)) - Decimal(str(balance.matched_amount))
-        )
-        
-        # Check if resolved
-        if abs(balance.balance_amount) <= self.tolerance_amount:
-            balance.is_resolved = True
-            balance.resolved_at = datetime.utcnow()
-            balance.resolved_by_match_id = match_record_id
-        
-        self.db.flush()
-        
-        logger.info(
-            f"Updated balance for {document_type} {document_id}: "
-            f"matched={balance.matched_amount}, balance={balance.balance_amount}"
-        )
-        
-        return balance
-
-    def _get_or_create_balance(
-        self, document_type: str, document_id: UUID
-    ) -> BalanceRecord:
-        """Get existing balance record or create new one."""
-        balance = (
-            self.db.query(BalanceRecord)
-            .filter(
-                BalanceRecord.document_type == document_type,
-                BalanceRecord.document_id == document_id,
-                BalanceRecord.is_resolved == False,
+        match_id: UUID,
+        match_amount: Decimal,
+        reference_type: str,
+        reference_id: UUID,
+        reference_number: str,
+    ) -> Optional[BalanceLedger]:
+        """Record a match against a document's balance."""
+        result = await self.db.execute(
+            select(BalanceLedger).where(
+                BalanceLedger.document_type == document_type,
+                BalanceLedger.document_id == document_id,
+                BalanceLedger.is_deleted == False,
             )
-            .first()
         )
+        balance = result.scalar_one_or_none()
         
         if not balance:
-            # Get original amount from document
-            original_amount = self._get_document_amount(document_type, document_id)
-            balance = BalanceRecord(
-                document_type=document_type,
-                document_id=document_id,
-                original_amount=original_amount,
-                matched_amount=0,
-                balance_amount=original_amount,
-            )
-            self.db.add(balance)
-            self.db.flush()
+            logger.warning(f"No balance found for {document_type}:{document_id}")
+            return None
         
+        new_matched = balance.matched_amount + match_amount
+        new_pending = balance.original_amount - new_matched
+        
+        balance.matched_amount = new_matched
+        balance.pending_amount = new_pending
+        
+        if new_pending <= Decimal("0.00"):
+            balance.balance_status = "CLOSED"
+            balance.closed_at = datetime.utcnow()
+        
+        entry = BalanceLedgerEntry(
+            balance_ledger_id=balance.id,
+            match_id=match_id,
+            entry_type="MATCH",
+            amount=match_amount,
+            balance_after=new_pending,
+            reference_document_type=reference_type,
+            reference_document_id=reference_id,
+            reference_document_number=reference_number,
+        )
+        self.db.add(entry)
+        
+        await self.db.flush()
+        await self.db.refresh(balance)
         return balance
-
-    def _get_document_amount(self, document_type: str, document_id: UUID) -> float:
-        """Get the total amount from a document."""
-        if document_type == "PO":
-            doc = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == document_id).first()
-        elif document_type == "Invoice":
-            doc = self.db.query(Invoice).filter(Invoice.id == document_id).first()
-        elif document_type == "DN":
-            doc = self.db.query(DeliveryNote).filter(DeliveryNote.id == document_id).first()
-        else:
-            return 0.0
-        
-        if doc:
-            return float(doc.total_amount)
-        return 0.0
-
-    def get_document_balance(
-        self, document_type: str, document_id: UUID
-    ) -> Optional[BalanceRecord]:
-        """Get current balance for a document."""
-        return (
-            self.db.query(BalanceRecord)
-            .filter(
-                BalanceRecord.document_type == document_type,
-                BalanceRecord.document_id == document_id,
-                BalanceRecord.is_resolved == False,
-            )
-            .order_by(BalanceRecord.created_at.desc())
-            .first()
-        )
-
-    def get_unresolved_balances(
-        self, document_type: Optional[str] = None, limit: int = 100
-    ) -> List[BalanceRecord]:
-        """Get all unresolved balance records."""
-        query = self.db.query(BalanceRecord).filter(BalanceRecord.is_resolved == False)
-        
-        if document_type:
-            query = query.filter(BalanceRecord.document_type == document_type)
-        
-        return (
-            query.order_by(BalanceRecord.balance_amount.desc())
-            .limit(limit)
-            .all()
-        )
-
-    def resolve_balance(
+    
+    async def reverse_match(
         self,
         document_type: str,
         document_id: UUID,
-        resolution_match_id: UUID,
-    ) -> BalanceRecord:
-        """
-        Manually resolve a balance.
-        
-        Used when a balance is resolved through manual intervention.
-        """
-        balance = self._get_or_create_balance(document_type, document_id)
-        
-        balance.is_resolved = True
-        balance.resolved_at = datetime.utcnow()
-        balance.resolved_by_match_id = resolution_match_id
-        balance.balance_amount = 0
-        
-        self.db.flush()
-        
-        logger.info(
-            f"Manually resolved balance for {document_type} {document_id} "
-            f"via match {resolution_match_id}"
-        )
-        
-        return balance
-
-    def get_balance_summary(self, match_record_id: UUID) -> Dict:
-        """Get a summary of balances for a match."""
-        balances = (
-            self.db.query(BalanceRecord)
-            .filter(BalanceRecord.match_record_id == match_record_id)
-            .all()
-        )
-        
-        summary = {
-            "total_documents": len(balances),
-            "total_original": sum(b.original_amount for b in balances),
-            "total_matched": sum(b.matched_amount for b in balances),
-            "total_balance": sum(b.balance_amount for b in balances),
-            "resolved_count": sum(1 for b in balances if b.is_resolved),
-            "unresolved_count": sum(1 for b in balances if not b.is_resolved),
-            "documents": [
-                {
-                    "type": b.document_type,
-                    "id": str(b.document_id),
-                    "original": b.original_amount,
-                    "matched": b.matched_amount,
-                    "balance": b.balance_amount,
-                    "is_resolved": b.is_resolved,
-                }
-                for b in balances
-            ],
-        }
-        
-        return summary
-
-    def close_document_balances(
-        self, document_type: str, document_id: UUID
-    ) -> None:
-        """
-        Close all open balances for a document.
-        
-        Called when a document is fully closed/cancelled.
-        """
-        balances = (
-            self.db.query(BalanceRecord)
-            .filter(
-                BalanceRecord.document_type == document_type,
-                BalanceRecord.document_id == document_id,
-                BalanceRecord.is_resolved == False,
+        match_id: UUID,
+        amount: Decimal,
+    ) -> Optional[BalanceLedger]:
+        """Reverse a match and restore the balance."""
+        result = await self.db.execute(
+            select(BalanceLedger).where(
+                BalanceLedger.document_type == document_type,
+                BalanceLedger.document_id == document_id,
+                BalanceLedger.is_deleted == False,
             )
-            .all()
         )
+        balance = result.scalar_one_or_none()
         
-        for balance in balances:
-            balance.is_resolved = True
-            balance.resolved_at = datetime.utcnow()
-            balance.balance_amount = 0
+        if not balance:
+            return None
         
-        self.db.flush()
+        new_matched = max(Decimal("0.00"), balance.matched_amount - amount)
+        new_pending = balance.original_amount - new_matched
         
-        logger.info(
-            f"Closed {len(balances)} balances for {document_type} {document_id}"
+        balance.matched_amount = new_matched
+        balance.pending_amount = new_pending
+        balance.balance_status = "PARTIAL" if new_pending > Decimal("0.00") else "CLOSED"
+        
+        if balance.balance_status == "CLOSED":
+            balance.closed_at = datetime.utcnow()
+        
+        entry = BalanceLedgerEntry(
+            balance_ledger_id=balance.id,
+            match_id=match_id,
+            entry_type="REVERSE",
+            amount=amount,
+            balance_after=new_pending,
         )
+        self.db.add(entry)
+        
+        await self.db.flush()
+        await self.db.refresh(balance)
+        return balance
+    
+    async def get_balance_for_document(
+        self,
+        document_type: str,
+        document_id: UUID,
+    ) -> Optional[BalanceLedger]:
+        """Get balance entry for a document."""
+        result = await self.db.execute(
+            select(BalanceLedger)
+            .where(
+                BalanceLedger.document_type == document_type,
+                BalanceLedger.document_id == document_id,
+                BalanceLedger.is_deleted == False,
+            )
+            .options(selectinload(BalanceLedger.entries))
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_open_balances(
+        self,
+        document_type: Optional[str] = None,
+        include_partial: bool = True,
+    ) -> list[BalanceLedger]:
+        """Get all open balances, optionally filtered by document type."""
+        query = select(BalanceLedger).where(BalanceLedger.is_deleted == False)
+        
+        if document_type:
+            query = query.where(BalanceLedger.document_type == document_type)
+        
+        if include_partial:
+            query = query.where(BalanceLedger.balance_status.in_(["OPEN", "PARTIAL"]))
+        else:
+            query = query.where(BalanceLedger.balance_status == "OPEN")
+        
+        query = query.order_by(BalanceLedger.created_at.desc())
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+    
+    async def get_balance_summary(self) -> dict:
+        """Get summary of all balances."""
+        balances = await self.get_open_balances(include_partial=True)
+        
+        total_original = sum(b.original_amount for b in balances)
+        total_matched = sum(b.matched_amount for b in balances)
+        total_pending = sum(b.pending_amount for b in balances)
+        
+        open_count = sum(1 for b in balances if b.balance_status == "OPEN")
+        partial_count = sum(1 for b in balances if b.balance_status == "PARTIAL")
+        
+        return {
+            "total_documents": len(balances),
+            "open_documents": open_count,
+            "partial_documents": partial_count,
+            "total_original_amount": total_original,
+            "total_matched_amount": total_matched,
+            "total_pending_amount": total_pending,
+            "match_percentage": (
+                (total_matched / total_original * 100).quantize(Decimal("0.01"))
+                if total_original > 0 else Decimal("0.00")
+            ),
+        }

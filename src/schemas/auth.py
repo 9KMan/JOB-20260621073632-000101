@@ -4,61 +4,65 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import EmailStr, Field, ConfigDict
-
-from src.schemas.common import BaseSchema
-from src.models.enums import UserRole
+from pydantic import BaseModel, EmailStr, Field
 
 
-class Token(BaseSchema):
-    """JWT Token response."""
+class Token(BaseModel):
+    """JWT token response."""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
-    expires_in: int
 
 
-class TokenData(BaseSchema):
+class TokenData(BaseModel):
     """Token payload data."""
-    sub: Optional[str] = None
     user_id: Optional[UUID] = None
     email: Optional[str] = None
-    role: Optional[UserRole] = None
-    exp: Optional[datetime] = None
+    is_superuser: bool = False
 
 
-class UserBase(BaseSchema):
+class UserBase(BaseModel):
     """Base user schema."""
     email: EmailStr
-    full_name: str = Field(..., min_length=1, max_length=255)
-    role: UserRole = UserRole.VIEWER
+    username: str = Field(..., min_length=3, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=255)
 
 
 class UserCreate(UserBase):
-    """User creation schema."""
-    password: str = Field(..., min_length=8, max_length=128)
+    """Schema for user creation."""
+    password: str = Field(..., min_length=8, max_length=100)
 
 
-class UserUpdate(BaseSchema):
-    """User update schema."""
+class UserUpdate(BaseModel):
+    """Schema for user update."""
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    role: Optional[UserRole] = None
-    password: Optional[str] = Field(None, min_length=8, max_length=128)
+    full_name: Optional[str] = Field(None, max_length=255)
+    password: Optional[str] = Field(None, min_length=8, max_length=100)
     is_active: Optional[bool] = None
 
 
 class UserResponse(UserBase):
-    """User response schema."""
+    """Schema for user response."""
     id: UUID
     is_active: bool
-    last_login: Optional[datetime] = None
+    is_superuser: bool
     created_at: datetime
     updated_at: datetime
+    
+    model_config = {"from_attributes": True}
 
-    model_config = ConfigDict(from_attributes=True)
+
+class UserInDB(UserResponse):
+    """User schema with hashed password."""
+    hashed_password: str
 
 
-class UserLogin(BaseSchema):
-    """User login schema."""
-    email: EmailStr
+class LoginRequest(BaseModel):
+    """Login request schema."""
+    username: str
     password: str
+
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request schema."""
+    refresh_token: str

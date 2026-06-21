@@ -1,9 +1,10 @@
 // src/app/config.py
-"""Application configuration settings."""
+"""Application configuration management."""
 import os
 from functools import lru_cache
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,49 +14,47 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
+        case_sensitive=True,
         extra="ignore"
     )
 
     # Application
-    app_name: str = "FinaRo AP Automation Engine"
-    app_version: str = "1.0.0"
-    debug: bool = False
-    api_v1_prefix: str = "/api/v1"
-
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = Field(default=False)
+    API_V1_PREFIX: str = "/api/v1"
+    
     # Database
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/finaro_ap"
-    db_pool_size: int = 10
-    db_max_overflow: int = 20
-    db_pool_timeout: int = 30
-    db_echo: bool = False
-
-    # JWT Authentication
-    jwt_secret_key: str = "your-secret-key-change-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
-
-    # Matching Engine Weights
-    matching_line_weight: float = 0.70
-    matching_amount_weight: float = 0.20
-    matching_date_weight: float = 0.10
-
-    # Match Thresholds
-    match_confirm_threshold: float = 0.95
-    match_pending_threshold: float = 0.75
-
-    # Redis (for workers/cache if needed)
-    redis_url: Optional[str] = None
-
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://finaro:finaro@localhost:5432/finaro"
+    )
+    DATABASE_POOL_SIZE: int = Field(default=20)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30)
+    DATABASE_ECHO: bool = Field(default=False)
+    
+    # Security
+    SECRET_KEY: str = Field(default="change-me-in-production")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    
+    # Matching Engine
+    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
+    MATCH_WEIGHT_AMOUNT: float = 0.20
+    MATCH_WEIGHT_DATE: float = 0.10
+    AUTO_APPROVE_THRESHOLD: float = 0.95
+    HUMAN_REVIEW_THRESHOLD: float = 0.70
+    
     # CORS
-    cors_origins: list[str] = ["*"]
-
+    CORS_ORIGINS: list[str] = Field(default=["*"])
+    
     # Logging
-    log_level: str = "INFO"
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()

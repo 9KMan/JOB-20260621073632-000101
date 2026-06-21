@@ -1,104 +1,85 @@
 // src/schemas/delivery_note.py
 """Delivery Note schemas."""
-import uuid
-import decimal
 from datetime import date, datetime
-from typing import Optional, List
+from decimal import Decimal
+from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-
-from src.models.enums import DocumentStatus
+from pydantic import BaseModel, Field
 
 
-class DeliveryNoteLineBase(BaseModel):
-    """Base schema for Delivery Note line."""
+class DeliveryNoteLineItemBase(BaseModel):
+    """Base line item schema."""
     line_number: int = Field(..., ge=1)
-    product_code: Optional[str] = Field(None, max_length=100)
-    description: str = Field(..., min_length=1, max_length=500)
-    quantity_delivered: decimal.Decimal = Field(..., ge=0)
-    quantity_accepted: Optional[decimal.Decimal] = Field(None, ge=0)
-    quantity_rejected: decimal.Decimal = Field(default=decimal.Decimal("0.0000"), ge=0)
+    item_code: str = Field(..., max_length=100)
+    description: str = Field(..., max_length=500)
+    quantity: Decimal = Field(..., gt=0)
     unit_of_measure: str = Field(default="EA", max_length=20)
-    notes: Optional[str] = Field(None, max_length=500)
+    unit_price: Decimal = Field(..., ge=0)
+    line_total: Decimal = Field(..., ge=0)
 
 
-class DeliveryNoteLineCreate(DeliveryNoteLineBase):
-    """Schema for creating a Delivery Note line."""
+class DeliveryNoteLineItemCreate(DeliveryNoteLineItemBase):
+    """Schema for line item creation."""
     pass
 
 
-class DeliveryNoteLineUpdate(BaseModel):
-    """Schema for updating a Delivery Note line."""
-    product_code: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    quantity_delivered: Optional[decimal.Decimal] = Field(None, ge=0)
-    quantity_accepted: Optional[decimal.Decimal] = Field(None, ge=0)
-    quantity_rejected: Optional[decimal.Decimal] = Field(None, ge=0)
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    notes: Optional[str] = Field(None, max_length=500)
-
-
-class DeliveryNoteLineResponse(DeliveryNoteLineBase):
-    """Schema for Delivery Note line response."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    delivery_note_id: uuid.UUID
-    is_matched: bool
-    matched_quantity: decimal.Decimal
-    created_at: datetime
-    updated_at: datetime
+class DeliveryNoteLineItemResponse(DeliveryNoteLineItemBase):
+    """Schema for line item response."""
+    id: UUID
+    delivery_note_id: UUID
+    
+    model_config = {"from_attributes": True}
 
 
 class DeliveryNoteBase(BaseModel):
-    """Base schema for Delivery Note."""
-    dn_number: str = Field(..., min_length=1, max_length=100)
-    supplier_id: str = Field(..., min_length=1, max_length=100)
-    supplier_name: str = Field(..., min_length=1, max_length=255)
-    supplier_reference: Optional[str] = Field(None, max_length=100)
-    purchase_order_id: Optional[uuid.UUID] = None
+    """Base delivery note schema."""
+    dn_number: str = Field(..., max_length=50)
+    supplier_id: UUID
+    purchase_order_id: Optional[UUID] = None
     delivery_date: date
-    received_by: Optional[str] = Field(None, max_length=255)
-    status: DocumentStatus = DocumentStatus.SUBMITTED
-    notes: Optional[str] = Field(None, max_length=1000)
-    metadata: Optional[str] = Field(None, max_length=2000)
+    received_by: str = Field(..., max_length=100)
+    currency: str = Field(default="USD", max_length=3)
+    notes: Optional[str] = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """Schema for creating a Delivery Note."""
-    total_quantity: decimal.Decimal = Field(default=decimal.Decimal("0.0000"), ge=0)
-    total_lines: int = Field(default=0, ge=0)
-    lines: List[DeliveryNoteLineCreate] = Field(default_factory=list)
+    """Schema for delivery note creation."""
+    line_items: list[DeliveryNoteLineItemCreate] = Field(default_factory=list)
 
 
 class DeliveryNoteUpdate(BaseModel):
-    """Schema for updating a Delivery Note."""
-    supplier_id: Optional[str] = Field(None, max_length=100)
-    supplier_name: Optional[str] = Field(None, max_length=255)
-    supplier_reference: Optional[str] = Field(None, max_length=100)
-    purchase_order_id: Optional[uuid.UUID] = None
+    """Schema for delivery note update."""
+    dn_number: Optional[str] = Field(None, max_length=50)
+    supplier_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
     delivery_date: Optional[date] = None
-    received_by: Optional[str] = Field(None, max_length=255)
-    total_quantity: Optional[decimal.Decimal] = Field(None, ge=0)
-    total_lines: Optional[int] = Field(None, ge=0)
-    status: Optional[DocumentStatus] = None
-    notes: Optional[str] = Field(None, max_length=1000)
-    metadata: Optional[str] = Field(None, max_length=2000)
+    received_by: Optional[str] = Field(None, max_length=100)
+    status: Optional[str] = Field(None, max_length=20)
+    currency: Optional[str] = Field(None, max_length=3)
+    notes: Optional[str] = None
+    line_items: Optional[list[DeliveryNoteLineItemCreate]] = None
 
 
 class DeliveryNoteResponse(DeliveryNoteBase):
-    """Schema for Delivery Note response."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    total_quantity: decimal.Decimal
-    total_lines: int
+    """Schema for delivery note response."""
+    id: UUID
+    status: str
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
     created_at: datetime
     updated_at: datetime
     is_deleted: bool
-    lines: List[DeliveryNoteLineResponse] = Field(default_factory=list)
+    line_items: list[DeliveryNoteLineItemResponse] = []
+    
+    model_config = {"from_attributes": True}
 
-    @field_validator("lines", mode="before")
-    @classmethod
-    def validate_lines(cls, v):
-        return v if v else []
+
+class DeliveryNoteListResponse(BaseModel):
+    """Schema for paginated delivery note list."""
+    items: list[DeliveryNoteResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

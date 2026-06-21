@@ -4,15 +4,13 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import Field, ConfigDict, EmailStr
-
-from src.schemas.common import BaseSchema
+from pydantic import BaseModel, EmailStr, Field
 
 
-class SupplierBase(BaseSchema):
+class SupplierBase(BaseModel):
     """Base supplier schema."""
-    code: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=255)
+    code: str = Field(..., min_length=1, max_length=50)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
@@ -21,14 +19,14 @@ class SupplierBase(BaseSchema):
 
 
 class SupplierCreate(SupplierBase):
-    """Supplier creation schema."""
+    """Schema for supplier creation."""
     pass
 
 
-class SupplierUpdate(BaseSchema):
-    """Supplier update schema."""
-    code: Optional[str] = Field(None, min_length=1, max_length=50)
+class SupplierUpdate(BaseModel):
+    """Schema for supplier update."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    code: Optional[str] = Field(None, min_length=1, max_length=50)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
@@ -37,9 +35,18 @@ class SupplierUpdate(BaseSchema):
 
 
 class SupplierResponse(SupplierBase):
-    """Supplier response schema."""
+    """Schema for supplier response."""
     id: UUID
     created_at: datetime
     updated_at: datetime
+    
+    model_config = {"from_attributes": True}
 
-    model_config = ConfigDict(from_attributes=True)
+
+class SupplierListResponse(BaseModel):
+    """Schema for paginated supplier list."""
+    items: list[SupplierResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
