@@ -1,14 +1,13 @@
-// core/config.py
+# core/config.py
 """Application configuration using pydantic-settings.
 
-All configuration is loaded from environment variables with type validation
-and sensible defaults for local development.
+All configuration is loaded from environment variables.
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,119 +22,148 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "AP Automation Engine"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = Field(default=False, validation_alias="DEBUG")
-    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    app_name: str = Field(default="AP Automation Engine", description="Application name")
+    app_version: str = Field(default="0.1.0", description="Application version")
+    environment: str = Field(default="development", description="Environment: development|staging|production")
+    log_level: str = Field(default="INFO", description="Logging level")
 
     # Database
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        validation_alias="DATABASE_URL",
+    database_url: PostgresDsn = Field(
+        default="postgresql+asyncpg://appuser:apppassword@localhost:5432/apautomation",
+        description="PostgreSQL async database URL",
     )
-    PGBOUNCER_HOST: str = Field(default="localhost", validation_alias="PGBOUNCER_HOST")
-    DB_ECHO: bool = Field(default=False, validation_alias="DB_ECHO")
-    DB_POOL_SIZE: int = Field(default=20, ge=1, le=100)
-    DB_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
-    DB_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    database_pool_size: int = Field(default=20, ge=1, le=100, description="Connection pool size")
+    database_max_overflow: int = Field(default=10, ge=0, le=50, description="Max overflow connections")
+    database_pool_timeout: int = Field(default=30, ge=1, description="Pool timeout in seconds")
+    database_pool_recycle: int = Field(default=3600, ge=0, description="Pool recycle time in seconds")
+    database_echo: bool = Field(default=False, description="Echo SQL queries")
 
-    # Authentication
-    JWT_SECRET_KEY: str = Field(
-        default="changeme-in-production-use-strong-secret-key-32-chars",
-        validation_alias="JWT_SECRET_KEY",
-    )
-    JWT_ALGORITHM: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1, le=1440)
-    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=30)
+    # PGBouncer (optional)
+    pgbouncer_host: str | None = Field(default=None, description="PGBouncer host")
+    pgbouncer_port: int = Field(default=6432, ge=1, le=65535, description="PGBouncer port")
 
-    # Matching Engine Thresholds
-    THRESHOLD_HIGH: float = Field(
-        default=95.0,
-        ge=0,
-        le=100,
-        validation_alias="THRESHOLD_HIGH",
-        description="Auto-approve threshold (percentage)",
+    # JWT Authentication
+    jwt_secret_key: str = Field(
+        default="dev-secret-key-change-in-production",
+        description="JWT signing secret key",
     )
-    THRESHOLD_MID: float = Field(
-        default=75.0,
-        ge=0,
-        le=100,
-        validation_alias="THRESHOLD_MID",
-        description="1-click review threshold (percentage)",
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_access_token_expire_minutes: int = Field(
+        default=30, ge=1, le=1440, description="Access token expiry in minutes"
     )
-    THRESHOLD_LOW: float = Field(
-        default=50.0,
-        ge=0,
-        le=100,
-        validation_alias="THRESHOLD_LOW",
-        description="Exception threshold (percentage)",
+    jwt_refresh_token_expire_days: int = Field(
+        default=7, ge=1, le=30, description="Refresh token expiry in days"
     )
 
-    # Matching Tolerances
-    TOLERANCE_PRICE: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        validation_alias="TOLERANCE_PRICE",
-        description="Price match tolerance percentage",
+    # Matching Thresholds (0.0 - 1.0)
+    threshold_high: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold",
     )
-    TOLERANCE_QTY: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        validation_alias="TOLERANCE_QTY",
-        description="Quantity match tolerance percentage",
+    threshold_mid: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="1-click review threshold",
+    )
+    threshold_low: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold",
     )
 
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-    CORS_ORIGINS: list[str] = Field(
+    # Tolerance Settings
+    tolerance_price: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Price match tolerance as decimal (0.05 = 5%)",
+    )
+    tolerance_qty: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Quantity match tolerance as decimal (0.10 = 10%)",
+    )
+
+    # CORS
+    cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8080"],
-        validation_alias="CORS_ORIGINS",
+        description="Allowed CORS origins",
+    )
+    cors_allow_credentials: bool = Field(default=True, description="Allow credentials in CORS")
+    cors_allow_methods: list[str] = Field(
+        default=["*"], description="Allowed HTTP methods for CORS"
+    )
+    cors_allow_headers: list[str] = Field(
+        default=["*"], description="Allowed HTTP headers for CORS"
     )
 
-    @field_validator("DATABASE_URL")
+    # Rate Limiting
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
+    rate_limit_requests: int = Field(default=100, ge=1, description="Max requests per window")
+    rate_limit_window: int = Field(default=60, ge=1, description="Rate limit window in seconds")
+
+    # Redis (optional)
+    redis_url: str | None = Field(default=None, description="Redis URL for caching")
+
+    # OpenTelemetry
+    otel_enabled: bool = Field(default=False, description="Enable OpenTelemetry tracing")
+    otel_service_name: str = Field(default="ap-automation-engine", description="OTEL service name")
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None, description="OTEL exporter endpoint"
+    )
+
+    @field_validator("log_level")
     @classmethod
-    def validate_database_url(cls, v: str) -> str:
-        """Validate database URL format."""
-        if not v.startswith("postgresql"):
-            raise ValueError("DATABASE_URL must start with 'postgresql'")
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is a valid Python log level."""
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper_v = v.upper()
+        if upper_v not in valid_levels:
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
+        return upper_v
+
+    @field_validator("threshold_high", "threshold_mid", "threshold_low")
+    @classmethod
+    def validate_thresholds(cls, v: float) -> float:
+        """Validate threshold is within valid range."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"Threshold must be between 0.0 and 1.0, got {v}")
         return v
 
     @property
-    def database_host(self) -> str:
-        """Extract database host from DATABASE_URL."""
-        from urllib.parse import urlparse
-
-        parsed = urlparse(self.DATABASE_URL)
-        return parsed.hostname or "localhost"
+    def is_production(self) -> bool:
+        """Check if running in production environment."""
+        return self.environment.lower() == "production"
 
     @property
-    def database_port(self) -> int:
-        """Extract database port from DATABASE_URL."""
-        from urllib.parse import urlparse
-
-        parsed = urlparse(self.DATABASE_URL)
-        return parsed.port or 5432
-
-    def is_production(self) -> bool:
-        """Check if running in production mode."""
-        return self.DEBUG is False
-
     def is_development(self) -> bool:
-        """Check if running in development mode."""
-        return self.DEBUG is True
+        """Check if running in development environment."""
+        return self.environment.lower() == "development"
+
+    def validate_thresholds_order(self) -> None:
+        """Validate that thresholds are in correct order: HIGH > MID > LOW."""
+        if not (self.threshold_high > self.threshold_mid > self.threshold_low):
+            raise ValueError(
+                f"Threshold order invalid: HIGH({self.threshold_high}) > "
+                f"MID({self.threshold_mid}) > LOW({self.threshold_low})"
+            )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance (singleton pattern).
+    """Get cached application settings.
 
-    Returns:
-        Settings: Cached application settings instance.
+    Uses lru_cache to ensure settings are only loaded once.
     """
-    return Settings()
+    settings = Settings()
+    settings.validate_thresholds_order()
+    return settings
 
 
-# Global settings instance
-settings = get_settings()
+# Type alias for dependency injection
+SettingsDep = Annotated[Settings, None]

@@ -1,132 +1,146 @@
-// models/purchase_order.py
-"""PurchaseOrder and PurchaseOrderLine SQLAlchemy models."""
+# models/purchase_order.py
+"""Purchase Order model for AP Automation Engine."""
 
-from datetime import date, datetime
+import uuid
+from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
-    ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
-    UniqueConstraint,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKey
+from models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+
 
 if TYPE_CHECKING:
     from models.balance_ledger import BalanceLedger
     from models.cross_ref import CrossRef
-    from models.delivery_note import DeliveryNote
-    from models.invoice import Invoice
+    from models.delivery_note import DeliveryNoteLine
+    from models.invoice import InvoiceLine
 
 
-class PurchaseOrder(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
-    """Purchase Order header model.
+class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """Purchase Order model representing PO documents from ERP.
 
-    Represents a purchase order sent to a supplier.
+    Attributes:
+        po_number: Unique PO number
+        vendor_id: External vendor identifier
+        vendor_name: Name of the vendor
+        po_date: Date of the PO
+        delivery_date: Expected delivery date
+        subtotal: PO subtotal before tax
+        tax_amount: Tax amount
+        total_amount: Total PO amount
+        currency: Currency code (ISO 4217)
+        status: Current PO status
+        notes: Additional notes
+        metadata: JSON metadata for extensibility
     """
 
     __tablename__ = "purchase_orders"
     __table_args__ = (
-        Index("ix_pos_supplier_number", "supplier_number"),
-        Index("ix_pos_po_number", "po_number"),
-        Index("ix_pos_status", "status"),
-        Index("ix_pos_order_date", "order_date"),
-        UniqueConstraint("po_number", "supplier_number", name="uq_po_number_supplier"),
+        Index("ix_purchase_orders_vendor_id", "vendor_id"),
+        Index("ix_purchase_orders_po_number", "po_number", unique=True),
+        Index("ix_purchase_orders_status", "status"),
+        Index("ix_purchase_orders_po_date", "po_date"),
+        Index("ix_purchase_orders_created_at", "created_at"),
     )
 
-    # Header Information
+    # Basic Information
     po_number: Mapped[str] = mapped_column(
-        String(50),
+        String(100),
+        unique=True,
         nullable=False,
-        index=True,
+        doc="Unique PO number",
     )
-    supplier_number: Mapped[str] = mapped_column(
-        String(50),
+    vendor_id: Mapped[str] = mapped_column(
+        String(100),
         nullable=False,
-        index=True,
+        doc="External vendor identifier",
     )
-    supplier_name: Mapped[str] = mapped_column(
+    vendor_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+        doc="Name of the vendor",
     )
-    supplier_address: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
+    po_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        doc="Date of the PO",
     )
-    supplier_tax_id: Mapped[Optional[str]] = mapped_column(
-        String(50),
+    delivery_date: Mapped[date | None] = mapped_column(
+        Date,
         nullable=True,
+        doc="Expected delivery date",
     )
 
     # Financial Information
-    order_date: Mapped[date] = mapped_column(
-        Date,
-        nullable=False,
-        index=True,
-    )
-    expected_delivery_date: Mapped[Optional[date]] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
+    subtotal: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
+        default=Decimal("0.00"),
+        doc="PO subtotal before tax",
     )
     tax_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
         default=Decimal("0.00"),
+        doc="Tax amount",
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Total PO amount",
     )
     currency: Mapped[str] = mapped_column(
         String(3),
         nullable=False,
         default="USD",
+        doc="Currency code (ISO 4217)",
     )
 
     # Status
     status: Mapped[str] = mapped_column(
-        String(20),
+        String(50),
         nullable=False,
-        default="draft",
-        index=True,
+        default="approved",
+        doc="Current PO status",
     )
-
-    # ERP Reference
-    erp_reference: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    erp_sync_status: Mapped[str] = mapped_column(
-        String(20),
+    is_closed: Mapped[bool] = mapped_column(
+        Boolean,
         nullable=False,
-        default="synced",
+        default=False,
+        doc="Whether PO is closed",
     )
 
-    # Payment Terms
-    payment_terms: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    # Delivery Address
-    delivery_address: Mapped[Optional[str]] = mapped_column(
+    # Additional Information
+    notes: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
+        doc="Additional notes",
     )
-
-    # Notes
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
+    metadata: Mapped[dict | None] = mapped_column(
+        JSONB,
         nullable=True,
+        doc="JSON metadata for extensibility",
+    )
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="erp",
+        doc="Source system (erp, manual)",
     )
 
     # Relationships
@@ -134,127 +148,130 @@ class PurchaseOrder(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
         "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
-    invoices: Mapped[list["Invoice"]] = relationship(
-        "Invoice",
+    balance_ledgers: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
         back_populates="purchase_order",
-        lazy="selectin",
-    )
-    delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
-        "DeliveryNote",
-        secondary="po_delivery_notes",
-        back_populates="purchase_orders",
-        lazy="selectin",
+        foreign_keys="BalanceLedger.po_id",
     )
     cross_refs: Mapped[list["CrossRef"]] = relationship(
         "CrossRef",
         back_populates="purchase_order",
-        lazy="selectin",
+        foreign_keys="CrossRef.po_id",
     )
 
-    @property
-    def open_amount(self) -> Decimal:
-        """Calculate the remaining open amount for this PO."""
-        from models.balance_ledger import BalanceLedger
 
-        invoiced = sum(
-            line.invoiced_amount for line in self.lines
-        )
-        return self.total_amount - invoiced
+class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Purchase Order Line item model.
 
-    def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number} ({self.status})>"
-
-
-class PurchaseOrderLine(Base, UUIDPrimaryKey, TimestampMixin):
-    """Purchase Order line item model.
-
-    Represents individual line items on a purchase order.
+    Attributes:
+        po_id: Parent purchase order ID
+        line_number: Line item number
+        description: Item description
+        quantity: Ordered quantity
+        unit_price: Price per unit
+        amount: Total line amount
+        delivered_qty: Quantity already delivered
+        invoiced_qty: Quantity already invoiced
+        open_qty: Remaining quantity (quantity - delivered_qty)
+        tax_code: Tax code
+        accounting_code: Cost center / GL account
+        expected_delivery_date: Expected delivery date for this line
+        status: Line status
     """
 
     __tablename__ = "purchase_order_lines"
     __table_args__ = (
-        Index("ix_po_lines_po_id", "purchase_order_id"),
-        Index("ix_po_lines_line_number", "line_number"),
-        Index("ix_po_lines_sku", "sku"),
+        Index("ix_purchase_order_lines_po_id", "po_id"),
+        Index("ix_purchase_order_lines_accounting_code", "accounting_code"),
     )
 
-    # Parent Purchase Order
-    purchase_order_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+    po_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        doc="Parent purchase order ID",
     )
-
-    # Line Information
     line_number: Mapped[int] = mapped_column(
+        Integer,
         nullable=False,
-        index=True,
+        doc="Line item number",
     )
     description: Mapped[str] = mapped_column(
         String(500),
         nullable=False,
+        doc="Item description",
     )
-
-    # Product Information
-    sku: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    product_code: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-    manufacturer_code: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-    barcode: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-
-    # Quantity and Pricing
-    quantity_ordered: Mapped[Decimal] = mapped_column(
+    quantity: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
         nullable=False,
-    )
-    quantity_received: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    quantity_invoiced: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    unit_of_measure: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="EA",
+        doc="Ordered quantity",
     )
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
         nullable=False,
+        doc="Price per unit",
     )
-    line_amount: Mapped[Decimal] = mapped_column(
+    amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-    )
-    tax_rate: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        default=Decimal("0.00"),
+        doc="Total line amount",
     )
 
-    # Delivery Information
-    delivery_date: Mapped[Optional[date]] = mapped_column(
+    # Quantities
+    delivered_qty: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        doc="Quantity already delivered",
+    )
+    invoiced_qty: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        doc="Quantity already invoiced",
+    )
+    accepted_qty: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        doc="Quantity accepted",
+    )
+
+    # Tax and Accounting
+    tax_code: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Tax code",
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Line tax amount",
+    )
+    accounting_code: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Cost center / GL account",
+    )
+
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="open",
+        doc="Line status",
+    )
+    expected_delivery_date: Mapped[date | None] = mapped_column(
         Date,
         nullable=True,
+        doc="Expected delivery date for this line",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Additional notes",
     )
 
     # Relationships
@@ -264,52 +281,28 @@ class PurchaseOrderLine(Base, UUIDPrimaryKey, TimestampMixin):
     )
     invoice_lines: Mapped[list["InvoiceLine"]] = relationship(
         "InvoiceLine",
-        back_populates="purchase_order_line",
-        lazy="selectin",
+        back_populates="po_line",
+        foreign_keys="InvoiceLine.po_line_id",
     )
-    balance_ledger: Mapped[list["BalanceLedger"]] = relationship(
-        "BalanceLedger",
-        back_populates="purchase_order_line",
-        cascade="all, delete-orphan",
+    delivery_note_lines: Mapped[list["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
+        back_populates="po_line",
+        foreign_keys="DeliveryNoteLine.po_line_id",
     )
 
     @property
-    def quantity_remaining(self) -> Decimal:
-        """Calculate remaining quantity to be invoiced."""
-        return self.quantity_ordered - self.quantity_invoiced
+    def open_qty(self) -> Decimal:
+        """Calculate remaining quantity to be delivered."""
+        return self.quantity - self.delivered_qty
 
     @property
-    def amount_remaining(self) -> Decimal:
+    def open_amount(self) -> Decimal:
         """Calculate remaining amount to be invoiced."""
-        return self.line_amount - (self.quantity_invoiced * self.unit_price)
-
-    def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}: {self.description[:30]}>"
+        return Decimal(str(self.open_qty)) * self.unit_price
 
 
-# Association table for PO-delivery note many-to-many relationship
-from sqlalchemy import Table, Column
-from sqlalchemy import func
+# Add JSONB import at runtime
+from sqlalchemy.dialects.postgresql import JSONB
 
-po_delivery_notes = Table(
-    "po_delivery_notes",
-    Base.metadata,
-    Column(
-        "purchase_order_id",
-        UUID(as_uuid=False),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    Column(
-        "delivery_note_id",
-        UUID(as_uuid=False),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    Column(
-        "created_at",
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    ),
-)
+PurchaseOrder.__table__.c.metadata = Base.metadata
+PurchaseOrderLine.__table__.c.metadata = Base.metadata

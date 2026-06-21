@@ -1,29 +1,33 @@
-// pyproject.toml
+# pyproject.toml
+[build-system]
+requires = ["hatchling", "hatch-fancy-pypi-readme>=22.5.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "ap-automation-engine"
 version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo - Invoice matching and exception handling"
+description = "AP Automation Core Engine for FinaRo"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
-    { name = "FinaRo", email = "dev@finaro.example.com" }
+    { name = "FinaRo", email = "dev@finaro.com" }
 ]
-keywords = ["ap", "automation", "invoice", "matching", "erp"]
+keywords = ["ap", "automation", "invoice-matching", "fastapi"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Framework :: FastAPI",
     "Topic :: Office/Business :: Financial",
 ]
 
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.30",
+    "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "pydantic>=2.6.0",
@@ -31,7 +35,6 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
     "greenlet>=3.0.0",
 ]
 
@@ -44,21 +47,20 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.9.0",
     "types-python-dateutil>=2.8.0",
-    "types-pyyaml>=6.0.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.urls]
+Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101/docs"
+Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
+Issues = "https://github.com/9KMan/JOB-20260621073632-000101/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/ap_automation"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-
-[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -71,14 +73,15 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
 ]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-ignore_missing_imports = true
-disallow_untyped_defs = false
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -86,13 +89,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --cov=. --cov-report=term-missing"
 filterwarnings = [
     "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
 ]
 
 [tool.coverage.run]
-source = ["src", "core", "models", "services", "api"]
+source = ["core", "models", "services", "api"]
 omit = [
     "*/tests/*",
     "*/migrations/*",
@@ -103,7 +107,7 @@ omit = [
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
-    "raise AssertionError",
     "raise NotImplementedError",
-    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
 ]
