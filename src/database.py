@@ -1,82 +1,45 @@
 // src/database.py
-"""Database connection and session management."""
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.declarative import declarative_base
+from contextlib import contextmanager
+from typing import Generator
 
 from src.config import get_settings
 
 settings = get_settings()
 
-# Synchronous engine (for migrations and CLI)
-sync_engine = create_engine(
-    settings.database.url,
-    echo=settings.database.echo,
-    **settings.database.pool_config,
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    echo=settings.debug,
 )
 
-SyncSessionLocal = sessionmaker(
-    bind=sync_engine,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False,
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Async engine (for FastAPI)
-async_database_url = settings.database.url.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
-
-async_engine = create_async_engine(
-    async_database_url,
-    echo=settings.database.echo,
-    **settings.database.pool_config,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False,
-)
+Base = declarative_base()
 
 
-class Base(DeclarativeBase):
-    """Base class for all database models."""
-    pass
-
-
-def get_db() -> Session:
-    """Get synchronous database session (for migrations)."""
-    db = SyncSessionLocal()
+def get_db() -> Generator[Session, None, None]:
+    """Dependency for FastAPI to get database session."""
+    db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Get async database session (for FastAPI dependency injection)."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
+@contextmanager
+def get_db_context() -> Generator[Session, None, None]:
     """Context manager for database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

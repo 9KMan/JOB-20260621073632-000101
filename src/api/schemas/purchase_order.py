@@ -1,110 +1,81 @@
 // src/api/schemas/purchase_order.py
-"""Purchase Order schemas."""
+from pydantic import BaseModel, Field
+from uuid import UUID
+from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
-from uuid import UUID
-
-from pydantic import BaseModel, Field, field_validator
+from src.models.purchase_order import POStatus
 
 
 class PurchaseOrderLineBase(BaseModel):
     """Base PO line schema."""
-    line_number: int = Field(ge=1)
-    item_code: Optional[str] = Field(default=None, max_length=50)
-    description: str = Field(min_length=1, max_length=500)
-    quantity: Decimal = Field(gt=0, decimal_places=3)
-    unit_of_measure: Optional[str] = Field(default=None, max_length=20)
-    unit_price: Decimal = Field(ge=0, decimal_places=2)
-    tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    line_number: int
+    item_code: Optional[str] = None
+    description: str = Field(..., max_length=500)
+    quantity: Decimal = Field(..., gt=0)
+    unit_of_measure: str = "EA"
+    unit_price: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     expected_delivery_date: Optional[date] = None
-    
-    @field_validator("line_amount", mode="before")
-    @classmethod
-    def calculate_line_amount(cls, v, info):
-        """Calculate line amount from quantity and unit price."""
-        if v is not None:
-            return v
-        return None
+    notes: Optional[str] = None
 
 
 class PurchaseOrderLineCreate(PurchaseOrderLineBase):
     """PO line creation schema."""
-    line_amount: Optional[Decimal] = Field(default=None, ge=0)
-    
-    def calculate_amounts(self) -> tuple[Decimal, Decimal]:
-        """Calculate line amount and tax amount."""
-        line_amount = self.quantity * self.unit_price
-        tax_amount = Decimal("0")
-        if self.tax_rate:
-            tax_amount = line_amount * (self.tax_rate / 100)
-        return line_amount, tax_amount
-
-
-class PurchaseOrderLineUpdate(BaseModel):
-    """PO line update schema."""
-    item_code: Optional[str] = None
-    description: Optional[str] = None
-    quantity: Optional[Decimal] = None
-    unit_of_measure: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
-    expected_delivery_date: Optional[date] = None
+    pass
 
 
 class PurchaseOrderLineResponse(PurchaseOrderLineBase):
     """PO line response schema."""
     id: UUID
-    purchase_order_id: UUID
-    line_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
+    line_total: Decimal
+    tax_amount: Decimal
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class PurchaseOrderBase(BaseModel):
     """Base PO schema."""
-    po_number: str = Field(min_length=1, max_length=50)
+    po_number: str = Field(..., max_length=100)
     supplier_id: UUID
+    supplier_name: str = Field(..., max_length=255)
+    supplier_code: Optional[str] = None
     order_date: date
     expected_delivery_date: Optional[date] = None
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="USD", max_length=3)
     notes: Optional[str] = None
+    terms_and_conditions: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
     """PO creation schema."""
-    lines: List[PurchaseOrderLineCreate] = Field(min_length=1)
-    total_amount: Optional[Decimal] = None
-    
-    def calculate_total(self) -> Decimal:
-        """Calculate total amount from lines."""
-        return sum(
-            line.quantity * line.unit_price
-            for line in self.lines
-        )
+    line_items: List[PurchaseOrderLineCreate] = Field(default_factory=list)
 
 
 class PurchaseOrderUpdate(BaseModel):
     """PO update schema."""
-    supplier_id: Optional[UUID] = None
-    status: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
     expected_delivery_date: Optional[date] = None
+    status: Optional[POStatus] = None
     notes: Optional[str] = None
+    terms_and_conditions: Optional[str] = None
 
 
 class PurchaseOrderResponse(PurchaseOrderBase):
     """PO response schema."""
     id: UUID
-    status: str
+    subtotal: Decimal
+    tax_amount: Decimal
     total_amount: Decimal
-    created_by: Optional[UUID] = None
+    status: POStatus
     created_at: datetime
     updated_at: datetime
-    lines: List[PurchaseOrderLineResponse] = []
+    line_items: List[PurchaseOrderLineResponse] = []
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class PurchaseOrderListResponse(BaseModel):
@@ -112,5 +83,4 @@ class PurchaseOrderListResponse(BaseModel):
     items: List[PurchaseOrderResponse]
     total: int
     page: int
-    size: int
-    pages: int
+    page_size: int

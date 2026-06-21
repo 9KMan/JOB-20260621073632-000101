@@ -1,108 +1,81 @@
 // src/api/schemas/delivery_note.py
-"""Delivery Note schemas."""
+from pydantic import BaseModel, Field
+from uuid import UUID
+from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
-from uuid import UUID
-
-from pydantic import BaseModel, Field
+from src.models.delivery_note import DeliveryNoteStatus
 
 
 class DeliveryNoteLineBase(BaseModel):
     """Base DN line schema."""
-    line_number: int = Field(ge=1)
-    item_code: Optional[str] = Field(default=None, max_length=50)
-    description: str = Field(min_length=1, max_length=500)
-    quantity_received: Decimal = Field(gt=0, decimal_places=3)
-    quantity_accepted: Decimal = Field(ge=0, decimal_places=3)
-    unit_of_measure: Optional[str] = Field(default=None, max_length=20)
-    unit_price: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
-    
-    @field_validator("quantity_accepted")
-    @classmethod
-    def validate_quantity(cls, v, info):
-        """Validate accepted quantity doesn't exceed received."""
-        if "quantity_received" in info.data:
-            if v > info.data["quantity_received"]:
-                raise ValueError("Accepted quantity cannot exceed received quantity")
-        return v
+    line_number: int
+    item_code: Optional[str] = None
+    description: str = Field(..., max_length=500)
+    quantity: Decimal = Field(..., gt=0)
+    unit_of_measure: str = "EA"
+    unit_price: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
 
 
 class DeliveryNoteLineCreate(DeliveryNoteLineBase):
     """DN line creation schema."""
-    line_amount: Optional[Decimal] = Field(default=None, ge=0)
-    
-    def calculate_amounts(self) -> tuple[Decimal, Decimal]:
-        """Calculate line amount."""
-        if self.unit_price:
-            return self.quantity_accepted * self.unit_price, Decimal("0")
-        return Decimal("0"), Decimal("0")
-
-
-class DeliveryNoteLineUpdate(BaseModel):
-    """DN line update schema."""
-    item_code: Optional[str] = None
-    description: Optional[str] = None
-    quantity_received: Optional[Decimal] = None
-    quantity_accepted: Optional[Decimal] = None
-    unit_of_measure: Optional[str] = None
-    unit_price: Optional[Decimal] = None
+    matched_po_line_id: Optional[UUID] = None
 
 
 class DeliveryNoteLineResponse(DeliveryNoteLineBase):
     """DN line response schema."""
     id: UUID
-    delivery_note_id: UUID
-    line_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
+    line_total: Decimal
+    tax_amount: Decimal
+    matched_po_line_id: Optional[UUID] = None
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class DeliveryNoteBase(BaseModel):
     """Base DN schema."""
-    dn_number: str = Field(min_length=1, max_length=50)
+    dn_number: str = Field(..., max_length=100)
     supplier_id: UUID
-    po_id: Optional[UUID] = None
+    supplier_name: str = Field(..., max_length=255)
+    supplier_code: Optional[str] = None
     delivery_date: date
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    received_date: Optional[date] = None
+    currency: str = Field(default="USD", max_length=3)
     notes: Optional[str] = None
+    carrier_info: Optional[str] = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
     """DN creation schema."""
-    lines: List[DeliveryNoteLineCreate] = Field(min_length=1)
-    total_amount: Optional[Decimal] = None
-    
-    def calculate_total(self) -> Decimal:
-        """Calculate total amount from lines."""
-        total = Decimal("0")
-        for line in self.lines:
-            if line.unit_price:
-                total += line.quantity_accepted * line.unit_price
-        return total
+    line_items: List[DeliveryNoteLineCreate] = Field(default_factory=list)
 
 
 class DeliveryNoteUpdate(BaseModel):
     """DN update schema."""
-    supplier_id: Optional[UUID] = None
-    po_id: Optional[UUID] = None
-    status: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
+    received_date: Optional[date] = None
+    status: Optional[DeliveryNoteStatus] = None
     notes: Optional[str] = None
+    carrier_info: Optional[str] = None
 
 
 class DeliveryNoteResponse(DeliveryNoteBase):
     """DN response schema."""
     id: UUID
-    status: str
+    subtotal: Decimal
+    tax_amount: Decimal
     total_amount: Decimal
-    created_by: Optional[UUID] = None
+    status: DeliveryNoteStatus
+    matched_po_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
-    lines: List[DeliveryNoteLineResponse] = []
+    line_items: List[DeliveryNoteLineResponse] = []
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class DeliveryNoteListResponse(BaseModel):
@@ -110,5 +83,4 @@ class DeliveryNoteListResponse(BaseModel):
     items: List[DeliveryNoteResponse]
     total: int
     page: int
-    size: int
-    pages: int
+    page_size: int

@@ -1,107 +1,82 @@
 // src/api/schemas/invoice.py
-"""Invoice schemas."""
+from pydantic import BaseModel, Field
+from uuid import UUID
+from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
-from uuid import UUID
-
-from pydantic import BaseModel, Field, field_validator
+from src.models.invoice import InvoiceStatus
 
 
 class InvoiceLineBase(BaseModel):
     """Base invoice line schema."""
-    line_number: int = Field(ge=1)
-    item_code: Optional[str] = Field(default=None, max_length=50)
-    description: str = Field(min_length=1, max_length=500)
-    quantity: Decimal = Field(gt=0, decimal_places=3)
-    unit_of_measure: Optional[str] = Field(default=None, max_length=20)
-    unit_price: Decimal = Field(ge=0, decimal_places=2)
-    tax_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    line_number: int
+    item_code: Optional[str] = None
+    description: str = Field(..., max_length=500)
+    quantity: Decimal = Field(..., gt=0)
+    unit_of_measure: str = "EA"
+    unit_price: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
 
 
 class InvoiceLineCreate(InvoiceLineBase):
     """Invoice line creation schema."""
-    line_amount: Optional[Decimal] = Field(default=None, ge=0)
-    
-    def calculate_amounts(self) -> tuple[Decimal, Decimal]:
-        """Calculate line amount and tax amount."""
-        line_amount = self.quantity * self.unit_price
-        tax_amount = Decimal("0")
-        if self.tax_rate:
-            tax_amount = line_amount * (self.tax_rate / 100)
-        return line_amount, tax_amount
-
-
-class InvoiceLineUpdate(BaseModel):
-    """Invoice line update schema."""
-    item_code: Optional[str] = None
-    description: Optional[str] = None
-    quantity: Optional[Decimal] = None
-    unit_of_measure: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
+    matched_po_line_id: Optional[UUID] = None
 
 
 class InvoiceLineResponse(InvoiceLineBase):
     """Invoice line response schema."""
     id: UUID
-    invoice_id: UUID
-    line_amount: Decimal
-    created_at: datetime
-    updated_at: datetime
+    line_total: Decimal
+    tax_amount: Decimal
+    matched_po_line_id: Optional[UUID] = None
+    matched_dn_line_id: Optional[UUID] = None
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class InvoiceBase(BaseModel):
     """Base invoice schema."""
-    invoice_number: str = Field(min_length=1, max_length=50)
+    invoice_number: str = Field(..., max_length=100)
     supplier_id: UUID
-    po_id: Optional[UUID] = None
+    supplier_name: str = Field(..., max_length=255)
+    supplier_code: Optional[str] = None
     invoice_date: date
     due_date: Optional[date] = None
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="USD", max_length=3)
     notes: Optional[str] = None
+    payment_terms: Optional[str] = None
 
 
 class InvoiceCreate(InvoiceBase):
     """Invoice creation schema."""
-    lines: List[InvoiceLineCreate] = Field(min_length=1)
-    tax_amount: Optional[Decimal] = None
-    
-    def calculate_totals(self) -> tuple[Decimal, Decimal]:
-        """Calculate total amount and tax amount."""
-        total = Decimal("0")
-        tax_total = Decimal("0")
-        for line in self.lines:
-            line_amount = line.quantity * line.unit_price
-            total += line_amount
-            if line.tax_rate:
-                tax_total += line_amount * (line.tax_rate / 100)
-        return total, tax_total
+    line_items: List[InvoiceLineCreate] = Field(default_factory=list)
 
 
 class InvoiceUpdate(BaseModel):
     """Invoice update schema."""
-    supplier_id: Optional[UUID] = None
-    po_id: Optional[UUID] = None
-    status: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
     due_date: Optional[date] = None
+    status: Optional[InvoiceStatus] = None
     notes: Optional[str] = None
+    payment_terms: Optional[str] = None
 
 
 class InvoiceResponse(InvoiceBase):
     """Invoice response schema."""
     id: UUID
-    status: str
+    subtotal: Decimal
+    tax_amount: Decimal
     total_amount: Decimal
-    tax_amount: Optional[Decimal] = None
-    created_by: Optional[UUID] = None
+    status: InvoiceStatus
+    matched_po_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
-    lines: List[InvoiceLineResponse] = []
+    line_items: List[InvoiceLineResponse] = []
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class InvoiceListResponse(BaseModel):
@@ -109,5 +84,4 @@ class InvoiceListResponse(BaseModel):
     items: List[InvoiceResponse]
     total: int
     page: int
-    size: int
-    pages: int
+    page_size: int
