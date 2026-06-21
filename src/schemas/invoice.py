@@ -2,141 +2,98 @@
 """Invoice schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.base import BaseSchema, PaginatedResponse
+
 
 class InvoiceLineBase(BaseModel):
-    """Base invoice line schema."""
-    
-    line_number: int = Field(..., ge=1)
-    item_code: Optional[str] = Field(None, max_length=100)
-    description: str = Field(..., min_length=1, max_length=500)
+    """Base schema for Invoice line items."""
+
+    line_number: int
+    sku: str = Field(..., max_length=100)
+    description: str = Field(..., max_length=500)
     quantity: Decimal = Field(..., gt=0)
     unit_of_measure: str = Field(default="EA", max_length=20)
     unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0)
-    line_total: Decimal = Field(..., ge=0)
+    line_amount: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
 
 
 class InvoiceLineCreate(InvoiceLineBase):
-    """Invoice line creation schema."""
-    pass
+    """Schema for creating Invoice line items."""
+
+    po_line_id: Optional[UUID] = None
+    delivery_note_line_id: Optional[UUID] = None
 
 
-class InvoiceLineUpdate(BaseModel):
-    """Invoice line update schema."""
-    
-    item_code: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, min_length=1, max_length=500)
-    quantity: Optional[Decimal] = Field(None, gt=0)
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=0)
-    tax_rate: Optional[Decimal] = Field(None, ge=0)
-    line_total: Optional[Decimal] = Field(None, ge=0)
+class InvoiceLineResponse(InvoiceLineBase):
+    """Schema for Invoice line item response."""
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-class InvoiceLineResponse(BaseModel):
-    """Invoice line response schema."""
-    
-    model_config = ConfigDict(from_attributes=True)
-    
     id: UUID
-    line_number: int
-    item_code: Optional[str] = None
-    description: str
-    quantity: Decimal
-    unit_of_measure: str
-    unit_price: Decimal
-    tax_rate: Decimal
-    line_total: Decimal
+    invoice_id: UUID
+    po_line_id: Optional[UUID] = None
+    delivery_note_line_id: Optional[UUID] = None
+    matched_quantity: Decimal
     created_at: datetime
     updated_at: datetime
 
 
 class InvoiceBase(BaseModel):
-    """Base invoice schema."""
-    
-    invoice_number: str = Field(..., min_length=1, max_length=100)
-    vendor_id: UUID
-    po_reference: Optional[str] = Field(None, max_length=50)
+    """Base schema for Invoices."""
+
+    invoice_number: str = Field(..., max_length=100)
+    supplier_id: UUID
+    supplier_name: str = Field(..., max_length=255)
+    supplier_reference: Optional[str] = Field(None, max_length=100)
+    purchase_order_id: Optional[UUID] = None
     invoice_date: date
-    due_date: date
-    status: str = Field(default="pending", max_length=50)
-    currency: str = Field(default="USD", max_length=3)
-    subtotal: Decimal = Field(default=Decimal("0.00"), ge=0)
+    due_date: Optional[date] = None
+    received_date: Optional[date] = None
+    subtotal: Decimal = Field(..., ge=0)
     tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    total_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    amount_paid: Decimal = Field(default=Decimal("0.00"), ge=0)
+    total_amount: Decimal = Field(..., ge=0)
+    currency: str = Field(default="USD", max_length=3)
     notes: Optional[str] = None
-    attachments: Optional[str] = None
 
 
 class InvoiceCreate(InvoiceBase):
-    """Invoice creation schema."""
-    
-    lines: List[InvoiceLineCreate] = Field(default_factory=list)
-    
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "invoice_number": "INV-2024-001",
-                "vendor_id": "uuid-here",
-                "po_reference": "PO-2024-001",
-                "invoice_date": "2024-01-20",
-                "due_date": "2024-02-19",
-                "status": "pending",
-                "currency": "USD",
-                "subtotal": Decimal("1000.00"),
-                "tax_amount": Decimal("100.00"),
-                "total_amount": Decimal("1100.00"),
-                "amount_paid": Decimal("0.00"),
-                "lines": []
-            }
-        }
-    )
+    """Schema for creating an Invoice."""
+
+    lines: list[InvoiceLineCreate] = Field(default_factory=list)
 
 
 class InvoiceUpdate(BaseModel):
-    """Invoice update schema."""
-    
-    invoice_number: Optional[str] = Field(None, min_length=1, max_length=100)
-    vendor_id: Optional[UUID] = None
-    po_reference: Optional[str] = Field(None, max_length=50)
-    invoice_date: Optional[date] = None
+    """Schema for updating an Invoice."""
+
+    supplier_name: Optional[str] = Field(None, max_length=255)
     due_date: Optional[date] = None
-    status: Optional[str] = Field(None, max_length=50)
-    currency: Optional[str] = Field(None, max_length=3)
-    subtotal: Optional[Decimal] = Field(None, ge=0)
-    tax_amount: Optional[Decimal] = Field(None, ge=0)
-    total_amount: Optional[Decimal] = Field(None, ge=0)
-    amount_paid: Optional[Decimal] = Field(None, ge=0)
     notes: Optional[str] = None
-    attachments: Optional[str] = None
+    status: Optional[str] = Field(None, max_length=20)
+    lines: Optional[list[InvoiceLineCreate]] = None
 
 
-class InvoiceResponse(BaseModel):
-    """Invoice response schema."""
-    
-    model_config = ConfigDict(from_attributes=True)
-    
+class InvoiceResponse(InvoiceBase):
+    """Schema for Invoice response."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: UUID
-    invoice_number: str
-    vendor_id: UUID
-    po_reference: Optional[str] = None
-    invoice_date: date
-    due_date: date
     status: str
-    currency: str
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
-    amount_paid: Decimal
-    notes: Optional[str] = None
-    attachments: Optional[str] = None
-    received_at: datetime
+    matched_amount: Decimal
+    unmatched_amount: Decimal
+    lines: list[InvoiceLineResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
-    lines: List[InvoiceLineResponse] = Field(default_factory=list)
+
+
+class InvoiceListResponse(PaginatedResponse[InvoiceResponse]):
+    """Paginated list of Invoices."""
+
+    pass

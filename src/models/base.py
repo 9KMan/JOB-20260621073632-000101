@@ -1,57 +1,55 @@
 // src/models/base.py
-"""Base model classes with common functionality."""
+"""Base model with common fields."""
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.database import Base
 
 
-class Base(DeclarativeBase):
-    """Base class for all database models."""
-    pass
+class BaseModel(Base):
+    """Base model with UUID primary key and timestamps."""
 
+    __abstract__ = True
 
-class UUIDPrimaryKey:
-    """Mixin for UUID primary key."""
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        index=True
+        index=True,
     )
-
-
-class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
-        nullable=False
+        nullable=False,
     )
 
 
 class SoftDeleteMixin:
     """Mixin for soft delete functionality."""
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        default=None
+        default=None,
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False
-    )
+    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    def soft_delete(self) -> None:
+        """Mark the record as deleted."""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
 
-class BaseModel(UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
-    """Base model with all common mixins."""
-    pass
+    def restore(self) -> None:
+        """Restore a deleted record."""
+        self.is_deleted = False
+        self.deleted_at = None

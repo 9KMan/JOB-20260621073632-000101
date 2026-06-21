@@ -1,6 +1,7 @@
+// README.md
 # FinaRo — AP Automation Core Engine
 
-## 3-Way Matching Engine for Invoice × Delivery Note × Purchase Order
+Accounts Payable Automation Engine with 3-Way Matching (Invoice × Delivery Note × Purchase Order).
 
-### Quick Start
+## Quick Start
 

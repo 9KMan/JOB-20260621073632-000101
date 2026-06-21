@@ -7,66 +7,56 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+class LoginRequest(BaseModel):
+    """Login request schema."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+
+
 class Token(BaseModel):
     """JWT token response."""
-    
+
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
-class TokenPayload(BaseModel):
-    """JWT token payload."""
-    
-    sub: str
-    exp: datetime
-    iat: datetime
-    type: str  # "access" or "refresh"
+class TokenData(BaseModel):
+    """Token payload data."""
+
+    sub: str | None = None
+    exp: datetime | None = None
+    permissions: list[str] = Field(default_factory=list)
 
 
-class UserBase(BaseModel):
-    """Base user schema."""
-    
+class UserCreate(BaseModel):
+    """Schema for creating a new user."""
+
     email: EmailStr
+    password: str = Field(..., min_length=8)
     full_name: str = Field(..., min_length=1, max_length=255)
     role: str = Field(default="user", max_length=50)
 
 
-class UserCreate(UserBase):
-    """User creation schema."""
-    
-    password: str = Field(..., min_length=8, max_length=100)
-    
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "email": "user@example.com",
-                "full_name": "John Doe",
-                "password": "securepassword123",
-                "role": "user"
-            }
-        }
-    )
-
-
 class UserUpdate(BaseModel):
-    """User update schema."""
-    
+    """Schema for updating a user."""
+
     email: Optional[EmailStr] = None
     full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
     role: Optional[str] = Field(None, max_length=50)
     is_active: Optional[bool] = None
 
 
 class UserResponse(BaseModel):
     """User response schema."""
-    
-    model_config = ConfigDict(from_attributes=True)
-    
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: UUID
-    email: EmailStr
+    email: str
     full_name: str
     role: str
     is_active: bool
@@ -75,24 +65,13 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-class UserLogin(BaseModel):
-    """User login schema."""
-    
-    email: EmailStr
-    password: str
-    
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "email": "user@example.com",
-                "password": "securepassword123"
-            }
-        }
-    )
+class UserMeResponse(BaseModel):
+    """Current user response schema."""
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-class PasswordChange(BaseModel):
-    """Password change schema."""
-    
-    current_password: str
-    new_password: str = Field(..., min_length=8, max_length=100)
+    id: UUID
+    email: str
+    full_name: str
+    role: str
+    is_active: bool

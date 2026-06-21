@@ -1,21 +1,16 @@
 // src/models/__init__.py
-"""Database models package."""
-from src.models.base import BaseModel, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin
+"""SQLAlchemy models for the AP Automation Engine."""
+from src.models.base import Base
 from src.models.user import User
-from src.models.vendor import Vendor
 from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from src.models.invoice import Invoice, InvoiceLine
 from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from src.models.match import Match, MatchLine, MatchDecision
-from src.models.balance import Balance, BalanceType
+from src.models.match import Match, MatchLine, MatchConfirmation
+from src.models.balance import BalanceLedger, BalanceEntry
 
 __all__ = [
-    "BaseModel",
-    "UUIDPrimaryKey",
-    "TimestampMixin",
-    "SoftDeleteMixin",
+    "Base",
     "User",
-    "Vendor",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "Invoice",
@@ -24,7 +19,7 @@ __all__ = [
     "DeliveryNoteLine",
     "Match",
     "MatchLine",
-    "MatchDecision",
-    "Balance",
-    "BalanceType",
+    "MatchConfirmation",
+    "BalanceLedger",
+    "BalanceEntry",
 ]

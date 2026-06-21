@@ -1,145 +1,110 @@
-# src/services/auth_service.py
+// src/services/auth_service.py
+"""Authentication service with JWT token handling."""
+from datetime import datetime, timedelta
 from typing import Optional
+from uuid import UUID
 
-from jose import JWTError
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    get_password_hash,
-    verify_password,
-)
+from src.config import get_settings
 from src.models.user import User
-from src.api.v1.schemas.auth import UserCreate, UserResponse
+from src.schemas.auth import Token, TokenData, UserCreate, UserResponse, UserMeResponse
+
+settings = get_settings()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class AuthService:
-    """Service for authentication and user management."""
+    """Service for handling authentication and user management."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_user_by_username(self, username: str) -> Optional[User]:
-        """Get user by username."""
-        result = await self.db.execute(
-            select(User).where(User.username == username)
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verify a password against its hash."""
+        return pwd_context.verify(plain_password, hashed_password)
+
+    def get_password_hash(self, password: str) -> str:
+        """Generate password hash."""
+        return pwd_context.hash(password)
+
+    def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+        """Create a JWT access token."""
+        to_encode = data.copy()
+        expire = datetime.utcnow() + (
+            expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
         )
-        return result.scalar_one_or_none()
+        to_encode.update({"exp": expire})
+        return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+    def decode_token(self, token: str) -> Optional[TokenData]:
+        """Decode and validate a JWT token."""
+        try:
+            payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+            return TokenData(
+                sub=payload.get("sub"),
+                exp=datetime.fromtimestamp(payload.get("exp", 0)),
+                permissions=payload.get("permissions", []),
+            )
+        except JWTError:
+            return None
 
     async def get_user_by_email(self, email: str) -> Optional[User]:
-        """Get user by email."""
-        result = await self.db.execute(
-            select(User).where(User.email == email)
-        )
+        """Get a user by email address."""
+        result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
-    async def get_user_by_id(self, user_id: str) -> Optional[User]:
-        """Get user by ID."""
-        result = await self.db.execute(
-            select(User).where(User.id == user_id)
-        )
+    async def get_user_by_id(self, user_id: UUID) -> Optional[User]:
+        """Get a user by ID."""
+        result = await self.db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
-    async def authenticate_user(self, username: str, password: str) -> Optional[User]:
-        """Authenticate a user by username and password."""
-        user = await self.get_user_by_username(username)
+    async def create_user(self, user_data: UserCreate) -> User:
+        """Create a new user."""
+        user = User(
+            email=user_data.email,
+            hashed_password=self.get_password_hash(user_data.password),
+            full_name=user_data.full_name,
+            role=user_data.role,
+        )
+        self.db.add(user)
+        await self.db.flush()
+        await self.db.refresh(user)
+        return user
+
+    async def authenticate_user(self, email: str, password: str) -> Optional[User]:
+        """Authenticate a user with email and password."""
+        user = await self.get_user_by_email(email)
         if not user:
             return None
-        if not verify_password(password, user.hashed_password):
+        if not self.verify_password(password, user.hashed_password):
             return None
         if not user.is_active:
             return None
         return user
 
-    async def create_user(self, user_data: UserCreate) -> User:
-        """Create a new user."""
-        # Check if username or email already exists
-        existing_user = await self.get_user_by_username(user_data.username)
-        if existing_user:
-            raise ValueError("Username already registered")
-        
-        existing_email = await self.get_user_by_email(user_data.email)
-        if existing_email:
-            raise ValueError("Email already registered")
-
-        # Create new user
-        user = User(
-            email=user_data.email,
-            username=user_data.username,
-            full_name=user_data.full_name,
-            hashed_password=get_password_hash(user_data.password),
-            role=user_data.role,
-            is_active=True,
-            is_superuser=False,
-        )
-        
-        self.db.add(user)
-        await self.db.flush()
-        await self.db.refresh(user)
-        
-        return user
-
-    def create_tokens(self, user: User) -> dict:
-        """Create access and refresh tokens for a user."""
+    async def create_token_for_user(self, user: User) -> Token:
+        """Create an access token for a user."""
         token_data = {
             "sub": str(user.id),
-            "username": user.username,
             "email": user.email,
             "role": user.role,
+            "permissions": ["read", "write"] if user.is_active else [],
         }
-        
-        return {
-            "access_token": create_access_token(token_data),
-            "refresh_token": create_refresh_token(token_data),
-            "token_type": "bearer",
-        }
+        access_token = self.create_access_token(token_data)
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+        )
 
-    async def refresh_access_token(self, refresh_token: str) -> Optional[dict]:
-        """Refresh access token using refresh token."""
-        try:
-            payload = decode_token(refresh_token)
-            if not payload or payload.get("type") != "refresh":
-                return None
-            
-            user_id = payload.get("sub")
-            if not user_id:
-                return None
-            
-            user = await self.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                return None
-            
-            return self.create_tokens(user)
-        except JWTError:
-            return None
+    def user_to_response(self, user: User) -> UserResponse:
+        """Convert User model to response schema."""
+        return UserResponse.model_validate(user)
 
-    async def update_user(self, user: User, **kwargs) -> User:
-        """Update user information."""
-        if "password" in kwargs:
-            kwargs["hashed_password"] = get_password_hash(kwargs.pop("password"))
-        
-        for key, value in kwargs.items():
-            if value is not None and hasattr(user, key):
-                setattr(user, key, value)
-        
-        await self.db.flush()
-        await self.db.refresh(user)
-        
-        return user
-
-    async def deactivate_user(self, user: User) -> User:
-        """Deactivate a user."""
-        user.is_active = False
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
-
-    async def activate_user(self, user: User) -> User:
-        """Activate a user."""
-        user.is_active = True
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
+    def user_to_me_response(self, user: User) -> UserMeResponse:
+        """Convert User model to me response schema."""
+        return UserMeResponse.model_validate(user)
