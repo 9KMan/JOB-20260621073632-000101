@@ -1,162 +1,282 @@
 // app/models/delivery_note.py
-"""Delivery Note and DNLine SQLAlchemy models."""
+"""Delivery Note models for AP automation."""
 
 import uuid
-from datetime import date
-from decimal import Decimal
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
-    Date,
+    DateTime,
+    Float,
     ForeignKey,
-    Index,
     Integer,
-    Numeric,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
-from app.models.enums import DNStatus
+from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.vendor import Vendor
+    from app.models.purchase_order import PurchaseOrder
+    from app.models.match import Match, MatchLine
+    from app.models.balance import BalanceLedger
 
 
-class DeliveryNote(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """
-    Delivery Note header model.
+class DeliveryNoteStatus(str):
+    """Delivery Note status enumeration."""
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    RECEIVED = "RECEIVED"
+    PARTIALLY_MATCHED = "PARTIALLY_MATCHED"
+    MATCHED = "MATCHED"
+    CANCELLED = "CANCELLED"
+
+
+class DeliveryNote(Base):
+    """Delivery Note (Goods Receipt) model."""
     
-    Represents goods received or delivered from vendors.
-    """
-
     __tablename__ = "delivery_notes"
-
-    # Vendor information
-    vendor_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    vendor_tax_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-
-    # DN details
-    dn_number: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    dn_date: Mapped[date] = mapped_column(Date, nullable=False)
-    receipt_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-
-    # Reference
-    po_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
-    matched_po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
+        primary_key=True,
+        default=uuid.uuid4,
     )
-
-    # Financial amounts
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
-
-    # Status
-    status: Mapped[DNStatus] = mapped_column(
-        String(20),
+    
+    # Delivery Note identification
+    dn_number: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
         nullable=False,
-        default=DNStatus.RECEIVED,
+    )
+    
+    vendor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vendors.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    
+    # Reference to PO
+    po_number: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        ForeignKey("purchase_orders.po_number", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
-
+    
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=DeliveryNoteStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    
+    # Dates
+    shipment_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    
+    receipt_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    
+    # Reference
+    reference_number: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    
     # Metadata
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    source_system: Mapped[str] = mapped_column(String(50), nullable=False, default="erp")
-
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    
+    source_system: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    
+    source_document_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    
     # Relationships
-    lines: Mapped[List["DNLine"]] = relationship(
-        "DNLine",
+    vendor: Mapped["Vendor"] = relationship(
+        "Vendor",
+        back_populates=None,
+    )
+    
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[po_number],
+    )
+    
+    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
         back_populates="delivery_note",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
-    matched_po: Mapped[Optional["PurchaseOrder"]] = relationship(
-        "PurchaseOrder",
-        foreign_keys=[matched_po_id],
-        backref="matched_delivery_notes",
-    )
-
-    # Table indexes
-    __table_args__ = (
-        Index("ix_dns_vendor_date", "vendor_id", "dn_date"),
-        Index("ix_dns_status_date", "status", "dn_date"),
-        Index("ix_dns_po_ref", "po_ref"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<DeliveryNote(id={self.id}, number={self.dn_number}, vendor={self.vendor_id})>"
-
-
-class DNLine(Base, UUIDMixin, TimestampMixin):
-    """
-    Delivery Note Line item model.
     
-    Represents individual line items on a delivery note.
-    """
+    matches: Mapped[list["Match"]] = relationship(
+        "Match",
+        back_populates="delivery_note",
+    )
+    
+    balance_entries: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
+        back_populates="delivery_note",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<DeliveryNote {self.dn_number}>"
+    
+    def to_dict(self, include_lines: bool = False) -> dict:
+        """Convert delivery note to dictionary."""
+        result = {
+            "id": str(self.id),
+            "dn_number": self.dn_number,
+            "vendor_id": str(self.vendor_id),
+            "po_number": self.po_number,
+            "status": self.status,
+            "shipment_date": self.shipment_date.isoformat() if self.shipment_date else None,
+            "receipt_date": self.receipt_date.isoformat() if self.receipt_date else None,
+            "reference_number": self.reference_number,
+            "notes": self.notes,
+            "created_by": self.created_by,
+            "source_system": self.source_system,
+            "source_document_id": self.source_document_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        
+        if include_lines:
+            result["lines"] = [line.to_dict() for line in self.lines]
+        
+        return result
 
-    __tablename__ = "dn_lines"
 
-    dn_id: Mapped[uuid.UUID] = mapped_column(
+class DeliveryNoteLine(Base):
+    """Delivery Note Line Item model."""
+    
+    __tablename__ = "delivery_note_lines"
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    
+    delivery_note_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        index=True,
         nullable=False,
+    )
+    
+    line_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    
+    # Product/Service information
+    sku: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
         index=True,
     )
-
-    # Line details
-    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    description: Mapped[str] = mapped_column(String(500), nullable=False)
-
-    # Product/Service info
-    product_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    product_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    unit_of_measure: Mapped[str] = mapped_column(String(20), nullable=False, default="EA")
-
-    # Quantities
-    quantity_delivered: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    quantity_received: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
+    
+    description: Mapped[str] = mapped_column(
+        String(500),
         nullable=False,
-        default=Decimal("0.000"),
     )
-
-    # Pricing (for matching)
-    unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 4), nullable=True)
-    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-
-    # Reference
-    po_line_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    matched_po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("po_lines.id", ondelete="SET NULL"),
+    
+    quantity: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+    )
+    
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(
+        String(20),
         nullable=True,
     )
-
-    # Delivery tracking
-    delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    is_accepted: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    # Relationship
-    delivery_note: Mapped["DeliveryNote"] = relationship("DeliveryNote", back_populates="lines")
-    matched_po_line: Mapped[Optional["POLine"]] = relationship(
-        "POLine",
-        foreign_keys=[matched_po_line_id],
-        backref="matched_dn_lines",
+    
+    # Reference
+    po_line_reference: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
     )
-
-    __table_args__ = (
-        Index("ix_dn_lines_dn_line", "dn_id", "line_number"),
-        Index("ix_dn_lines_product", "product_code"),
-        Index("ix_dn_lines_po_ref", "po_line_ref"),
+    
+    reference_line: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
     )
-
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    
+    # Relationships
+    delivery_note: Mapped["DeliveryNote"] = relationship(
+        "DeliveryNote",
+        back_populates="lines",
+    )
+    
     def __repr__(self) -> str:
-        return f"<DNLine(id={self.id}, line={self.line_number}, product={self.product_code})>"
-
-
-# Import for relationship resolution
-from app.models.purchase_order import PurchaseOrder, POLine
+        return f"<DeliveryNoteLine {self.line_number}: {self.description[:30]}>"
+    
+    def to_dict(self) -> dict:
+        """Convert DN line to dictionary."""
+        return {
+            "id": str(self.id),
+            "delivery_note_id": str(self.delivery_note_id),
+            "line_number": self.line_number,
+            "sku": self.sku,
+            "description": self.description,
+            "quantity": self.quantity,
+            "unit_of_measure": self.unit_of_measure,
+            "po_line_reference": self.po_line_reference,
+            "reference_line": self.reference_line,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

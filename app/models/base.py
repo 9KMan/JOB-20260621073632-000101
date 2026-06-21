@@ -1,29 +1,31 @@
 // app/models/base.py
-"""SQLAlchemy declarative base and mixins."""
+"""Base model with common fields and mixins."""
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class."""
-
-    pass
-
-
-class TimestampMixin:
-    """Mixin providing created_at and updated_at timestamp columns."""
-
+class BaseModel:
+    """Base model with common fields for all tables."""
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
+    
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -32,36 +34,44 @@ class TimestampMixin:
     )
 
 
-class UUIDMixin:
-    """Mixin providing UUID primary key."""
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+class TimestampMixin:
+    """Mixin for timestamp tracking."""
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
 
 class SoftDeleteMixin:
-    """Mixin providing soft delete functionality."""
-
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+    """Mixin for soft delete functionality."""
+    
+    deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,
     )
+    
     is_deleted: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
     )
 
-    def soft_delete(self) -> None:
-        """Mark the record as deleted."""
-        self.is_deleted = True
-        self.deleted_at = datetime.now(timezone.utc)
 
-    def restore(self) -> None:
-        """Restore a soft-deleted record."""
-        self.is_deleted = False
-        self.deleted_at = None
+class UUIDPrimaryKeyMixin:
+    """Mixin for UUID primary key."""
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
