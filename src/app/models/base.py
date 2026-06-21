@@ -1,44 +1,43 @@
 // src/app/models/base.py
-"""Base model classes with common fields."""
+"""Base model classes with common functionality."""
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Column, DateTime, Boolean, String
+from sqlalchemy.orm import declarative_base
 
-from app.database import Base
+Base = declarative_base()
 
 
 class TimestampMixin:
-    """Mixin that adds created_at and updated_at timestamps."""
+    """Mixin for created_at and updated_at timestamps."""
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
         nullable=False,
     )
 
 
-class UUIDMixin:
-    """Mixin that adds UUID primary key."""
+class SoftDeleteMixin:
+    """Mixin for soft delete functionality."""
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
+    deleted_at = Column(DateTime, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+
+    def soft_delete(self) -> None:
+        """Mark record as deleted."""
+        self.deleted_at = datetime.utcnow()
+        self.is_deleted = True
 
 
-class BaseModel(Base, TimestampMixin, UUIDMixin):
-    """Base model combining all common mixins."""
+class BaseModel(Base, TimestampMixin, SoftDeleteMixin):
+    """Base model with UUID primary key and common mixins."""
 
     __abstract__ = True
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

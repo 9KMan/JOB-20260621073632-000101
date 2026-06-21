@@ -1,149 +1,62 @@
 // src/app/models/purchase_order.py
-"""Purchase Order model."""
+"""Purchase Order and Purchase Order Line models."""
 
-from decimal import Decimal
-from enum import Enum
-from uuid import UUID
+from sqlalchemy import Column, String, Numeric, Integer, ForeignKey, Date
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
 
-from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
-from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.models.base import BaseModel
-
-
-class POStatus(str, Enum):
-    """Purchase order status enumeration."""
-
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    APPROVED = "approved"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
+from src.app.models.base import BaseModel
 
 
 class PurchaseOrder(BaseModel):
-    """Purchase Order model."""
+    """Purchase Order header entity."""
 
     __tablename__ = "purchase_orders"
 
-    po_number: Mapped[str] = mapped_column(
-        String(50),
-        unique=True,
-        index=True,
-        nullable=False,
+    po_number = Column(String(50), unique=True, nullable=False, index=True)
+    supplier_id = Column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False
     )
-    supplier_id: Mapped[str] = mapped_column(
-        String(100),
-        index=True,
-        nullable=False,
-    )
-    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    supplier_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    status: Mapped[POStatus] = mapped_column(
-        SQLEnum(POStatus),
-        default=POStatus.DRAFT,
-        nullable=False,
-    )
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    tax_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    po_date: Mapped[Date] = mapped_column(Date, nullable=False)
-    expected_delivery_date: Mapped[Date | None] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_fully_matched: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-    )
+    order_date = Column(Date, nullable=False)
+    expected_delivery_date = Column(Date, nullable=True)
+    total_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    currency = Column(String(3), nullable=False, default="USD")
+    status = Column(String(20), nullable=False, default="OPEN")
+    notes = Column(String(1000), nullable=True)
 
     # Relationships
-    lines: Mapped[list["POLine"]] = relationship(
-        "POLine",
+    supplier = relationship("Supplier", back_populates="purchase_orders")
+    lines = relationship(
+        "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
-    )
-    invoice_matches: Mapped[list["Match"]] = relationship(
-        "Match",
-        foreign_keys="Match.po_id",
-        back_populates="purchase_order",
-    )
-    delivery_note_matches: Mapped[list["Match"]] = relationship(
-        "Match",
-        foreign_keys="Match.po_id",
-        back_populates="purchase_order_for_dn",
+        lazy="joined",
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number}>"
+        return f"<PurchaseOrder(id={self.id}, po_number={self.po_number})>"
 
 
-class POLine(BaseModel):
-    """Purchase Order Line Item model."""
+class PurchaseOrderLine(BaseModel):
+    """Purchase Order line item entity."""
 
-    __tablename__ = "po_lines"
+    __tablename__ = "purchase_order_lines"
 
-    po_id: Mapped[UUID] = mapped_column(
+    purchase_order_id = Column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        index=True,
         nullable=False,
     )
-    line_number: Mapped[int] = mapped_column(nullable=False)
-    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    product_description: Mapped[str] = mapped_column(String(500), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA")
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    tax_rate: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        default=Decimal("0.00"),
-    )
-    tax_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-    )
-    expected_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-    delivered_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        default=Decimal("0.00"),
-    )
+    line_number = Column(Integer, nullable=False)
+    item_code = Column(String(50), nullable=False)
+    description = Column(String(500), nullable=True)
+    quantity = Column(Numeric(12, 3), nullable=False)
+    unit_price = Column(Numeric(15, 4), nullable=False)
+    line_total = Column(Numeric(15, 2), nullable=False)
+    uom = Column(String(20), nullable=True)
 
     # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        back_populates="lines",
-    )
-    matched_lines: Mapped[list["MatchLine"]] = relationship(
-        "MatchLine",
-        back_populates="po_line",
-    )
+    purchase_order = relationship("PurchaseOrder", back_populates="lines")
 
     def __repr__(self) -> str:
-        return f"<POLine {self.line_number} - {self.product_code}>"
-
-
-# Import at bottom to avoid circular imports
-from app.models.invoice import Invoice, InvoiceLine
-from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.models.match import Match, MatchLine
+        return f"<PurchaseOrderLine(id={self.id}, line_number={self.line_number})>"

@@ -1,44 +1,54 @@
 // src/app/schemas/supplier.py
-"""
-Supplier schemas.
-"""
-from typing import Optional, List
-from datetime import datetime
-from pydantic import BaseModel, Field, EmailStr
+"""Supplier Pydantic schemas."""
 
-from app.schemas.common import BaseSchema, TimestampMixin
+from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, EmailStr, Field
 
 
 class SupplierBase(BaseModel):
     """Base supplier schema."""
-    code: str = Field(..., min_length=1, max_length=50)
+
     name: str = Field(..., min_length=1, max_length=255)
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, max_length=50)
-    address: Optional[str] = None
-    tax_id: Optional[str] = Field(default=None, max_length=50)
+    code: str = Field(..., min_length=1, max_length=50)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = Field(None, max_length=500)
     is_active: bool = True
 
 
 class SupplierCreate(SupplierBase):
-    """Supplier creation schema."""
+    """Schema for creating a supplier."""
+
     pass
 
 
 class SupplierUpdate(BaseModel):
-    """Supplier update schema."""
-    code: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, max_length=50)
-    address: Optional[str] = None
-    tax_id: Optional[str] = Field(default=None, max_length=50)
+    """Schema for updating a supplier."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
 
 
-class SupplierResponse(SupplierBase, TimestampMixin):
-    """Supplier response schema."""
+class SupplierResponse(SupplierBase):
+    """Schema for supplier response."""
+
     id: str
-    purchase_orders_count: Optional[int] = 0
-    invoices_count: Optional[int] = 0
-    delivery_notes_count: Optional[int] = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierListResponse(BaseModel):
+    """Schema for paginated supplier list response."""
+
+    items: List[SupplierResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

@@ -1,118 +1,89 @@
 // src/app/schemas/purchase_order.py
-"""Purchase Order schemas."""
+"""Purchase Order Pydantic schemas."""
 
-from datetime import date, datetime
+from datetime import datetime, date
+from typing import Optional, List
 from decimal import Decimal
-from typing import Optional
-from uuid import UUID
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from app.schemas.common import BaseSchema, TimestampMixin, UUIDMixin
+from src.app.schemas.supplier import SupplierResponse
 
 
-class POLineBase(BaseModel):
-    """PO Line base schema."""
+class PurchaseOrderLineBase(BaseModel):
+    """Base purchase order line schema."""
 
-    line_number: int = Field(ge=1)
-    product_code: str = Field(max_length=100)
-    product_description: str = Field(max_length=500)
-    quantity: Decimal = Field(ge=0)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(ge=0)
-    line_amount: Decimal = Field(ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
-    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    expected_quantity: Decimal = Field(ge=0)
-    delivered_quantity: Decimal = Field(default=Decimal("0.00"), ge=0)
+    line_number: int = Field(..., ge=1)
+    item_code: str = Field(..., min_length=1, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    quantity: Decimal = Field(..., gt=0)
+    unit_price: Decimal = Field(..., ge=0)
+    line_total: Decimal = Field(..., ge=0)
+    uom: Optional[str] = Field(None, max_length=20)
 
 
-class POLineCreate(POLineBase):
-    """PO Line creation schema."""
+class PurchaseOrderLineCreate(PurchaseOrderLineBase):
+    """Schema for creating a purchase order line."""
 
     pass
 
 
-class POLineUpdate(BaseModel):
-    """PO Line update schema."""
+class PurchaseOrderLineResponse(PurchaseOrderLineBase):
+    """Schema for purchase order line response."""
 
-    product_code: Optional[str] = Field(default=None, max_length=100)
-    product_description: Optional[str] = Field(default=None, max_length=500)
-    quantity: Optional[Decimal] = Field(default=None, ge=0)
-    unit_of_measure: Optional[str] = Field(default=None, max_length=20)
-    unit_price: Optional[Decimal] = Field(default=None, ge=0)
-    line_amount: Optional[Decimal] = Field(default=None, ge=0)
-    tax_rate: Optional[Decimal] = Field(default=None, ge=0)
-    tax_amount: Optional[Decimal] = Field(default=None, ge=0)
-    expected_quantity: Optional[Decimal] = Field(default=None, ge=0)
-    delivered_quantity: Optional[Decimal] = Field(default=None, ge=0)
+    id: str
+    purchase_order_id: str
+    created_at: datetime
+    updated_at: datetime
 
-
-class POLineResponse(POLineBase, UUIDMixin, TimestampMixin):
-    """PO Line response schema."""
-
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
 
 class PurchaseOrderBase(BaseModel):
-    """Purchase Order base schema."""
+    """Base purchase order schema."""
 
-    po_number: str = Field(max_length=50)
-    supplier_id: str = Field(max_length=100)
-    supplier_name: str = Field(max_length=255)
-    supplier_reference: Optional[str] = Field(default=None, max_length=100)
-    status: str = Field(default="draft")
-    currency: str = Field(default="USD", max_length=3)
-    total_amount: Decimal = Field(ge=0)
-    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    po_date: date
+    po_number: str = Field(..., min_length=1, max_length=50)
+    supplier_id: str
+    order_date: date
     expected_delivery_date: Optional[date] = None
-    notes: Optional[str] = None
+    total_amount: Decimal = Field(..., ge=0)
+    currency: str = Field(default="USD", max_length=3)
+    status: str = Field(default="OPEN", max_length=20)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Purchase Order creation schema."""
+    """Schema for creating a purchase order."""
 
-    lines: list[POLineCreate] = Field(default_factory=list)
+    lines: List[PurchaseOrderLineCreate] = Field(..., min_length=1)
 
 
 class PurchaseOrderUpdate(BaseModel):
-    """Purchase Order update schema."""
+    """Schema for updating a purchase order."""
 
-    supplier_id: Optional[str] = Field(default=None, max_length=100)
-    supplier_name: Optional[str] = Field(default=None, max_length=255)
-    supplier_reference: Optional[str] = Field(default=None, max_length=100)
-    status: Optional[str] = None
-    currency: Optional[str] = Field(default=None, max_length=3)
-    total_amount: Optional[Decimal] = Field(default=None, ge=0)
-    tax_amount: Optional[Decimal] = Field(default=None, ge=0)
-    po_date: Optional[date] = None
     expected_delivery_date: Optional[date] = None
-    notes: Optional[str] = None
-    is_active: Optional[bool] = None
+    status: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
-class PurchaseOrderResponse(PurchaseOrderBase, UUIDMixin, TimestampMixin):
-    """Purchase Order response schema."""
+class PurchaseOrderResponse(PurchaseOrderBase):
+    """Schema for purchase order response."""
 
-    model_config = ConfigDict(from_attributes=True)
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    lines: List[PurchaseOrderLineResponse] = []
+    supplier: Optional[SupplierResponse] = None
 
-    is_fully_matched: bool
-    is_active: bool
-    lines: list[POLineResponse] = Field(default_factory=list)
+    class Config:
+        from_attributes = True
 
 
 class PurchaseOrderListResponse(BaseModel):
-    """Purchase Order list response schema."""
+    """Schema for paginated purchase order list response."""
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    po_number: str
-    supplier_id: str
-    supplier_name: str
-    status: str
-    total_amount: Decimal
-    po_date: date
-    is_fully_matched: bool
-    created_at: datetime
+    items: List[PurchaseOrderResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

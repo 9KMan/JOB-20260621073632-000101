@@ -1,329 +1,400 @@
 // src/app/services/matching_service.py
-"""Matching service - Orchestrates the 3-layer matching process."""
+"""Matching service for 3-way matching operations."""
 
-from datetime import date, datetime
+from typing import List, Optional, Tuple
 from decimal import Decimal
-from typing import Any
-from uuid import UUID
+from datetime import date, timedelta
+from sqlalchemy.orm import Session
 
-from sqlalchemy.orm import Session, joinedload
-
-from app.models import (
-    Invoice,
-    InvoiceLine,
-    DeliveryNote,
-    DeliveryNoteLine,
-    PurchaseOrder,
-    POLine,
-    Match,
-    MatchLine,
-    MatchStatus,
-    MatchResult,
+from src.app.config import get_settings
+from src.app.models import (
+    Invoice, InvoiceLine,
+    DeliveryNote, DeliveryNoteLine,
+    PurchaseOrder, PurchaseOrderLine,
+    MatchResult, MatchDecision, HumanConfirmation,
+    BalanceLedger, BalanceType
 )
-from app.services.layer1_anchor import Layer1AnchorService
-from app.services.layer2_cascade import Layer2CascadeService
-from app.services.layer3_balance import Layer3BalanceService
-from app.services.decision_engine import DecisionEngine
+from src.app.engine.layer1_anchor import Layer1Anchor
+from src.app.engine.layer2_cascade import Layer2Cascade
+from src.app.engine.layer3_balance import Layer3Balance
+from src.app.engine.decision_router import DecisionRouter
+
+settings = get_settings()
 
 
 class MatchingService:
-    """Service for orchestrating the 3-way matching process."""
+    """Service for performing 3-way matching operations."""
 
-    def __init__(self, db: Session):
-        """Initialize matching service."""
-        self.db = db
-        self.layer1 = Layer1AnchorService(db)
-        self.layer2 = Layer2CascadeService(db)
-        self.layer3 = Layer3BalanceService(db)
-        self.decision_engine = DecisionEngine(db)
+    def __init__(self):
+        """Initialize matching service with engine components."""
+        self.layer1 = Layer1Anchor()
+        self.layer2 = Layer2Cascade()
+        self.layer3 = Layer3Balance()
+        self.decision_router = DecisionRouter()
 
     def match_invoice_to_po(
         self,
-        invoice_id: UUID,
-        po_id: UUID | None = None,
-    ) -> Match | None:
-        """
-        Match an invoice against purchase orders.
-        
-        Layer 1: Anchor to PO if not specified
-        Layer 2: Cascade matching with scoring
-        Layer 3: Balance resolution
-        Decision: Route to appropriate status
-        """
-        invoice = self.db.query(Invoice).options(
-            joinedload(Invoice.lines)
-        ).filter(Invoice.id == invoice_id).first()
-        
+        db: Session,
+        invoice_id: str,
+        po_id: Optional[str] = None
+    ) -> Optional[MatchResult]:
+        """Match an invoice against a purchase order."""
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if not invoice:
             return None
 
         # Layer 1: Anchor to PO
-        if po_id:
-            po = self.db.query(PurchaseOrder).options(
-                joinedload(PurchaseOrder.lines)
-            ).filter(PurchaseOrder.id == po_id).first()
-        else:
-            po = self.layer1.find_anchor_po(
-                supplier_id=invoice.supplier_id,
-                po_reference=invoice.po_reference,
+        anchor_po = po_id
+        if not anchor_po:
+            anchor_po = self.layer1.find_anchor_po(
+                db,
+                invoice.supplier_id,
+                invoice.po_reference,
+                invoice.invoice_number
             )
 
+        if not anchor_po:
+            return self._create_unmatched_result(
+                db, invoice, None, None, "INVOICE_PO",
+                "No matching purchase order found"
+            )
+
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == anchor_po).first()
         if not po:
             return None
 
         # Layer 2: Cascade matching
-        match_result = self.layer2.match_invoice_to_po(invoice, po)
-
-        if not match_result:
-            return None
-
-        # Create match record
-        match = self._create_match_record(
-            invoice=invoice,
-            po=po,
-            match_type="invoice_po",
-            scoring=match_result["scoring"],
-            lines=match_result["lines"],
-        )
+        match_score, scores, variance = self.layer2.match_invoice_po(invoice, po)
 
         # Layer 3: Balance resolution
-        self.layer3.update_balances(match, invoice, po)
+        balance_info = self.layer3.check_balance(db, invoice, po, "INVOICE_PO")
 
         # Decision routing
-        match = self.decision_engine.route_decision(match)
+        decision = self.decision_router.route(match_score, "INVOICE_PO")
 
-        return match
+        # Create match result
+        match_result = MatchResult(
+            invoice_id=invoice_id,
+            purchase_order_id=po.id,
+            match_type="INVOICE_PO",
+            match_score=Decimal(str(match_score)),
+            line_level_score=Decimal(str(scores.get("line_level", 0))),
+            amount_score=Decimal(str(scores.get("amount", 0))),
+            date_score=Decimal(str(scores.get("date", 0))),
+            decision=decision.value,
+            auto_processed="TRUE" if decision != MatchDecision.PENDING else "FALSE",
+            invoice_amount=invoice.total_amount,
+            po_amount=po.total_amount,
+            variance_amount=Decimal(str(variance.get("amount", 0))),
+            invoice_quantity=sum(line.quantity for line in invoice.lines),
+            po_quantity=sum(line.quantity for line in po.lines),
+            variance_quantity=Decimal(str(variance.get("quantity", 0))),
+            details=self._format_match_details(scores, variance),
+            discrepancy_notes=self._format_discrepancy_notes(variance)
+        )
+
+        db.add(match_result)
+        db.commit()
+        db.refresh(match_result)
+
+        # Update balance ledger if partial match
+        if decision == MatchDecision.CONFIRMED:
+            self.layer3.update_balance_ledger(
+                db, match_result, invoice, po, None, balance_info
+            )
+
+        return match_result
 
     def match_delivery_note_to_po(
         self,
-        dn_id: UUID,
-        po_id: UUID | None = None,
-    ) -> Match | None:
-        """
-        Match a delivery note against purchase orders.
-        
-        Layer 1: Anchor to PO if not specified
-        Layer 2: Cascade matching with scoring
-        Layer 3: Balance resolution
-        Decision: Route to appropriate status
-        """
-        dn = self.db.query(DeliveryNote).options(
-            joinedload(DeliveryNote.lines)
-        ).filter(DeliveryNote.id == dn_id).first()
-        
+        db: Session,
+        delivery_note_id: str,
+        po_id: Optional[str] = None
+    ) -> Optional[MatchResult]:
+        """Match a delivery note against a purchase order."""
+        dn = db.query(DeliveryNote).filter(DeliveryNote.id == delivery_note_id).first()
         if not dn:
             return None
 
         # Layer 1: Anchor to PO
-        if po_id:
-            po = self.db.query(PurchaseOrder).options(
-                joinedload(PurchaseOrder.lines)
-            ).filter(PurchaseOrder.id == po_id).first()
-        else:
-            po = self.layer1.find_anchor_po(
-                supplier_id=dn.supplier_id,
-                po_reference=dn.po_reference,
+        anchor_po = po_id
+        if not anchor_po:
+            anchor_po = self.layer1.find_anchor_po(
+                db,
+                dn.supplier_id,
+                dn.po_reference,
+                dn.dn_number
             )
 
+        if not anchor_po:
+            return self._create_unmatched_result(
+                db, None, delivery_note_id, None, "DELIVERY_NOTE_PO",
+                "No matching purchase order found"
+            )
+
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == anchor_po).first()
         if not po:
             return None
 
         # Layer 2: Cascade matching
-        match_result = self.layer2.match_dn_to_po(dn, po)
-
-        if not match_result:
-            return None
-
-        # Create match record
-        match = self._create_match_record(
-            dn=dn,
-            po=po,
-            match_type="dn_po",
-            scoring=match_result["scoring"],
-            lines=match_result["lines"],
-        )
+        match_score, scores, variance = self.layer2.match_dn_po(dn, po)
 
         # Layer 3: Balance resolution
-        self.layer3.update_dn_balances(match, dn, po)
+        balance_info = self.layer3.check_balance(db, None, po, "DELIVERY_NOTE_PO", dn)
 
         # Decision routing
-        match = self.decision_engine.route_decision(match)
+        decision = self.decision_router.route(match_score, "DELIVERY_NOTE_PO")
 
-        return match
-
-    def match_invoice_to_delivery_note(
-        self,
-        invoice_id: UUID,
-        dn_id: UUID,
-    ) -> Match | None:
-        """
-        Match an invoice against a delivery note.
-        
-        Layer 2: Direct cascade matching
-        Decision: Route to appropriate status
-        """
-        invoice = self.db.query(Invoice).options(
-            joinedload(Invoice.lines)
-        ).filter(Invoice.id == invoice_id).first()
-        
-        dn = self.db.query(DeliveryNote).options(
-            joinedload(DeliveryNote.lines)
-        ).filter(DeliveryNote.id == dn_id).first()
-        
-        if not invoice or not dn:
-            return None
-
-        # Layer 2: Cascade matching
-        match_result = self.layer2.match_invoice_to_dn(invoice, dn)
-
-        if not match_result:
-            return None
-
-        # Create match record
-        match = self._create_match_record(
-            invoice=invoice,
-            dn=dn,
-            match_type="invoice_dn",
-            scoring=match_result["scoring"],
-            lines=match_result["lines"],
+        # Create match result
+        match_result = MatchResult(
+            delivery_note_id=delivery_note_id,
+            purchase_order_id=po.id,
+            match_type="DELIVERY_NOTE_PO",
+            match_score=Decimal(str(match_score)),
+            line_level_score=Decimal(str(scores.get("line_level", 0))),
+            amount_score=Decimal(str(scores.get("amount", 0))),
+            date_score=Decimal(str(scores.get("date", 0))),
+            decision=decision.value,
+            auto_processed="TRUE" if decision != MatchDecision.PENDING else "FALSE",
+            dn_amount=dn.total_amount,
+            po_amount=po.total_amount,
+            variance_amount=Decimal(str(variance.get("amount", 0))),
+            dn_quantity=sum(line.quantity for line in dn.lines),
+            po_quantity=sum(line.quantity for line in po.lines),
+            variance_quantity=Decimal(str(variance.get("quantity", 0))),
+            details=self._format_match_details(scores, variance),
+            discrepancy_notes=self._format_discrepancy_notes(variance)
         )
 
-        # Decision routing
-        match = self.decision_engine.route_decision(match)
+        db.add(match_result)
+        db.commit()
+        db.refresh(match_result)
 
-        return match
+        # Update balance ledger if partial match
+        if decision == MatchDecision.CONFIRMED:
+            self.layer3.update_balance_ledger(
+                db, match_result, None, po, dn, balance_info
+            )
 
-    def perform_three_way_match(
+        return match_result
+
+    def match_three_way(
         self,
-        invoice_id: UUID,
-        dn_id: UUID,
-        po_id: UUID | None = None,
-    ) -> Match | None:
-        """
-        Perform complete 3-way matching.
-        
-        Matches Invoice ↔ Delivery Note ↔ Purchase Order
-        """
-        invoice = self.db.query(Invoice).options(
-            joinedload(Invoice.lines)
-        ).filter(Invoice.id == invoice_id).first()
-        
-        dn = self.db.query(DeliveryNote).options(
-            joinedload(DeliveryNote.lines)
-        ).filter(DeliveryNote.id == dn_id).first()
-        
-        if not invoice or not dn:
+        db: Session,
+        invoice_id: str,
+        delivery_note_id: Optional[str] = None,
+        po_id: Optional[str] = None
+    ) -> Optional[MatchResult]:
+        """Perform full 3-way matching."""
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not invoice:
             return None
 
-        # Layer 1: Find anchor PO
-        if po_id:
-            po = self.db.query(PurchaseOrder).options(
-                joinedload(PurchaseOrder.lines)
-            ).filter(PurchaseOrder.id == po_id).first()
-        else:
-            po = self.layer1.find_anchor_po(
-                supplier_id=invoice.supplier_id,
-                po_reference=invoice.po_reference or dn.po_reference,
+        # Layer 1: Anchor to PO
+        anchor_po = po_id
+        if not anchor_po:
+            anchor_po = self.layer1.find_anchor_po(
+                db,
+                invoice.supplier_id,
+                invoice.po_reference,
+                invoice.invoice_number
             )
+
+        if not anchor_po:
+            return None
+
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == anchor_po).first()
+        if not po:
+            return None
+
+        # Find delivery note if not provided
+        if not delivery_note_id:
+            delivery_note_id = self._find_matching_dn(
+                db, invoice.supplier_id, po.id
+            )
+
+        dn = None
+        if delivery_note_id:
+            dn = db.query(DeliveryNote).filter(
+                DeliveryNote.id == delivery_note_id
+            ).first()
 
         # Layer 2: Three-way matching
-        match_result = self.layer2.perform_three_way_match(invoice, dn, po)
+        match_score, scores, variance = self.layer2.match_three_way(invoice, dn, po)
+
+        # Layer 3: Balance resolution
+        balance_info = self.layer3.check_balance(db, invoice, po, "THREE_WAY", dn)
+
+        # Decision routing
+        decision = self.decision_router.route(match_score, "THREE_WAY")
+
+        # Create match result
+        match_result = MatchResult(
+            invoice_id=invoice_id,
+            delivery_note_id=delivery_note_id,
+            purchase_order_id=po.id,
+            match_type="THREE_WAY",
+            match_score=Decimal(str(match_score)),
+            line_level_score=Decimal(str(scores.get("line_level", 0))),
+            amount_score=Decimal(str(scores.get("amount", 0))),
+            date_score=Decimal(str(scores.get("date", 0))),
+            decision=decision.value,
+            auto_processed="TRUE" if decision != MatchDecision.PENDING else "FALSE",
+            invoice_amount=invoice.total_amount,
+            po_amount=po.total_amount,
+            dn_amount=dn.total_amount if dn else None,
+            variance_amount=Decimal(str(variance.get("amount", 0))),
+            details=self._format_match_details(scores, variance),
+            discrepancy_notes=self._format_discrepancy_notes(variance)
+        )
+
+        db.add(match_result)
+        db.commit()
+        db.refresh(match_result)
+
+        # Update balance ledger
+        if decision == MatchDecision.CONFIRMED:
+            self.layer3.update_balance_ledger(
+                db, match_result, invoice, po, dn, balance_info
+            )
+
+        return match_result
+
+    def confirm_match(
+        self,
+        db: Session,
+        match_result_id: str,
+        confirmation: HumanConfirmation
+    ) -> Optional[MatchResult]:
+        """Apply human confirmation to a match result."""
+        match_result = db.query(MatchResult).filter(
+            MatchResult.id == match_result_id
+        ).first()
 
         if not match_result:
             return None
 
-        # Create match record
-        match = self._create_match_record(
-            invoice=invoice,
-            dn=dn,
-            po=po,
-            match_type="three_way",
-            scoring=match_result["scoring"],
-            lines=match_result["lines"],
-        )
+        # Add confirmation
+        confirmation.match_result_id = match_result_id
+        db.add(confirmation)
 
-        # Layer 3: Balance resolution for all documents
-        if po:
-            self.layer3.update_balances(match, invoice, po)
-            self.layer3.update_dn_balances(match, dn, po)
+        # Update decision
+        match_result.decision = confirmation.new_decision
+        match_result.auto_processed = "FALSE"
 
-        # Decision routing
-        match = self.decision_engine.route_decision(match)
+        # Apply confidence boost for future matching
+        if confirmation.confidence_boost:
+            self._apply_learning_boost(db, match_result, confirmation.confidence_boost)
 
-        return match
+        db.commit()
+        db.refresh(match_result)
 
-    def _create_match_record(
+        return match_result
+
+    def get_match_summary(self, db: Session) -> dict:
+        """Get summary of all matches."""
+        total = db.query(MatchResult).filter(MatchResult.is_deleted == False).count()  # noqa: E712
+        
+        confirmed = db.query(MatchResult).filter(
+            MatchResult.is_deleted == False,  # noqa: E712
+            MatchResult.decision == MatchDecision.CONFIRMED.value
+        ).count()
+
+        pending = db.query(MatchResult).filter(
+            MatchResult.is_deleted == False,  # noqa: E712
+            MatchResult.decision == MatchDecision.PENDING.value
+        ).count()
+
+        rejected = db.query(MatchResult).filter(
+            MatchResult.is_deleted == False,  # noqa: E712
+            MatchResult.decision == MatchDecision.REJECTED.value
+        ).count()
+
+        auto_approved = db.query(MatchResult).filter(
+            MatchResult.is_deleted == False,  # noqa: E712
+            MatchResult.decision == MatchDecision.CONFIRMED.value,
+            MatchResult.auto_processed == "TRUE"
+        ).count()
+
+        human_review = confirmed - auto_approved
+
+        return {
+            "total_matches": total,
+            "confirmed": confirmed,
+            "pending": pending,
+            "rejected": rejected,
+            "auto_approved": auto_approved,
+            "human_review": human_review
+        }
+
+    def _find_matching_dn(
         self,
-        invoice: Invoice | None = None,
-        dn: DeliveryNote | None = None,
-        po: PurchaseOrder | None = None,
-        match_type: str = "",
-        scoring: dict[str, Decimal] | None = None,
-        lines: list[dict[str, Any]] | None = None,
-    ) -> Match:
-        """Create a match record with line items."""
-        scoring = scoring or {}
-        lines = lines or []
+        db: Session,
+        supplier_id: str,
+        po_id: str
+    ) -> Optional[str]:
+        """Find matching delivery note for given supplier and PO."""
+        dn = db.query(DeliveryNote).filter(
+            DeliveryNote.supplier_id == supplier_id,
+            DeliveryNote.po_reference == db.query(PurchaseOrder.po_number).filter(
+                PurchaseOrder.id == po_id
+            ).scalar_subquery(),
+            DeliveryNote.is_deleted == False  # noqa: E712
+        ).first()
 
-        match = Match(
+        return dn.id if dn else None
+
+    def _create_unmatched_result(
+        self,
+        db: Session,
+        invoice: Optional[Invoice],
+        delivery_note: Optional[DeliveryNote],
+        po: Optional[PurchaseOrder],
+        match_type: str,
+        notes: str
+    ) -> MatchResult:
+        """Create a rejected match result for unmatched documents."""
+        match_result = MatchResult(
             invoice_id=invoice.id if invoice else None,
-            dn_id=dn.id if dn else None,
-            po_id=po.id if po else None,
+            delivery_note_id=delivery_note.id if delivery_note else None,
+            purchase_order_id=po.id if po else None,
             match_type=match_type,
-            status=MatchStatus.PENDING,
-            result=MatchResult.PARTIAL_MATCH
-            if scoring.get("overall_score", 0) < 100
-            else MatchResult.FULL_MATCH,
-            overall_score=scoring.get("overall_score", Decimal("0.00")),
-            line_level_score=scoring.get("line_level_score", Decimal("0.00")),
-            amount_score=scoring.get("amount_score", Decimal("0.00")),
-            date_score=scoring.get("date_score", Decimal("0.00")),
-            invoice_amount=invoice.total_amount if invoice else None,
-            dn_amount=dn.total_amount if dn else None,
-            po_amount=po.total_amount if po else None,
-            variance_amount=scoring.get("variance_amount", Decimal("0.00")),
-            match_date=date.today(),
-            scoring_details={
-                "line_matches": len([l for l in lines if l.get("score", 0) >= 70]),
-                "total_lines": len(lines),
-            },
+            match_score=Decimal("0"),
+            decision=MatchDecision.REJECTED.value,
+            auto_processed="TRUE",
+            discrepancy_notes=notes
         )
+        db.add(match_result)
+        db.commit()
+        db.refresh(match_result)
+        return match_result
 
-        self.db.add(match)
-        self.db.flush()
+    def _format_match_details(self, scores: dict, variance: dict) -> str:
+        """Format match details as string."""
+        details = []
+        details.append(f"Line Level Score: {scores.get('line_level', 0):.2%}")
+        details.append(f"Amount Score: {scores.get('amount', 0):.2%}")
+        details.append(f"Date Score: {scores.get('date', 0):.2%}")
+        return "; ".join(details)
 
-        # Create line matches
-        for line_data in lines:
-            match_line = MatchLine(
-                match_id=match.id,
-                invoice_line_id=line_data.get("invoice_line_id"),
-                dn_line_id=line_data.get("dn_line_id"),
-                po_line_id=line_data.get("po_line_id"),
-                match_type=line_data.get("match_type", match_type),
-                score=line_data.get("score", Decimal("0.00")),
-                quantity_match=line_data.get("quantity_match", False),
-                price_match=line_data.get("price_match", False),
-                product_match=line_data.get("product_match", False),
-                invoice_quantity=line_data.get("invoice_quantity"),
-                dn_quantity=line_data.get("dn_quantity"),
-                po_quantity=line_data.get("po_quantity"),
-                matched_quantity=line_data.get("matched_quantity", Decimal("0.00")),
-                invoice_amount=line_data.get("invoice_amount"),
-                po_amount=line_data.get("po_amount"),
-                variance_quantity=line_data.get("variance_quantity", Decimal("0.00")),
-                variance_amount=line_data.get("variance_amount", Decimal("0.00")),
-            )
-            self.db.add(match_line)
+    def _format_discrepancy_notes(self, variance: dict) -> str:
+        """Format discrepancy notes from variance data."""
+        notes = []
+        if variance.get("amount", 0) != 0:
+            notes.append(f"Amount variance: {variance['amount']}")
+        if variance.get("quantity", 0) != 0:
+            notes.append(f"Quantity variance: {variance['quantity']}")
+        if variance.get("date_days", 0) > 0:
+            notes.append(f"Date variance: {variance['date_days']} days")
+        return "; ".join(notes) if notes else "No discrepancies"
 
-        self.db.commit()
-        self.db.refresh(match)
-
-        return match
-
-    def confirm_match(self, match_id: UUID, notes: str | None = None) -> Match | None:
-        """Confirm a pending match."""
-        return self.decision_engine.confirm_match(match_id, notes)
-
-    def reject_match(self, match_id: UUID, notes: str | None = None) -> Match | None:
-        """Reject a pending match."""
-        return self.decision_engine.reject_match(match_id, notes)
+    def _apply_learning_boost(
+        self,
+        db: Session,
+        match_result: MatchResult,
+        boost: Decimal
+    ) -> None:
+        """Apply confidence boost from human confirmation to learning system."""
+        # Store confirmation for future matching improvements
+        # This data can be used to adjust weights in future matching operations
+        pass
