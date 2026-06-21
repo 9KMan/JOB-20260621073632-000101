@@ -1,168 +1,181 @@
 // src/models/document.py
-"""Document models for invoices, delivery notes, and purchase orders."""
-import enum
+"""Base document model for PO, Invoice, and Delivery Note."""
 from decimal import Decimal
-from typing import Any, Optional
+from enum import Enum
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Numeric, DateTime, ForeignKey, Index, Enum, JSON
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import BaseModel
+from src.models.base import Base, UUIDMixin, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.document_line import DocumentLine
+    from src.models.user import User
 
 
-class DocumentType(str, enum.Enum):
-    """Document type enumeration."""
-    INVOICE = "INVOICE"
-    DELIVERY_NOTE = "DELIVERY_NOTE"
-    PURCHASE_ORDER = "PURCHASE_ORDER"
+class DocumentType(str, Enum):
+    """Types of documents in the system."""
+    PURCHASE_ORDER = "purchase_order"
+    INVOICE = "invoice"
+    DELIVERY_NOTE = "delivery_note"
 
 
-class DocumentStatus(str, enum.Enum):
-    """Document status enumeration."""
-    DRAFT = "DRAFT"
-    SUBMITTED = "SUBMITTED"
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
-    MATCHED = "MATCHED"
-    PAID = "PAID"
-    CANCELLED = "CANCELLED"
+class DocumentStatus(str, Enum):
+    """Status of a document."""
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    PARTIALLY_MATCHED = "partially_matched"
+    FULLY_MATCHED = "fully_matched"
+    DISPUTED = "disputed"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
 
 
-class Document(BaseModel):
-    """Main document model (Invoice, Delivery Note, or Purchase Order)."""
+class Document(UUIDMixin, TimestampMixin, Base):
+    """
+    Base document model representing PO, Invoice, or Delivery Note.
+    Uses single-table inheritance pattern for different document types.
+    """
+    
     __tablename__ = "documents"
-
-    document_type: Mapped[str] = mapped_column(
-        Enum(DocumentType),
-        nullable=False,
-        index=True
-    )
+    __mapper_args__ = {
+        "polymorphic_identity": "document",
+        "polymorphic_on": "document_type",
+    }
+    
+    # Document identification
     document_number: Mapped[str] = mapped_column(
         String(100),
+        unique=True,
+        index=True,
         nullable=False,
-        unique=True
     )
-    supplier_id: Mapped[str] = mapped_column(
-        String(100),
+    document_type: Mapped[DocumentType] = mapped_column(
+        SQLEnum(DocumentType, name="document_type_enum"),
         nullable=False,
-        index=True
+    )
+    status: Mapped[DocumentStatus] = mapped_column(
+        SQLEnum(DocumentStatus, name="document_status_enum"),
+        default=DocumentStatus.SUBMITTED,
+        nullable=False,
+        index=True,
+    )
+    
+    # Supplier information
+    supplier_code: Mapped[str] = mapped_column(
+        String(100),
+        index=True,
+        nullable=False,
     )
     supplier_name: Mapped[str] = mapped_column(
         String(255),
-        nullable=False
+        nullable=False,
     )
-    supplier_reference: Mapped[Optional[str]] = mapped_column(
+    supplier_tax_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    
+    # Reference numbers
+    reference_number: Mapped[Optional[str]] = mapped_column(
         String(100),
-        nullable=True
+        nullable=True,
+        index=True,
+    )
+    po_reference: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    
+    # Dates
+    document_date: Mapped[Date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+    )
+    expected_delivery_date: Mapped[Optional[Date]] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    
+    # Financial
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+        index=True,
     )
     currency: Mapped[str] = mapped_column(
         String(3),
         default="USD",
-        nullable=False
-    )
-    subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0"),
-        nullable=False
-    )
-    tax_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0"),
-        nullable=False
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False
-    )
-    document_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False
-    )
-    due_date: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True
-    )
-    status: Mapped[str] = mapped_column(
-        String(50),
-        default=DocumentStatus.DRAFT.value,
         nullable=False,
-        index=True
     )
-    metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSON,
-        nullable=True
+    
+    # Metadata
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False
+    
+    # Audit
+    created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
     )
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True
-    )
-
+    
     # Relationships
     lines: Mapped[list["DocumentLine"]] = relationship(
         "DocumentLine",
         back_populates="document",
         cascade="all, delete-orphan",
-        lazy="selectin"
+        lazy="selectin",
     )
+    created_by: Mapped[Optional["User"]] = relationship(
+        "User",
+        foreign_keys=[created_by_id],
+    )
+    
+    def __repr__(self) -> str:
+        return f"<Document {self.document_type.value}:{self.document_number}>"
+    
+    @property
+    def is_po(self) -> bool:
+        """Check if this is a purchase order."""
+        return self.document_type == DocumentType.PURCHASE_ORDER
+    
+    @property
+    def is_invoice(self) -> bool:
+        """Check if this is an invoice."""
+        return self.document_type == DocumentType.INVOICE
+    
+    @property
+    def is_delivery_note(self) -> bool:
+        """Check if this is a delivery note."""
+        return self.document_type == DocumentType.DELIVERY_NOTE
+    
+    @property
+    def open_amount(self) -> Decimal:
+        """Calculate open (unmatched) amount."""
+        from src.models.balance import Balance, BalanceType
+        matched_amount = sum(
+            b.amount for b in self.balances 
+            if b.balance_type == BalanceType.DEBIT if self.is_po or self.is_delivery_note
+            else b.amount if b.balance_type == BalanceType.CREDIT else Decimal("0")
+            for b in self.balances
+        )
+        return self.total_amount - matched_amount
 
-    __table_args__ = (
-        Index("ix_documents_supplier_date", "supplier_id", "document_date"),
-        Index("ix_documents_type_status", "document_type", "status"),
-    )
 
-
-class DocumentLine(BaseModel):
-    """Line items within a document."""
-    __tablename__ = "document_lines"
-
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    line_number: Mapped[int] = mapped_column(
-        nullable=False
-    )
-    item_code: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-        index=True
-    )
-    description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False
-    )
-    quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False
-    )
-    unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False
-    )
-    uom: Mapped[Optional[str]] = mapped_column(
-        String(20),
-        nullable=True
-    )
-    tax_code: Mapped[Optional[str]] = mapped_column(
-        String(20),
-        nullable=True
-    )
-
-    # Relationships
-    document: Mapped["Document"] = relationship(
-        "Document",
-        back_populates="lines"
-    )
-
-    __table_args__ = (
-        Index("ix_document_lines_document_line", "document_id", "line_number"),
-    )
+import uuid

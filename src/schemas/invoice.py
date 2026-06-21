@@ -1,76 +1,60 @@
 // src/schemas/invoice.py
 """Invoice schemas."""
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.models.invoice import InvoiceStatus
-from src.schemas.common import BaseSchema, TimestampSchema
+from src.schemas.document import DocumentLineCreate, DocumentLineResponse
 
 
-class InvoiceLineBase(BaseSchema):
-    """Base invoice line schema."""
-    line_number: int
-    sku: Optional[str] = None
-    description: str = Field(max_length=500)
-    quantity: Decimal = Field(gt=0)
-    unit_of_measure: str = "EA"
-    unit_price: Decimal = Field(ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
-
-
-class InvoiceLineCreate(InvoiceLineBase):
-    """Invoice line creation schema."""
-    pass
-
-
-class InvoiceLineResponse(InvoiceLineBase, TimestampSchema):
-    """Invoice line response schema."""
-    model_config = ConfigDict(from_attributes=True)
-    
-    id: UUID
-    invoice_id: UUID
-    line_total: Decimal
-
-
-class InvoiceBase(BaseSchema):
+class InvoiceBase(BaseModel):
     """Base invoice schema."""
-    invoice_number: str = Field(max_length=50)
-    supplier_id: str = Field(max_length=100)
-    supplier_name: str = Field(max_length=255)
-    supplier_reference: Optional[str] = None
-    po_reference: Optional[str] = None
-    invoice_date: str
-    due_date: Optional[str] = None
-    currency: str = "USD"
+    document_number: str = Field(..., max_length=100)
+    supplier_code: str = Field(..., max_length=100)
+    supplier_name: str = Field(..., max_length=255)
+    supplier_tax_id: Optional[str] = Field(None, max_length=50)
+    reference_number: Optional[str] = Field(None, max_length=100)
+    po_reference: Optional[str] = Field(None, max_length=100)
+    document_date: date
+    due_date: Optional[date] = None
+    payment_method: Optional[str] = Field(None, max_length=50)
+    bank_details: Optional[str] = None
+    tax_id: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
+    currency: str = Field(default="USD", max_length=3)
 
 
 class InvoiceCreate(InvoiceBase):
     """Invoice creation schema."""
-    lines: list[InvoiceLineCreate]
+    lines: list[DocumentLineCreate] = Field(..., min_length=1)
 
 
-class InvoiceUpdate(BaseSchema):
+class InvoiceUpdate(BaseModel):
     """Invoice update schema."""
-    supplier_name: Optional[str] = None
-    supplier_reference: Optional[str] = None
-    due_date: Optional[str] = None
-    status: Optional[InvoiceStatus] = None
+    supplier_code: Optional[str] = Field(None, max_length=100)
+    supplier_name: Optional[str] = Field(None, max_length=255)
+    supplier_tax_id: Optional[str] = Field(None, max_length=50)
+    due_date: Optional[date] = None
+    payment_method: Optional[str] = Field(None, max_length=50)
+    bank_details: Optional[str] = None
     notes: Optional[str] = None
-    lines: Optional[list[InvoiceLineCreate]] = None
+    status: Optional[str] = None
 
 
-class InvoiceResponse(InvoiceBase, TimestampSchema):
+class InvoiceResponse(InvoiceBase):
     """Invoice response schema."""
     model_config = ConfigDict(from_attributes=True)
     
-    id: UUID
+    id: str
+    status: str
     subtotal: Decimal
     tax_amount: Decimal
+    discount_percent: Decimal
+    discount_amount: Decimal
     total_amount: Decimal
-    status: InvoiceStatus
-    lines: list[InvoiceLineResponse] = []
+    open_amount: Decimal
+    lines: list[DocumentLineResponse] = []
+    created_at: datetime
+    updated_at: datetime

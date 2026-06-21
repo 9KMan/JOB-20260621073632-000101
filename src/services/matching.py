@@ -1,524 +1,508 @@
 // src/services/matching.py
-"""3-Way Matching engine service."""
+"""3-Way Matching Engine Service."""
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
-from uuid import UUID
+import uuid
 
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.models.match import (
-    MatchRecord,
-    MatchConfirmation,
-    MatchType,
-    MatchStatus,
-    MatchResult,
-)
-from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine, POStatus
-from src.models.invoice import Invoice, InvoiceLine, InvoiceStatus
-from src.models.delivery_note import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
-from src.models.balance import BalanceLedger, BalanceType
-from src.schemas.match import MatchConfirmationCreate
+from src.app.config import get_settings
+from src.models.balance import Balance, BalanceType
+from src.models.document import Document, DocumentType, DocumentStatus
+from src.models.document_line import DocumentLine
+from src.models.match import Match, MatchDecision, MatchLine, MatchStatus, MatchType
+from src.services.balance import BalanceService
+
+settings = get_settings()
 
 
 class MatchingService:
     """
-    3-Way Matching Engine.
+    3-Way Matching Engine Service.
     
-    Layer 1: Anchoring - Uses PO as single source of truth
-    Layer 2: Cascade Matching - Invoice↔PO, DN↔PO, Invoice↔DN
-    Layer 3: Balance Resolution - Tracks partial matches
+    Architecture:
+    - Layer 1: PO Anchoring - PO as single source of truth
+    - Layer 2: Cascade Matching - Invoice↔PO, DN↔PO, Invoice↔DN
+    - Layer 3: Balance Resolution - partial matches and multi-delivery
     """
-    
-    WEIGHT_LINE_LEVEL = Decimal("0.70")
-    WEIGHT_AMOUNT = Decimal("0.20")
-    WEIGHT_DATE = Decimal("0.10")
-    
-    AUTO_APPROVE_THRESHOLD = Decimal("95.00")
-    HUMAN_REVIEW_THRESHOLD = Decimal("70.00")
     
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.balance_service = BalanceService(db)
     
-    async def _get_open_pos(
+    # ==================== Layer 1: PO Anchoring ====================
+    
+    async def anchor_to_po(
         self,
-        supplier_id: str,
+        document: Document,
+        supplier_code: Optional[str] = None,
         po_reference: Optional[str] = None,
-    ) -> list[PurchaseOrder]:
-        """Get open purchase orders for a supplier."""
-        query = select(PurchaseOrder).options(
-            selectinload(PurchaseOrder.lines)
-        ).where(
-            and_(
-                PurchaseOrder.supplier_id == supplier_id,
-                PurchaseOrder.status.in_([
-                    POStatus.APPROVED,
-                    POStatus.PARTIALLY_RECEIVED,
-                ])
-            )
-        )
+    ) -> Optional[Document]:
+        """
+        Layer 1: Anchor a document to its Purchase Order.
+        Uses PO as single source of truth for matching.
+        """
+        # Try to find matching PO
+        conditions = [Document.document_type == DocumentType.PURCHASE_ORDER]
         
         if po_reference:
-            query = query.where(PurchaseOrder.po_number == po_reference)
+            conditions.append(Document.document_number == po_reference)
+        if supplier_code:
+            conditions.append(Document.supplier_code == supplier_code)
+        else:
+            conditions.append(Document.supplier_code == document.supplier_code)
+        
+        # Look for open POs
+        conditions.append(
+            Document.status.in_([
+                DocumentStatus.SUBMITTED,
+                DocumentStatus.PARTIALLY_MATCHED,
+            ])
+        )
+        
+        result = await self.db.execute(
+            select(Document)
+            .options(selectinload(Document.lines))
+            .where(and_(*conditions))
+            .order_by(Document.document_date.desc())
+            .limit(1)
+        )
+        
+        return result.scalar_one_or_none()
+    
+    # ==================== Layer 2: Cascade Matching ====================
+    
+    async def match_invoice_to_po(
+        self,
+        invoice: Document,
+        po: Document,
+    ) -> tuple[Decimal, Decimal, Decimal, list[dict]]:
+        """
+        Match invoice lines to PO lines.
+        Returns: (line_score, amount_score, date_score, matched_lines)
+        """
+        line_score = Decimal("0")
+        matched_lines = []
+        total_matched_amount = Decimal("0")
+        total_invoice_amount = invoice.total_amount
+        total_po_amount = po.total_amount
+        
+        # Match line by line
+        invoice_lines = {line.sku: line for line in invoice.lines if line.sku}
+        
+        for po_line in po.lines:
+            matched_invoice_line = invoice_lines.get(po_line.sku)
+            
+            if matched_invoice_line:
+                # Calculate quantity match
+                qty_ratio = min(
+                    matched_invoice_line.quantity / po_line.quantity
+                    if po_line.quantity > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                # Calculate amount match
+                expected_amount = po_line.line_total
+                actual_amount = matched_invoice_line.line_total
+                amount_ratio = Decimal("1") - min(
+                    abs(expected_amount - actual_amount) / expected_amount
+                    if expected_amount > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                line_score += qty_ratio * amount_ratio
+                total_matched_amount += min(actual_amount, expected_amount)
+                
+                matched_lines.append({
+                    "po_line_id": po_line.id,
+                    "invoice_line_id": matched_invoice_line.id,
+                    "matched_quantity": min(matched_invoice_line.quantity, po_line.quantity),
+                    "matched_amount": min(actual_amount, expected_amount),
+                })
+        
+        # Normalize scores
+        max_lines = max(len(po.lines), 1)
+        line_score = line_score / Decimal(max_lines)
+        
+        # Amount score
+        if total_po_amount > 0:
+            amount_score = Decimal("1") - min(
+                abs(total_po_amount - total_invoice_amount) / total_po_amount,
+                Decimal("1"),
+            )
+        else:
+            amount_score = Decimal("0")
+        
+        # Date score
+        date_score = self._calculate_date_score(
+            invoice.document_date,
+            po.document_date,
+        )
+        
+        return line_score, amount_score, date_score, matched_lines
+    
+    async def match_delivery_to_po(
+        self,
+        delivery: Document,
+        po: Document,
+    ) -> tuple[Decimal, Decimal, Decimal, list[dict]]:
+        """
+        Match delivery note lines to PO lines.
+        Returns: (line_score, amount_score, date_score, matched_lines)
+        """
+        line_score = Decimal("0")
+        matched_lines = []
+        total_delivered_amount = Decimal("0")
+        total_po_amount = po.total_amount
+        
+        po_lines = {line.sku: line for line in po.lines if line.sku}
+        
+        for dn_line in delivery.lines:
+            matched_po_line = po_lines.get(dn_line.sku)
+            
+            if matched_po_line:
+                # Calculate quantity match using delivered quantity
+                delivered_qty = dn_line.delivered_quantity or dn_line.quantity
+                qty_ratio = min(
+                    delivered_qty / matched_po_line.quantity
+                    if matched_po_line.quantity > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                # Amount ratio
+                expected_amount = matched_po_line.line_total
+                actual_amount = dn_line.line_total
+                amount_ratio = Decimal("1") - min(
+                    abs(expected_amount - actual_amount) / expected_amount
+                    if expected_amount > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                line_score += qty_ratio * amount_ratio
+                total_delivered_amount += min(actual_amount, expected_amount)
+                
+                matched_lines.append({
+                    "po_line_id": matched_po_line.id,
+                    "dn_line_id": dn_line.id,
+                    "matched_quantity": min(delivered_qty, matched_po_line.quantity),
+                    "matched_amount": min(actual_amount, expected_amount),
+                })
+        
+        # Normalize scores
+        max_lines = max(len(po.lines), 1)
+        line_score = line_score / Decimal(max_lines)
+        
+        # Amount score
+        if total_po_amount > 0:
+            amount_score = Decimal("1") - min(
+                abs(total_po_amount - total_delivered_amount) / total_po_amount,
+                Decimal("1"),
+            )
+        else:
+            amount_score = Decimal("0")
+        
+        # Date score (delivery date vs expected)
+        expected_date = po.expected_delivery_date or po.document_date
+        date_score = self._calculate_date_score(
+            delivery.delivery_date or delivery.document_date,
+            expected_date,
+        )
+        
+        return line_score, amount_score, date_score, matched_lines
+    
+    async def match_invoice_to_delivery(
+        self,
+        invoice: Document,
+        delivery: Document,
+    ) -> tuple[Decimal, Decimal, Decimal, list[dict]]:
+        """
+        Match invoice lines to delivery note lines.
+        Returns: (line_score, amount_score, date_score, matched_lines)
+        """
+        line_score = Decimal("0")
+        matched_lines = []
+        total_invoice_amount = invoice.total_amount
+        total_delivery_amount = delivery.total_amount
+        
+        invoice_lines = {line.sku: line for line in invoice.lines if line.sku}
+        delivery_lines = {line.sku: line for line in delivery.lines if line.sku}
+        
+        for sku, inv_line in invoice_lines.items():
+            if sku in delivery_lines:
+                dn_line = delivery_lines[sku]
+                
+                # Quantity match
+                delivered_qty = dn_line.delivered_quantity or dn_line.quantity
+                qty_ratio = min(
+                    inv_line.quantity / delivered_qty
+                    if delivered_qty > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                # Amount match
+                amount_ratio = Decimal("1") - min(
+                    abs(inv_line.line_total - dn_line.line_total) / dn_line.line_total
+                    if dn_line.line_total > 0 else Decimal("0"),
+                    Decimal("1"),
+                )
+                
+                line_score += qty_ratio * amount_ratio
+                
+                matched_lines.append({
+                    "invoice_line_id": inv_line.id,
+                    "dn_line_id": dn_line.id,
+                    "matched_quantity": inv_line.quantity,
+                    "matched_amount": inv_line.line_total,
+                })
+        
+        # Normalize
+        max_lines = max(len(invoice.lines), len(delivery.lines), 1)
+        line_score = line_score / Decimal(max_lines)
+        
+        # Amount score
+        if total_delivery_amount > 0:
+            amount_score = Decimal("1") - min(
+                abs(total_delivery_amount - total_invoice_amount) / total_delivery_amount,
+                Decimal("1"),
+            )
+        else:
+            amount_score = Decimal("0")
+        
+        # Date score
+        date_score = self._calculate_date_score(
+            invoice.document_date,
+            delivery.delivery_date or delivery.document_date,
+        )
+        
+        return line_score, amount_score, date_score, matched_lines
+    
+    def _calculate_date_score(
+        self,
+        date1: date,
+        date2: date,
+    ) -> Decimal:
+        """Calculate date similarity score (0-1)."""
+        days_diff = abs((date1 - date2).days)
+        tolerance = settings.DATE_TOLERANCE_DAYS
+        
+        if days_diff <= tolerance:
+            return Decimal("1")
+        elif days_diff <= tolerance * 2:
+            return Decimal("0.5")
+        else:
+            return Decimal("0")
+    
+    def _calculate_total_score(
+        self,
+        line_score: Decimal,
+        amount_score: Decimal,
+        date_score: Decimal,
+    ) -> Decimal:
+        """Calculate weighted total match score."""
+        return (
+            line_score * Decimal(str(settings.MATCHING_LINE_WEIGHT)) +
+            amount_score * Decimal(str(settings.MATCHING_AMOUNT_WEIGHT)) +
+            date_score * Decimal(str(settings.MATCHING_DATE_WEIGHT))
+        )
+    
+    # ==================== Layer 3: Balance Resolution ====================
+    
+    async def resolve_balance(
+        self,
+        source_document: Document,
+        target_document: Document,
+        matched_amount: Decimal,
+    ) -> dict:
+        """
+        Layer 3: Resolve balances between matched documents.
+        Handles partial matches and multi-delivery scenarios.
+        """
+        # Get or create balances
+        source_balance = await self.balance_service.get_or_create_balance(
+            source_document.id,
+            BalanceType.DEBIT if source_document.is_po or source_document.is_delivery_note
+            else BalanceType.CREDIT,
+            source_document.total_amount,
+        )
+        
+        target_balance = await self.balance_service.get_or_create_balance(
+            target_document.id,
+            BalanceType.CREDIT if target_document.is_po or target_document.is_delivery_note
+            else BalanceType.DEBIT,
+            target_document.total_amount,
+        )
+        
+        # Update matched amounts
+        source_balance.matched_amount += matched_amount
+        target_balance.matched_amount += matched_amount
+        
+        source_balance.reference_document_id = target_document.id
+        source_balance.reference_document_number = target_document.document_number
+        target_balance.reference_document_id = source_document.id
+        target_balance.reference_document_number = source_document.document_number
+        
+        await self.db.flush()
+        
+        return {
+            "source_open_amount": source_balance.open_amount,
+            "target_open_amount": target_balance.open_amount,
+            "source_fully_matched": source_balance.is_fully_matched,
+            "target_fully_matched": target_balance.is_fully_matched,
+        }
+    
+    # ==================== Decision Routing ====================
+    
+    def route_decision(self, total_score: Decimal) -> MatchDecision:
+        """
+        Route match to appropriate decision path.
+        - CONFIRMED + HIGH_SCORE → AUTO_APPROVED
+        - PENDING + MEDIUM_SCORE → HUMAN_REVIEW
+        - LOW_SCORE → DISPUTED
+        """
+        if total_score >= Decimal(str(settings.AUTO_APPROVE_THRESHOLD)):
+            return MatchDecision.AUTO_APPROVED
+        elif total_score >= Decimal(str(settings.HUMAN_REVIEW_THRESHOLD)):
+            return MatchDecision.HUMAN_REVIEW
+        else:
+            return MatchDecision.DISPUTED
+    
+    # ==================== Main Matching Interface ====================
+    
+    async def find_matches_for_document(
+        self,
+        document_id: str,
+        match_type: Optional[MatchType] = None,
+    ) -> list[Match]:
+        """Find existing matches for a document."""
+        query = select(Match).where(
+            or_(
+                Match.source_document_id == document_id,
+                Match.target_document_id == document_id,
+                Match.third_document_id == document_id,
+            )
+        ).options(
+            selectinload(Match.lines),
+            selectinload(Match.source_document),
+            selectinload(Match.target_document),
+        )
+        
+        if match_type:
+            query = query.where(Match.match_type == match_type)
         
         result = await self.db.execute(query)
         return list(result.scalars().all())
     
-    async def _calculate_quantity_score(
+    async def create_match(
         self,
-        qty1: Decimal,
-        qty2: Decimal,
-    ) -> Decimal:
-        """Calculate quantity match score (0-100)."""
-        if qty1 == Decimal("0") and qty2 == Decimal("0"):
-            return Decimal("100.00")
-        if qty1 == Decimal("0") or qty2 == Decimal("0"):
-            return Decimal("0.00")
-        
-        ratio = min(qty1, qty2) / max(qty1, qty2)
-        return ratio * Decimal("100.00")
-    
-    async def _calculate_amount_score(
-        self,
-        amt1: Decimal,
-        amt2: Decimal,
-    ) -> Decimal:
-        """Calculate amount match score (0-100)."""
-        if amt1 == Decimal("0") and amt2 == Decimal("0"):
-            return Decimal("100.00")
-        if amt1 == Decimal("0") or amt2 == Decimal("0"):
-            return Decimal("0.00")
-        
-        ratio = min(amt1, amt2) / max(amt1, amt2)
-        return ratio * Decimal("100.00")
-    
-    async def _calculate_date_score(
-        self,
-        date1: str,
-        date2: str,
-        tolerance_days: int = 7,
-    ) -> Decimal:
-        """Calculate date match score (0-100)."""
-        try:
-            from datetime import datetime, timedelta
-            
-            d1 = datetime.strptime(date1, "%Y-%m-%d")
-            d2 = datetime.strptime(date2, "%Y-%m-%d")
-            diff = abs((d1 - d2).days)
-            
-            if diff == 0:
-                return Decimal("100.00")
-            elif diff <= tolerance_days:
-                return Decimal("100.00") - Decimal(str(diff * 5))
-            else:
-                max_diff = 30
-                score = max(Decimal("0.00"), Decimal("100.00") - Decimal(str((diff - tolerance_days) * 3)))
-                return score
-        except (ValueError, TypeError):
-            return Decimal("50.00")
-    
-    async def _match_line_level(
-        self,
-        lines1: list,
-        lines2: list,
-    ) -> tuple[Decimal, dict]:
-        """
-        Match lines at line level.
-        Returns score and match details.
-        """
-        total_score = Decimal("0.00")
-        matched_lines = []
-        
-        lines2_remaining = {line.line_number: line for line in lines2}
-        
-        for line1 in lines1:
-            best_match = None
-            best_score = Decimal("0.00")
-            
-            for line2_num, line2 in lines2_remaining.items():
-                score = Decimal("0.00")
-                
-                if line1.sku and line2.sku and line1.sku == line2.sku:
-                    score += Decimal("40.00")
-                
-                desc_match = self._calculate_text_similarity(
-                    line1.description.lower(),
-                    line2.description.lower(),
-                )
-                score += desc_match * Decimal("30.00")
-                
-                qty_score = await self._calculate_quantity_score(
-                    line1.quantity,
-                    line2.quantity,
-                )
-                score += qty_score * Decimal("30.00")
-                
-                if score > best_score:
-                    best_score = score
-                    best_match = line2_num
-            
-            if best_match and best_score > Decimal("50.00"):
-                total_score += best_score
-                matched_lines.append({
-                    "line1_id": line1.id,
-                    "line2_id": lines2_remaining[best_match].id,
-                    "score": float(best_score),
-                })
-                del lines2_remaining[best_match]
-        
-        if matched_lines:
-            avg_score = total_score / Decimal(str(len(lines1)))
-        else:
-            avg_score = Decimal("0.00")
-        
-        return avg_score, {"matched_lines": matched_lines}
-    
-    def _calculate_text_similarity(self, text1: str, text2: str) -> Decimal:
-        """Calculate text similarity score."""
-        if text1 == text2:
-            return Decimal("1.00")
-        if text1 in text2 or text2 in text1:
-            return Decimal("0.80")
-        
-        words1 = set(text1.split())
-        words2 = set(text2.split())
-        
-        if not words1 or not words2:
-            return Decimal("0.00")
-        
-        intersection = words1 & words2
-        union = words1 | words2
-        
-        return Decimal(str(len(intersection) / len(union)))
-    
-    async def _determine_match_result(
-        self,
+        source_document_id: str,
+        target_document_id: str,
+        match_type: MatchType,
+        line_score: Decimal,
+        amount_score: Decimal,
+        date_score: Decimal,
+        matched_lines: list[dict],
+        matched_amount: Decimal,
         variance_amount: Decimal,
-        variance_quantity: Decimal,
-        tolerance_pct: Decimal = Decimal("0.05"),
-        tolerance_abs: Decimal = Decimal("10.00"),
-    ) -> MatchResult:
-        """Determine match result based on variance."""
-        if variance_amount == Decimal("0") and variance_quantity == Decimal("0"):
-            return MatchResult.EXACT
+        third_document_id: Optional[str] = None,
+    ) -> Match:
+        """Create a new match record."""
+        total_score = self._calculate_total_score(line_score, amount_score, date_score)
+        decision = self.route_decision(total_score)
         
-        if variance_amount <= tolerance_abs and variance_quantity <= Decimal("0.01"):
-            return MatchResult.EXACT
+        # Determine status based on decision
+        status = MatchStatus.CONFIRMED if decision == MatchDecision.AUTO_APPROVED else MatchStatus.PENDING
         
-        po_total = Decimal("100.00")
-        variance_pct = abs(variance_amount) / po_total if po_total else Decimal("0")
-        
-        if variance_pct <= tolerance_pct:
-            if variance_amount > 0:
-                return MatchResult.OVER
-            else:
-                return MatchResult.UNDER
-        else:
-            return MatchResult.PARTIAL
-    
-    async def _determine_status(self, total_score: Decimal) -> MatchStatus:
-        """Determine match status based on score."""
-        if total_score >= self.AUTO_APPROVE_THRESHOLD:
-            return MatchStatus.AUTO_CONFIRMED
-        elif total_score >= self.HUMAN_REVIEW_THRESHOLD:
-            return MatchStatus.HUMAN_REVIEW
-        else:
-            return MatchStatus.PENDING
-    
-    async def match_invoice_po(
-        self,
-        invoice: Invoice,
-        po: PurchaseOrder,
-    ) -> MatchRecord:
-        """Match invoice against purchase order (Layer 2)."""
-        line_score, line_details = await self._match_line_level(
-            invoice.lines,
-            po.lines,
-        )
-        
-        amount_score = await self._calculate_amount_score(
-            invoice.total_amount,
-            po.total_amount,
-        )
-        
-        date_score = await self._calculate_date_score(
-            invoice.invoice_date,
-            po.order_date,
-        )
-        
-        total_score = (
-            line_score * self.WEIGHT_LINE_LEVEL +
-            amount_score * self.WEIGHT_AMOUNT +
-            date_score * self.WEIGHT_DATE
-        )
-        
-        variance_amount = invoice.total_amount - po.total_amount
-        
-        match_result = await self._determine_match_result(variance_amount, Decimal("0"))
-        status = await self._determine_status(total_score)
-        
-        match_record = MatchRecord(
-            match_type=MatchType.INVOICE_PO,
-            invoice_id=invoice.id,
-            purchase_order_id=po.id,
-            line_match_details=line_details,
-            quantity_match_score=line_score,
-            amount_match_score=amount_score,
-            date_match_score=date_score,
+        match = Match(
+            source_document_id=source_document_id,
+            target_document_id=target_document_id,
+            third_document_id=third_document_id,
+            match_type=match_type,
             total_score=total_score,
-            match_result=match_result,
-            status=status,
+            line_score=line_score,
+            amount_score=amount_score,
+            date_score=date_score,
+            matched_amount=matched_amount,
             variance_amount=variance_amount,
-            variance_quantity=Decimal("0"),
-        )
-        
-        self.db.add(match_record)
-        await self.db.flush()
-        
-        return match_record
-    
-    async def match_delivery_po(
-        self,
-        dn: DeliveryNote,
-        po: PurchaseOrder,
-    ) -> MatchRecord:
-        """Match delivery note against purchase order (Layer 2)."""
-        line_score, line_details = await self._match_line_level(
-            dn.lines,
-            po.lines,
-        )
-        
-        date_score = await self._calculate_date_score(
-            dn.delivery_date,
-            po.expected_delivery_date or po.order_date,
-        )
-        
-        total_score = line_score * Decimal("0.90") + date_score * Decimal("0.10")
-        
-        variance_quantity = Decimal("0")
-        for dn_line in dn.lines:
-            for po_line in po.lines:
-                if dn_line.sku == po_line.sku:
-                    variance_quantity += dn_line.quantity - po_line.quantity
-        
-        match_result = await self._determine_match_result(Decimal("0"), variance_quantity)
-        status = await self._determine_status(total_score)
-        
-        match_record = MatchRecord(
-            match_type=MatchType.DELIVERY_PO,
-            delivery_note_id=dn.id,
-            purchase_order_id=po.id,
-            line_match_details=line_details,
-            quantity_match_score=line_score,
-            amount_match_score=Decimal("100.00"),
-            date_match_score=date_score,
-            total_score=total_score,
-            match_result=match_result,
             status=status,
-            variance_amount=Decimal("0"),
-            variance_quantity=variance_quantity,
+            decision=decision,
         )
         
-        self.db.add(match_record)
+        self.db.add(match)
         await self.db.flush()
         
-        return match_record
-    
-    async def match_invoice_delivery(
-        self,
-        invoice: Invoice,
-        dn: DeliveryNote,
-    ) -> MatchRecord:
-        """Match invoice against delivery note (Layer 2)."""
-        line_score, line_details = await self._match_line_level(
-            invoice.lines,
-            dn.lines,
-        )
+        # Create match lines
+        for line_data in matched_lines:
+            match_line = MatchLine(
+                match_id=match.id,
+                source_line_id=line_data.get("po_line_id") or line_data.get("invoice_line_id"),
+                target_line_id=line_data.get("invoice_line_id") or line_data.get("dn_line_id"),
+                matched_quantity=line_data.get("matched_quantity", Decimal("0")),
+                variance_quantity=line_data.get("variance_quantity", Decimal("0")),
+                matched_amount=line_data.get("matched_amount", Decimal("0")),
+                variance_amount=line_data.get("variance_amount", Decimal("0")),
+                score=line_score,
+            )
+            self.db.add(match_line)
         
-        amount_score = await self._calculate_amount_score(
-            invoice.total_amount,
-            dn.total_amount,
-        )
-        
-        date_score = await self._calculate_date_score(
-            invoice.invoice_date,
-            dn.delivery_date,
-        )
-        
-        total_score = (
-            line_score * self.WEIGHT_LINE_LEVEL +
-            amount_score * self.WEIGHT_AMOUNT +
-            date_score * self.WEIGHT_DATE
-        )
-        
-        variance_amount = invoice.total_amount - dn.total_amount
-        match_result = await self._determine_match_result(variance_amount, Decimal("0"))
-        status = await self._determine_status(total_score)
-        
-        match_record = MatchRecord(
-            match_type=MatchType.INVOICE_DELIVERY,
-            invoice_id=invoice.id,
-            delivery_note_id=dn.id,
-            line_match_details=line_details,
-            quantity_match_score=line_score,
-            amount_match_score=amount_score,
-            date_match_score=date_score,
-            total_score=total_score,
-            match_result=match_result,
-            status=status,
-            variance_amount=variance_amount,
-            variance_quantity=Decimal("0"),
-        )
-        
-        self.db.add(match_record)
         await self.db.flush()
+        await self.db.refresh(match)
         
-        return match_record
+        return match
     
-    async def perform_three_way_match(
+    async def full_three_way_match(
         self,
-        invoice: Invoice,
-        po: PurchaseOrder,
-        dn: DeliveryNote,
-    ) -> tuple[MatchRecord, list[MatchRecord]]:
+        invoice_id: str,
+        delivery_id: str,
+        po_id: str,
+    ) -> Match:
         """
-        Perform full 3-way match.
-        Returns the 3-way match record and all component matches.
+        Perform complete 3-way match between Invoice, Delivery Note, and PO.
         """
-        invoice_po_match = await self.match_invoice_po(invoice, po)
-        delivery_po_match = await self.match_delivery_po(dn, po)
-        invoice_dn_match = await self.match_invoice_delivery(invoice, dn)
+        # Load documents
+        invoice = await self.db.get(Document, invoice_id, options=[selectinload(Document.lines)])
+        delivery = await self.db.get(Document, delivery_id, options=[selectinload(Document.lines)])
+        po = await self.db.get(Document, po_id, options=[selectinload(Document.lines)])
         
-        total_score = (
-            invoice_po_match.total_score +
-            delivery_po_match.total_score +
-            invoice_dn_match.total_score
-        ) / Decimal("3")
+        if not all([invoice, delivery, po]):
+            raise ValueError("One or more documents not found")
         
-        variance_amount = abs(invoice.total_amount - po.total_amount) + abs(dn.total_amount - po.total_amount)
+        # Calculate individual match scores
+        inv_po_scores = await self.match_invoice_to_po(invoice, po)
+        dn_po_scores = await self.match_delivery_to_po(delivery, po)
+        inv_dn_scores = await self.match_invoice_to_delivery(invoice, delivery)
         
-        three_way_record = MatchRecord(
+        # Average the scores for 3-way match
+        line_score = (inv_po_scores[0] + dn_po_scores[0] + inv_dn_scores[0]) / Decimal("3")
+        amount_score = (inv_po_scores[1] + dn_po_scores[1] + inv_dn_scores[1]) / Decimal("3")
+        date_score = (inv_po_scores[2] + dn_po_scores[2] + inv_dn_scores[2]) / Decimal("3")
+        
+        # Combined matched lines
+        all_matched_lines = inv_po_scores[3] + dn_po_scores[3] + inv_dn_scores[3]
+        
+        # Matched amount (minimum of all three documents)
+        matched_amount = min(invoice.total_amount, delivery.total_amount, po.total_amount)
+        variance_amount = abs(invoice.total_amount - po.total_amount)
+        
+        # Create 3-way match
+        match = await self.create_match(
+            source_document_id=invoice_id,
+            target_document_id=delivery_id,
             match_type=MatchType.THREE_WAY,
-            invoice_id=invoice.id,
-            purchase_order_id=po.id,
-            delivery_note_id=dn.id,
-            line_match_details={
-                "invoice_po_score": float(invoice_po_match.total_score),
-                "delivery_po_score": float(delivery_po_match.total_score),
-                "invoice_dn_score": float(invoice_dn_match.total_score),
-            },
-            quantity_match_score=total_score,
-            amount_match_score=total_score,
-            date_match_score=total_score,
-            total_score=total_score,
-            match_result=MatchResult.EXACT if variance_amount == 0 else MatchResult.PARTIAL,
-            status=await self._determine_status(total_score),
+            line_score=line_score,
+            amount_score=amount_score,
+            date_score=date_score,
+            matched_lines=all_matched_lines,
+            matched_amount=matched_amount,
             variance_amount=variance_amount,
-            variance_quantity=Decimal("0"),
+            third_document_id=po_id,
         )
         
-        self.db.add(three_way_record)
-        await self.db.flush()
+        # Resolve balances
+        await self.resolve_balance(invoice, po, matched_amount)
+        await self.resolve_balance(delivery, po, matched_amount)
+        await self.resolve_balance(invoice, delivery, matched_amount)
         
-        await self.db.commit()
-        
-        return three_way_record, [invoice_po_match, delivery_po_match, invoice_dn_match]
-    
-    async def find_possible_matches(
-        self,
-        invoice: Invoice,
-    ) -> list[dict]:
-        """Find all possible PO matches for an invoice (Layer 1 - Anchoring)."""
-        pos = await self._get_open_pos(
-            invoice.supplier_id,
-            invoice.po_reference,
-        )
-        
-        matches = []
-        for po in pos:
-            line_score, _ = await self._match_line_level(invoice.lines, po.lines)
-            amount_score = await self._calculate_amount_score(
-                invoice.total_amount,
-                po.total_amount,
-            )
-            
-            combined_score = (
-                line_score * self.WEIGHT_LINE_LEVEL +
-                amount_score * self.WEIGHT_AMOUNT
-            )
-            
-            matches.append({
-                "po": po,
-                "score": combined_score,
-                "line_score": line_score,
-                "amount_score": amount_score,
-            })
-        
-        matches.sort(key=lambda x: x["score"], reverse=True)
-        return matches
-    
-    async def confirm_match(
-        self,
-        confirmation: MatchConfirmationCreate,
-        user_id: UUID,
-    ) -> Optional[MatchRecord]:
-        """Confirm or reject a match (human review feedback)."""
-        result = await self.db.execute(
-            select(MatchRecord).where(MatchRecord.id == confirmation.match_record_id)
-        )
-        match_record = result.scalar_one_or_none()
-        
-        if not match_record:
-            return None
-        
-        db_confirmation = MatchConfirmation(
-            match_record_id=confirmation.match_record_id,
-            user_id=user_id,
-            decision=confirmation.decision,
-            notes=confirmation.notes,
-        )
-        self.db.add(db_confirmation)
-        
-        match_record.status = confirmation.decision
-        
-        await self.db.commit()
-        await self.db.refresh(match_record)
-        
-        return match_record
-    
-    async def get_match_record(self, match_id: UUID) -> Optional[MatchRecord]:
-        """Get match record by ID."""
-        result = await self.db.execute(
-            select(MatchRecord)
-            .options(selectinload(MatchRecord.confirmations))
-            .where(MatchRecord.id == match_id)
-        )
-        return result.scalar_one_or_none()
-    
-    async def get_matches_for_invoice(self, invoice_id: UUID) -> list[MatchRecord]:
-        """Get all matches for an invoice."""
-        result = await self.db.execute(
-            select(MatchRecord)
-            .where(MatchRecord.invoice_id == invoice_id)
-            .order_by(MatchRecord.total_score.desc())
-        )
-        return list(result.scalars().all())
-    
-    async def get_matches_for_po(self, po_id: UUID) -> list[MatchRecord]:
-        """Get all matches for a purchase order."""
-        result = await self.db.execute(
-            select(MatchRecord)
-            .where(MatchRecord.purchase_order_id == po_id)
-            .order_by(MatchRecord.total_score.desc())
-        )
-        return list(result.scalars().all())
-    
-    async def get_matches_for_dn(self, dn_id: UUID) -> list[MatchRecord]:
-        """Get all matches for a delivery note."""
-        result = await self.db.execute(
-            select(MatchRecord)
-            .where(MatchRecord.delivery_note_id == dn_id)
-            .order_by(MatchRecord.total_score.desc())
-        )
-        return list(result.scalars().all())
+        return match
