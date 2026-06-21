@@ -1,20 +1,7 @@
-# api/__init__.py
-"""API module for AP Automation Engine.
+// api/__init__.py
+"""API package for AP Automation Engine.
 
-This module contains the API layer with FastAPI routers,
-Pydantic schemas, and endpoint definitions.
+This package contains API routes and schemas.
 """
 
-from api.schemas import (
-    HealthResponse,
-    ErrorResponse,
-    PaginationParams,
-    PaginatedResponse,
-)
-
-__all__ = [
-    "HealthResponse",
-    "ErrorResponse",
-    "PaginationParams",
-    "PaginatedResponse",
-]
+__version__ = "1.0.0"

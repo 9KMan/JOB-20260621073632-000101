@@ -1,8 +1,8 @@
-# models/purchase_order.py
-"""PurchaseOrder and PurchaseOrderLine SQLAlchemy models."""
+// models/purchase_order.py
+"""Purchase Order model for the AP Automation Engine."""
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -12,215 +12,187 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, CompanyMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from models.enums import CurrencyCode, PurchaseOrderStatus, LineType
+from models.base import Base, CustomMixin, SoftDeleteMixin
+from models.enums import DocumentStatus, MatchStatus
 
 if TYPE_CHECKING:
     from models.balance_ledger import BalanceLedger
     from models.cross_ref import CrossRef
     from models.delivery_note import DeliveryNote
-    from models.invoice import Invoice
+    from models.invoice import Invoice, InvoiceLine
 
 
-class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, CompanyMixin):
-    """Purchase Order database model.
+class PurchaseOrder(Base, CustomMixin, SoftDeleteMixin):
+    """Purchase Order model.
 
-    Represents a PO issued to a supplier, which serves as the primary
-    anchor for invoice matching.
+    Attributes:
+        po_number: Unique PO number.
+        vendor_id: External vendor identifier.
+        vendor_name: Vendor name for display.
+        po_date: PO creation date.
+        delivery_date: Expected delivery date.
+        status: Current document status.
+        match_status: Current matching status.
+        subtotal: Pre-tax PO amount.
+        tax_amount: Tax amount.
+        total_amount: Total PO amount.
+        currency: ISO currency code.
+        payment_terms: Payment terms description.
+        ship_to: Shipping address.
+        bill_to: Billing address.
+        notes: Additional notes.
+        is_blanket: Whether this is a blanket PO.
+        blanket_release_number: For blanket POs, the release number.
     """
 
     __tablename__ = "purchase_orders"
     __table_args__ = (
-        UniqueConstraint("po_number", "company_code", name="uq_po_number_company"),
-        Index("ix_purchase_orders_supplier_code", "supplier_code"),
-        Index("ix_purchase_orders_status", "status"),
-        Index("ix_purchase_orders_po_date", "po_date"),
-        Index("ix_purchase_orders_expected_date", "expected_delivery_date"),
+        Index("ix_po_vendor_id", "vendor_id"),
+        Index("ix_po_status", "status"),
+        Index("ix_po_match_status", "match_status"),
+        Index("ix_po_po_date", "po_date"),
+        Index("ix_po_created_at", "created_at"),
         {"schema": None},
     )
 
-    # Reference fields
+    # Core PO fields
     po_number: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+        unique=True,
         index=True,
     )
-    supplier_po_number: Mapped[str | None] = mapped_column(
+    vendor_id: Mapped[str] = mapped_column(
         String(100),
-        nullable=True,
+        nullable=False,
         index=True,
     )
-    external_po_id: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-
-    # Supplier information
-    supplier_name: Mapped[str] = mapped_column(
+    vendor_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
-    supplier_address: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    supplier_contact: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-    supplier_email: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    # Date fields
     po_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
         index=True,
     )
-    expected_delivery_date: Mapped[date | None] = mapped_column(
+    delivery_date: Mapped[date | None] = mapped_column(
         Date,
         nullable=True,
     )
-    confirmed_delivery_date: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
+
+    # Status fields
+    status: Mapped[DocumentStatus] = mapped_column(
+        String(20),
+        default=DocumentStatus.DRAFT,
+        nullable=False,
+    )
+    match_status: Mapped[MatchStatus] = mapped_column(
+        String(20),
+        default=MatchStatus.PENDING,
+        nullable=False,
     )
 
     # Financial fields
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        nullable=False,
-        default="USD",
-    )
     subtotal: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
+        nullable=False,
     )
     tax_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
+        nullable=False,
     )
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
-    )
-    shipping_cost: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
         nullable=False,
-        default=Decimal("0.00"),
-    )
-    other_charges: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
-
-    # Status
-    status: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        default=PurchaseOrderStatus.DRAFT.value,
         index=True,
     )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="USD",
+        nullable=False,
+    )
 
-    # Terms
+    # Additional fields
     payment_terms: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
     )
-    delivery_terms: Mapped[str | None] = mapped_column(
-        String(255),
+    ship_to: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    bill_to: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True,
     )
     notes: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
     )
-
-    # Flags
-    is_blanket_po: Mapped[bool] = mapped_column(
+    is_blanket: Mapped[bool] = mapped_column(
         Boolean,
-        nullable=False,
         default=False,
+        nullable=False,
     )
-    is_rush: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
+    blanket_release_number: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
     )
 
     # Relationships
-    lines: Mapped[list["PurchaseOrderLine"]] = relationship(
+    po_lines: Mapped[list["PurchaseOrderLine"]] = relationship(
         "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
-    invoices: Mapped[list["Invoice"]] = relationship(
-        "Invoice",
+    cross_refs: Mapped[list["CrossRef"]] = relationship(
+        "CrossRef",
         back_populates="purchase_order",
-        lazy="selectin",
+        foreign_keys="CrossRef.purchase_order_id",
+        cascade="all, delete-orphan",
     )
     delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
         "DeliveryNote",
         back_populates="purchase_order",
-        lazy="selectin",
+        foreign_keys="DeliveryNote.po_id",
     )
 
     def __repr__(self) -> str:
         return f"<PurchaseOrder {self.po_number} - {self.total_amount} {self.currency}>"
 
-    @property
-    def is_open(self) -> bool:
-        """Check if PO is still open for matching."""
-        return self.status in [
-            PurchaseOrderStatus.SENT.value,
-            PurchaseOrderStatus.CONFIRMED.value,
-            PurchaseOrderStatus.PARTIAL.value,
-        ]
 
-    @property
-    def is_overdue(self) -> bool:
-        """Check if PO is past expected delivery date."""
-        if self.expected_delivery_date is None:
-            return False
-        return date.today() > self.expected_delivery_date and not self.is_complete
+class PurchaseOrderLine(Base, CustomMixin):
+    """Purchase Order line item model.
 
-    @property
-    def is_complete(self) -> bool:
-        """Check if PO is fully delivered and invoiced."""
-        return self.status in [
-            PurchaseOrderStatus.COMPLETE.value,
-            PurchaseOrderStatus.CLOSED.value,
-        ]
-
-
-class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Purchase Order Line Item database model.
-
-    Represents individual line items on a PO for line-level matching
-    against invoice lines and delivery note lines.
+    Attributes:
+        po_id: Parent PO ID.
+        line_number: Line item number.
+        description: Line description.
+        quantity: Ordered quantity.
+        received_quantity: Quantity received so far.
+        invoiced_quantity: Quantity invoiced so far.
+        unit_price: Price per unit.
+        amount: Total line amount.
+        tax_code: Tax classification code.
+        expected_delivery_date: Expected delivery for this line.
+        line_status: Current status of the line.
     """
 
     __tablename__ = "purchase_order_lines"
     __table_args__ = (
-        Index("ix_purchase_order_lines_po_id", "po_id"),
-        Index("ix_purchase_order_lines_line_number", "line_number"),
-        Index("ix_purchase_order_lines_sku", "sku"),
+        Index("ix_po_line_po_id", "po_id"),
         {"schema": None},
     )
 
@@ -228,103 +200,49 @@ class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-
-    # Line identification
     line_number: Mapped[int] = mapped_column(
+        Integer,
         nullable=False,
-    )
-    external_line_id: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    # Product/Service identification
-    sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    supplier_sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
     )
     description: Mapped[str] = mapped_column(
         String(500),
         nullable=False,
     )
-    line_type: Mapped[str] = mapped_column(
-        String(50),
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),
+        default=Decimal("0.0000"),
         nullable=False,
-        default=LineType.STANDARD.value,
     )
-
-    # Quantities
-    quantity_ordered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
+    received_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),
+        default=Decimal("0.0000"),
         nullable=False,
-        default=Decimal("0.000"),
     )
-    quantity_unit: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-    )
-    quantity_delivered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
+    invoiced_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),
+        default=Decimal("0.0000"),
         nullable=False,
-        default=Decimal("0.000"),
     )
-    quantity_invoiced: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-        default=Decimal("0.000"),
-    )
-    quantity_cancelled: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-        default=Decimal("0.000"),
-    )
-
-    # Pricing
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
-        nullable=False,
         default=Decimal("0.0000"),
+        nullable=False,
     )
-    line_total: Mapped[Decimal] = mapped_column(
+    amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
-    )
-    discount_percent: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
         nullable=False,
-        default=Decimal("0.00"),
     )
-    discount_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
-
-    # Tax
     tax_code: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
     )
-    tax_rate: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
     tax_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=False,
         default=Decimal("0.00"),
+        nullable=False,
     )
-
-    # Delivery
     expected_delivery_date: Mapped[date | None] = mapped_column(
         Date,
         nullable=True,
@@ -333,36 +251,22 @@ class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
         "PurchaseOrder",
-        back_populates="lines",
-        lazy="selectin",
+        back_populates="po_lines",
+    )
+    invoice_lines: Mapped[list["InvoiceLine"]] = relationship(
+        "InvoiceLine",
+        back_populates="po_line",
     )
 
-    def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}: {self.description}>"
-
     @property
-    def quantity_remaining(self) -> Decimal:
-        """Calculate remaining quantity to be delivered."""
-        return self.quantity_ordered - self.quantity_delivered - self.quantity_cancelled
-
-    @property
-    def quantity_pending_invoice(self) -> Decimal:
-        """Calculate quantity pending to be invoiced."""
-        return self.quantity_delivered - self.quantity_invoiced
-
-    @property
-    def is_fully_delivered(self) -> bool:
-        """Check if line is fully delivered."""
-        return self.quantity_delivered >= self.quantity_ordered
+    def remaining_quantity(self) -> Decimal:
+        """Calculate remaining uninvoiced quantity."""
+        return self.quantity - self.invoiced_quantity
 
     @property
     def is_fully_invoiced(self) -> bool:
         """Check if line is fully invoiced."""
-        return self.quantity_invoiced >= self.quantity_delivered
+        return self.invoiced_quantity >= self.quantity
 
-    @property
-    def delivery_percentage(self) -> float:
-        """Calculate delivery percentage."""
-        if self.quantity_ordered == 0:
-            return 100.0
-        return float(self.quantity_delivered / self.quantity_ordered * 100)
+    def __repr__(self) -> str:
+        return f"<PurchaseOrderLine {self.line_number} - {self.amount}>"

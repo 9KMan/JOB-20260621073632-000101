@@ -1,15 +1,8 @@
 // core/main.py
-"""FastAPI application entry point.
-
-This module creates and configures the FastAPI application with:
-- API routers
-- Middleware (CORS, logging, error handling)
-- Health check endpoint
-- OpenAPI documentation
-"""
+"""Main FastAPI application."""
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -18,106 +11,94 @@ from fastapi.responses import JSONResponse
 
 from api.v1.router import api_router
 from core.config import settings
-from core.database import close_db, init_db
+from core.database import check_database_connection, close_database, init_database
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager.
-
-    Handles startup and shutdown events:
-    - Startup: Initialize database connection
-    - Shutdown: Close database connections
-    """
+async def lifespan(app: FastAPI) -> Any:
+    """Application lifespan handler for startup and shutdown events."""
     # Startup
-    print(f"Starting {settings.app_name} v{settings.app_version}")
-    await init_db()
+    await init_database()
     yield
     # Shutdown
-    print("Shutting down application...")
-    await close_db()
+    await close_database()
 
 
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application.
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    description="AP Automation Core Engine for Finaro - Invoice matching and processing",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
+)
 
-    Returns:
-        FastAPI: Configured application instance
-    """
-    app = FastAPI(
-        title=settings.app_name,
-        version=settings.app_version,
-        description=settings.app_description,
-        docs_url=settings.docs_url if settings.environment != "production" else None,
-        redoc_url=settings.redoc_url if settings.environment != "production" else None,
-        openapi_url=settings.openapi_url if settings.environment != "production" else None,
-        lifespan=lifespan,
-        debug=settings.debug,
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    """Handle validation errors with custom response format."""
+    errors = []
+    for error in exc.errors():
+        errors.append({
+            "field": ".".join(str(loc) for loc in error["loc"]),
+            "message": error["msg"],
+            "type": error["type"],
+        })
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": "Validation error",
+            "errors": errors,
+        },
     )
 
-    # Configure CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=settings.cors_allow_credentials,
-        allow_methods=settings.cors_allow_methods,
-        allow_headers=settings.cors_allow_headers,
+
+@app.get("/health", tags=["Health"])
+async def health_check() -> dict[str, Any]:
+    """Health check endpoint for monitoring."""
+    db_healthy = await check_database_connection()
+
+    return {
+        "status": "healthy" if db_healthy else "degraded",
+        "version": settings.app_version,
+        "database": "connected" if db_healthy else "disconnected",
+    }
+
+
+@app.get("/", tags=["Root"])
+async def root() -> dict[str, Any]:
+    """Root endpoint returning API information."""
+    return {
+        "name": settings.app_name,
+        "version": settings.app_version,
+        "docs": "/docs",
+    }
+
+
+# Include API routes
+app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "core.main:app",
+        host="0.0.0.0",
+        port=settings.api_port,
+        reload=settings.debug,
     )
-
-    # Register API router
-    app.include_router(api_router, prefix=settings.api_v1_prefix)
-
-    # Health check endpoint
-    @app.get("/health", tags=["health"])
-    async def health_check() -> dict:
-        """Health check endpoint.
-
-        Returns:
-            dict: Health status and application info
-        """
-        from core.database import health_check as db_health_check
-
-        db_healthy = await db_health_check()
-
-        return {
-            "status": "healthy" if db_healthy else "degraded",
-            "service": settings.app_name,
-            "version": settings.app_version,
-            "environment": settings.environment,
-            "database": "connected" if db_healthy else "disconnected",
-        }
-
-    # Global exception handlers
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        request: Request,
-        exc: RequestValidationError,
-    ) -> JSONResponse:
-        """Handle request validation errors."""
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "detail": "Validation error",
-                "errors": exc.errors(),
-            },
-        )
-
-    @app.exception_handler(Exception)
-    async def global_exception_handler(
-        request: Request,
-        exc: Exception,
-    ) -> JSONResponse:
-        """Handle unexpected exceptions."""
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": "Internal server error",
-                "message": str(exc) if settings.debug else "An unexpected error occurred",
-            },
-        )
-
-    return app
-
-
-# Create application instance
-app = create_app()

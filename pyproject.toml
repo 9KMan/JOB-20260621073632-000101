@@ -1,20 +1,137 @@
-# pyproject.toml
+// pyproject.toml
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "finaro-ap-automation"
-version = "1.0.0"
-description = "AP Automation Core Engine - 3-Way Matching Engine for FinaRo"
+name = "ap-automation-engine"
+version = "0.1.0"
+description = "AP Automation Core Engine for Finaro"
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Finaro", email = "dev@finaro.com" }
+]
+keywords = ["ap", "automation", "invoice", "matching", "fastapi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "Topic :: Office/Business :: Financial",
+]
+
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.9",
+    "email-validator>=2.1.0",
+    "httpx>=0.27.0",
+    "greenlet>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.27.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "types-python-jose>=3.3.7",
+    "types-passlib>=1.7.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101/docs"
+Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
+Issues = "https://github.com/9KMan/JOB-20260621073632-000101/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "models*", "api*", "services*", "workers*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+minversion = "8.1"
 asyncio_mode = "auto"
+testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=70",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
 
-[tool.black]
+[tool.coverage.run]
+source = ["core", "models", "api", "services", "workers"]
+omit = [
+    "*/tests/*",
+    "*/conftest.py",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.ruff]
 line-length = 100
-target-version = ['py311']
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
 
-[tool.isort]
-profile = "black"
-line_length = 100
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["B011", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "*.tests"]
+ignore_missing_imports = true
