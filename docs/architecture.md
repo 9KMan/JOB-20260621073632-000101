@@ -5,44 +5,35 @@
 
 ---
 
-## 1. Project Overview
+## 1. Project Identity
 
-**Project Name:** FinaRo — AP Automation Core Engine  
-**Type:** 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order)  
-**Purpose:** Automate the accounts payable matching process by comparing invoices against purchase orders and delivery notes, reducing manual review and accelerating approval workflows.
-
-### Problem Statement
-
-Traditional AP workflows require accountants to manually match invoices against purchase orders (POs) and delivery notes. This process is:
-
-- **Time-consuming:** Manual comparison of line items across documents
-- **Error-prone:** Human error in amount calculations and quantity matching
-- **Inconsistent:** Varying tolerance thresholds and approval criteria
-- **Bottlenecked:** Sequential review creates approval delays
-
-### Solution
-
-FinaRo automates the 3-way matching process through a layered architecture that:
-
-1. Anchors all documents to their originating Purchase Orders
-2. Performs cascade matching with weighted scoring
-3. Tracks balances across partial matches
-4. Routes decisions through an intelligent decision engine
+| Field | Value |
+|---|---|
+| Project name | FinaRo — AP Automation Core Engine |
+| Client | Finaro |
+| Type | 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order) |
+| Tier | PREMIUM |
+| Budget | $14,250–$21,375 (150–225 hrs @ $95/hr) |
+| Timeline | 4–8 weeks |
+| GitHub | https://github.com/9KMan/JOB-20260621073632-000101 |
+| Rate | $95/hr |
 
 ---
 
 ## 2. Technical Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Backend | Python 3.11+ / FastAPI | REST API framework |
-| Database | PostgreSQL 15+ | Primary datastore |
-| ORM | SQLAlchemy 2.0 | Database abstraction |
-| Migrations | Alembic | Schema version control |
-| Authentication | JWT (HS256) | API authentication |
-| Password Hashing | bcrypt | Secure credential storage |
-| Testing | pytest | Unit and integration tests |
-| Containerization | Docker | Deployment packaging |
+| Component | Technology |
+|---|---|
+| Backend | Python 3.11+, FastAPI |
+| Database | PostgreSQL 15+ |
+| ORM | SQLAlchemy 2.0 |
+| Migrations | Alembic |
+| Testing | pytest, pytest-asyncio |
+| Containerization | Docker, docker-compose |
+| Authentication | JWT (HS256), bcrypt |
+| API Documentation | OpenAPI/Swagger (auto-generated) |
 
-### System Architecture
+---
+
+## 3. System Architecture
 
