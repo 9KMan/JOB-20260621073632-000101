@@ -1,41 +1,61 @@
 # Dockerfile
-FROM python:3.11-slim AS base
+FROM python:3.11-slim as base
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    openssl \
-    libpq-dev \
     gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir uv==0.1.18
 
-FROM base AS builder
+FROM base as builder
 
-COPY --chown=root:root pyproject.toml ./
+COPY --from=base /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=base /usr/local/lib/python3.11/site-packages /site-packages
 
-RUN pip install --no-cache-dir --prefix=/install -e .[dev]
+ENV UV_LINK_MODE=copy
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-FROM base AS runtime
+COPY pyproject.toml ./
+RUN uv sync --frozen --no-install-project
 
-COPY --chown=root:root --from=builder /install /usr/local
+FROM base as production
 
-RUN groupadd --gid 1000 appuser \
-    && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home appuser
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_LINK_MODE=copy
 
+WORKDIR /app
+
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /site-packages /usr/local/lib/python3.11/site-packages
+
+COPY . .
+
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /app
 USER appuser
-
-COPY --chown=appuser:appuser --from=builder /app .
 
 EXPOSE 8000
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/usr/local/bin:${PATH}"
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+FROM base as dev
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /site-packages /usr/local/lib/python3.11/site-packages
+
+COPY . .
+
+CMD ["uv", "run", "uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

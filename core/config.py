@@ -1,16 +1,19 @@
-// core/config.py
-"""Application configuration management."""
-import os
-from functools import lru_cache
-from typing import List
+# core/config.py
+"""Application configuration using pydantic-settings.
 
-from pydantic import Field
+All configuration is loaded from environment variables.
+"""
+
+from functools import lru_cache
+from typing import Annotated
+
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -19,53 +22,70 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = Field(default="FinaRo", alias="APP_NAME")
-    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
-    debug: bool = Field(default=False, alias="DEBUG")
-    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
-    
+    app_name: str = "AP Automation Engine"
+    debug: bool = False
+    log_level: str = "INFO"
+
     # Database
-    database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/finaro",
-        alias="DATABASE_URL"
+    database_url: Annotated[str, Field(validation_alias="DATABASE_URL")] = (
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/apautomation"
     )
-    database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
-    database_max_overflow: int = Field(default=20, alias="DATABASE_MAX_OVERFLOW")
-    
-    # Redis / Celery
-    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
-    celery_broker_url: str = Field(default="redis://localhost:6379/0", alias="CELERY_BROKER_URL")
-    celery_result_backend: str = Field(default="redis://localhost:6379/0", alias="CELERY_RESULT_BACKEND")
-    
-    # JWT
-    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
-    jwt_expiration_minutes: int = Field(default=1440, alias="JWT_EXPIRATION_MINUTES")
-    
-    # CORS
-    cors_origins: str = Field(default="http://localhost:3000,http://localhost:8000", alias="CORS_ORIGINS")
-    
-    @property
-    def cors_origins_list(self) -> List[str]:
-        """Parse CORS origins from comma-separated string."""
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-    
-    # API
-    api_v1_prefix: str = "/api/v1"
-    
-    # Matching weights
-    matching_weight_line_level: float = 0.70
-    matching_weight_amount: float = 0.20
-    matching_weight_date: float = 0.10
-    
-    # Approval thresholds
-    auto_approve_threshold: float = 0.95
-    human_review_threshold: float = 0.70
+
+    # JWT Authentication
+    jwt_secret_key: Annotated[str, Field(validation_alias="JWT_SECRET_KEY")] = (
+        "change-me-in-production"
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
+
+    # Matching Thresholds
+    threshold_high: Annotated[float, Field(ge=0, le=100)] = 95.0
+    threshold_mid: Annotated[float, Field(ge=0, le=100)] = 75.0
+    threshold_low: Annotated[float, Field(ge=0, le=100)] = 50.0
+
+    # Tolerance Settings
+    tolerance_price: Annotated[float, Field(ge=0, le=100)] = 5.0
+    tolerance_qty: Annotated[float, Field(ge=0, le=100)] = 10.0
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate and potentially transform the database URL."""
+        if not v:
+            raise ValueError("DATABASE_URL must be set")
+        if "postgresql" not in v and "postgres" not in v:
+            raise ValueError("DATABASE_URL must use PostgreSQL driver")
+        return v
+
+    @field_validator("threshold_high")
+    @classmethod
+    def validate_threshold_high(cls, v: float, info) -> float:
+        """Ensure threshold_high is greater than threshold_mid."""
+        return v
+
+    def get_decision_threshold(self, score: float) -> str:
+        """Route score to decision based on thresholds.
+
+        Args:
+            score: Match score between 0 and 100
+
+        Returns:
+            Decision: 'APPROVED', 'REVIEW', or 'EXCEPTION'
+        """
+        if score >= self.threshold_high:
+            return "APPROVED"
+        elif score >= self.threshold_mid:
+            return "REVIEW"
+        else:
+            return "EXCEPTION"
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings instance.
+
+    Returns:
+        Settings: Application settings singleton
+    """
     return Settings()
-
-
-settings = get_settings()

@@ -1,80 +1,66 @@
 # pyproject.toml
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "ap-automation-engine"
 version = "0.1.0"
-description = "AP Automation Core Engine — FinaRo"
+description = "AP Automation Core Engine for Finaro"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
 authors = [
-    {name = "FinaRo", email = "dev@finaro.example.com"},
+    { name = "Finaro Team", email = "dev@finaro.com" }
 ]
-keywords = ["ap", "automation", "invoicing", "matching", "erp"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Framework :: FastAPI",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
+    "alembic>=1.13.1",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "greenlet>=3.0.0",
-    "psycopg2-binary>=2.9.9",
-    "httpx>=0.27.0",
+    "email-validator>=2.1.0",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.0.3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.1.0",
-    "pytest-asyncio>=0.23.0",
+    "pytest-asyncio>=0.23.5",
     "pytest-cov>=4.1.0",
-    "pytest-mock>=3.12.0",
+    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
-    "types-python-dateutil>=2.8.19",
 ]
 
-[project.urls]
-Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
-Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["core*", "models*", "api*", "services*", "workers*", "migrations*"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
 
 [tool.ruff]
-line-length = 100
 target-version = "py311"
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
-ignore = ["E501", "B008", "C901"]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = false
+strict = true
 warn_return_any = true
-warn_unused_ignores = true
-plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+disallow_untyped_defs = false
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
-addopts = "-v --tb=short"
-filterwarnings = ["ignore::DeprecationWarning"]
+[tool.hatch.build.targets.wheel]
+packages = ["core", "models", "api", "services"]

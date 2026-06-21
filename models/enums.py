@@ -1,89 +1,97 @@
 # models/enums.py
-"""SQLAlchemy-compatible and Pydantic enum definitions."""
+"""Enumeration types for the AP Automation Engine."""
 
-import enum
-
-
-# ── Invoice ───────────────────────────────────────────────────────────────────
-
-class InvoiceStatus(str, enum.Enum):
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    MATCHING = "matching"
-    APPROVED = "approved"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
-    PAID = "paid"
+from enum import Enum
 
 
-# ── Purchase Order ─────────────────────────────────────────────────────────────
+class InvoiceStatus(str, Enum):
+    """Invoice status values."""
 
-class PurchaseOrderStatus(str, enum.Enum):
-    DRAFT = "draft"
-    ACTIVE = "active"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-
-# ── Delivery Note ─────────────────────────────────────────────────────────────
-
-class DeliveryNoteStatus(str, enum.Enum):
-    RECEIVED = "received"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    CANCELLED = "cancelled"
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    MATCHING = "MATCHING"
+    MATCHED = "MATCHED"
+    APPROVED = "APPROVED"
+    REVIEW = "REVIEW"
+    EXCEPTION = "EXCEPTION"
+    REJECTED = "REJECTED"
+    PAID = "PAID"
+    CANCELLED = "CANCELLED"
 
 
-# ── Matching ──────────────────────────────────────────────────────────────────
+class PurchaseOrderStatus(str, Enum):
+    """Purchase order status values."""
 
-class MatchStatus(str, enum.Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    NO_CANDIDATES = "no_candidates"
-
-
-class LineMatchStatus(str, enum.Enum):
-    UNMATCHED = "unmatched"
-    MATCHED = "matched"
-    PARTIAL = "partial"
-    OVER_DELIVERED = "over_delivered"
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
 
 
-class MatchConfidence(str, enum.Enum):
-    """Confidence level derived from the match score."""
-    HIGH = "high"      # >= THRESHOLD_HIGH
-    MEDIUM = "medium"  # >= THRESHOLD_MID
-    LOW = "low"        # >= THRESHOLD_LOW
-    EXCEPTION = "exception"  # below threshold_low
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status values."""
+
+    DRAFT = "DRAFT"
+    ISSUED = "ISSUED"
+    RECEIVED = "RECEIVED"
+    INVOICED = "INVOICED"
+    CANCELLED = "CANCELLED"
 
 
-# ── Approval Decision ─────────────────────────────────────────────────────────
+class MatchDecision(str, Enum):
+    """Matching decision outcomes."""
 
-class ApprovalDecision(str, enum.Enum):
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVE = "one_click_approve"
-    ONE_CLICK_REJECT = "one_click_reject"
-    MANUAL_REVIEW = "manual_review"
-    EXCEPTION = "exception"
-
-
-# ── Exceptions ────────────────────────────────────────────────────────────────
-
-class ExceptionStatus(str, enum.Enum):
-    OPEN = "open"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
+    APPROVED = "APPROVED"
+    REVIEW = "REVIEW"
+    EXCEPTION = "EXCEPTION"
+    REJECTED = "REJECTED"
 
 
-class ExceptionReason(str, enum.Enum):
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    MISSING_PO = "missing_po"
-    MULTIPLE_PO_CANDIDATES = "multiple_po_candidates"
-    NO_LINE_MATCH = "no_line_match"
-    PARTIAL_LINE_MATCH = "partial_line_match"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    OTHER = "other"
+class ExceptionType(str, Enum):
+    """Types of matching exceptions."""
+
+    PRICE_VARIANCE = "PRICE_VARIANCE"
+    QUANTITY_VARIANCE = "QUANTITY_VARIANCE"
+    MISSING_PO = "MISSING_PO"
+    MISSING_INVOICE = "MISSING_INVOICE"
+    MULTIPLE_MATCHES = "MULTIPLE_MATCHES"
+    DUPLICATE_INVOICE = "DUPLICATE_INVOICE"
+    DUPLICATE_PO = "DUPLICATE_PO"
+    PARTIAL_MATCH = "PARTIAL_MATCH"
+    OVER_DELIVERY = "OVER_DELIVERY"
+    UNDER_DELIVERY = "UNDER_DELIVERY"
+    CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
+    DATE_VARIANCE = "DATE_VARIANCE"
+    VENDOR_MISMATCH = "VENDOR_MISMATCH"
+    UNEXPECTED_CHARGE = "UNEXPECTED_CHARGE"
+    OTHER = "OTHER"
+
+
+class ExceptionStatus(str, Enum):
+    """Exception resolution status."""
+
+    OPEN = "OPEN"
+    IN_REVIEW = "IN_REVIEW"
+    RESOLVED = "RESOLVED"
+    DISMISSED = "DISMISSED"
+    ESCALATED = "ESCALATED"
+
+
+class MatchConfidence(str, Enum):
+    """Match confidence levels."""
+
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    NONE = "NONE"
+
+
+class LearningStatus(str, Enum):
+    """Cross-reference learning status."""
+
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    PROMOTED = "PROMOTED"
+    DEMOTED = "DEMOTED"
+    ARCHIVED = "ARCHIVED"

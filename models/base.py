@@ -1,66 +1,73 @@
-// models/base.py
-"""Base model classes with common mixins."""
+# models/base.py
+"""SQLAlchemy declarative base and mixins."""
+
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any
 
-from sqlalchemy import Column, DateTime, String
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declared_attr
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from core.database import Base
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base for all models."""
+
+    pass
+
+
+class TimestampMixin:
+    """Mixin that adds created_at and updated_at timestamps."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class UUIDMixin:
     """Mixin that adds UUID primary key."""
-    
-    id = Column(
-        UUID(as_uuid=True),
+
+    id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
         nullable=False,
     )
 
 
-class TimestampMixin:
-    """Mixin that adds created_at and updated_at timestamps."""
-    
-    created_at = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-
-
 class SoftDeleteMixin:
     """Mixin that adds soft delete functionality."""
-    
-    deleted_at = Column(DateTime(timezone=True), nullable=True)
-    
-    @declared_attr
-    def is_deleted(cls):
-        return Column(DateTime(timezone=True), nullable=True, default=None)
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if record is soft deleted."""
+        return self.deleted_at is not None
+
+    def soft_delete(self) -> None:
+        """Soft delete the record."""
+        self.deleted_at = datetime.now(timezone.utc)
+
+    def restore(self) -> None:
+        """Restore a soft deleted record."""
+        self.deleted_at = None
 
 
-class BaseModel(Base, UUIDMixin, TimestampMixin):
-    """Abstract base model with common fields."""
-    
-    __abstract__ = True
-    
-    @classmethod
-    def get_by_id(cls, db, model_id: uuid.UUID):
-        """Get a single record by ID."""
-        return db.query(cls).filter(cls.id == model_id).first()
-    
-    def to_dict(self) -> dict:
-        """Convert model to dictionary."""
-        return {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
-        }
+def generate_uuid() -> uuid.UUID:
+    """Generate a new UUID.
+
+    Returns:
+        uuid.UUID: New unique identifier
+    """
+    return uuid.uuid4()
