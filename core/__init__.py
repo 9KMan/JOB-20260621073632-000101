@@ -1,34 +1,51 @@
-# core/__init__.py
-# Core package initialization
-# AP Automation Core Engine — FinaRo
+// core/__init__.py
+"""Core module for AP Automation Core Engine.
 
-"""Core module for configuration, database, and security.
+This module contains the foundational components of the application:
+- Configuration management
+- Database connection and session management
+- Security utilities (JWT, password hashing)
 
-This module contains the foundational components used across the application:
-- Configuration management via pydantic-settings
-- Async SQLAlchemy database session handling
-- JWT and bcrypt security utilities
+All environment-based configuration is handled through pydantic-settings
+to ensure type safety and validation of required environment variables.
 """
 
 from core.config import get_settings, Settings
-from core.database import get_db_session, AsyncSessionLocal, engine
+from core.database import (
+    get_db,
+    get_async_session,
+    init_db,
+    close_db,
+    AsyncSessionLocal,
+    Base,
+)
 from core.security import (
-    create_access_token,
     verify_password,
     get_password_hash,
+    create_access_token,
+    decode_token,
     get_current_user,
-    TokenPayload,
+    JWTPayload,
 )
 
 __all__ = [
+    # Config
     "get_settings",
     "Settings",
-    "get_db_session",
+    # Database
+    "get_db",
+    "get_async_session",
+    "init_db",
+    "close_db",
     "AsyncSessionLocal",
-    "engine",
-    "create_access_token",
+    "Base",
+    # Security
     "verify_password",
     "get_password_hash",
+    "create_access_token",
+    "decode_token",
     "get_current_user",
-    "TokenPayload",
+    "JWTPayload",
 ]
+
+__version__ = "1.0.0"

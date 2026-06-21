@@ -1,5 +1,5 @@
-# docker-compose.yml - Local Development Stack
-# AP Automation Core Engine — FinaRo
+// docker-compose.yml
+version: '3.8'
 
 services:
   api:
@@ -7,42 +7,30 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ap-automation-api
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appass123@postgres:5432/apautomation
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
-      - JWT_ALGORITHM=HS256
-      - THRESHOLD_HIGH=0.95
-      - THRESHOLD_MID=0.75
-      - THRESHOLD_LOW=0.50
-      - TOLERANCE_PRICE=0.05
-      - TOLERANCE_QTY=0.10
-      - LOG_LEVEL=INFO
     ports:
       - "8000:8000"
-    volumes:
-      - ./src:/app/src
-      - ./core:/app/core
-      - ./models:/app/models
-      - ./api:/app/api
-      - ./services:/app/services
-      - ./workers:/app/workers
-      - ./migrations:/app/migrations
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://apuser:appassword@postgres:5432/apautomation
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5432
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - THRESHOLD_HIGH=95
+      - THRESHOLD_MID=75
+      - THRESHOLD_LOW=50
+      - TOLERANCE_PRICE=5.0
+      - TOLERANCE_QTY=10.0
+      - LOG_LEVEL=INFO
+      - ENVIRONMENT=development
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
         condition: service_started
-    command: >
-      sh -c "
-        alembic upgrade head &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-      "
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - ap-network
 
@@ -51,8 +39,9 @@ services:
     container_name: ap-automation-postgres
     environment:
       - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appass123
+      - POSTGRES_PASSWORD=appassword
       - POSTGRES_DB=apautomation
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
     ports:
       - "5432:5432"
     volumes:
@@ -62,6 +51,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - ap-network
 
@@ -72,16 +62,39 @@ services:
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
       - DATABASE_NAME=apautomation
+      - DATABASE_USER=apuser
+      - DATABASE_PASSWORD=appassword
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
       - RESERVE_POOL_SIZE=5
-      - USER=apuser
+      - RESERVE_POOL_TIMEOUT=5
+      - LOG_CONNECTIONS=0
+      - LOG_DISCONNECTIONS=0
+      - LOG_STATEMENT=never
+      - SERVER_RESET_QUERY=DISCARD ALL
     ports:
       - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ap-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ap-automation-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+      - PGADMIN_LISTEN_PORT=5050
+    ports:
+      - "5050:5050"
+    depends_on:
+      - postgres
+    profiles:
+      - debug
     networks:
       - ap-network
 

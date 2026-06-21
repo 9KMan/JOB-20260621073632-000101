@@ -1,51 +1,76 @@
-# models/__init__.py
-# Data models package initialization
-# AP Automation Core Engine — FinaRo
+// models/__init__.py
+"""Database models for AP Automation Core Engine.
 
-"""Database models package.
+This module exports all SQLAlchemy models used in the application.
+Models are organized by domain: invoices, purchase orders, delivery notes,
+balance ledger, and cross-reference (learning loop).
 
-This package contains SQLAlchemy ORM models for the AP Automation Engine.
-All models inherit from a common declarative base.
+All models use UUID primary keys and include created_at/updated_at timestamps
+as specified in the project requirements.
 """
 
-from models.base import Base, TimestampMixin
+from models.base import Base
 from models.enums import (
     InvoiceStatus,
     PurchaseOrderStatus,
     DeliveryNoteStatus,
-    MatchingDecision,
+    MatchStatus,
+    MatchDecision,
     ExceptionType,
     ExceptionStatus,
     LineStatus,
 )
 from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from models.purchase_order import PurchaseOrder, POLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
-from models.balance_ledger import BalanceLedger, BalanceType
-from models.cross_ref import CrossRef, MatchConfidence, LearningStatus
+from models.balance_ledger import BalanceLedger
+from models.cross_ref import CrossRef
 
 __all__ = [
     # Base
     "Base",
-    "TimestampMixin",
     # Enums
     "InvoiceStatus",
     "PurchaseOrderStatus",
     "DeliveryNoteStatus",
-    "MatchingDecision",
+    "MatchStatus",
+    "MatchDecision",
     "ExceptionType",
     "ExceptionStatus",
     "LineStatus",
-    "BalanceType",
-    "MatchConfidence",
-    "LearningStatus",
     # Models
     "Invoice",
     "InvoiceLine",
     "PurchaseOrder",
-    "PurchaseOrderLine",
+    "POLine",
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
     "CrossRef",
 ]
+
+# Model registry for migrations and utilities
+MODEL_REGISTRY = {
+    "invoice": Invoice,
+    "invoice_line": InvoiceLine,
+    "purchase_order": PurchaseOrder,
+    "po_line": POLine,
+    "delivery_note": DeliveryNote,
+    "delivery_note_line": DeliveryNoteLine,
+    "balance_ledger": BalanceLedger,
+    "cross_ref": CrossRef,
+}
+
+
+def get_all_models():
+    """Get all model classes for registration."""
+    return [
+        Invoice,
+        InvoiceLine,
+        PurchaseOrder,
+        POLine,
+        DeliveryNote,
+        DeliveryNoteLine,
+        BalanceLedger,
+        CrossRef,
+    ]

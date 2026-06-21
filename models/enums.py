@@ -1,292 +1,299 @@
-# models/enums.py
-# Status enums and decision types
-# AP Automation Core Engine — FinaRo
+// models/enums.py
+"""Enumeration types for AP Automation Core Engine.
 
-"""SQLAlchemy enum types for status fields and decision types.
+This module defines all enum types used throughout the application
+for status fields, decision types, and other categorical data.
 
-Uses PostgreSQL ENUM types for type safety and database-level constraints.
+All enums use string values for database storage to ensure
+cross-database compatibility and human-readable values.
 """
 
-from enum import Enum
+import enum
+from typing import Any, Dict, List
 
-from sqlalchemy import Enum as SQLEnum
 
-
-class InvoiceStatus(str, Enum):
-    """Invoice status enumeration.
-
-    Attributes:
-        DRAFT: Invoice is in draft state, not yet submitted.
-        SUBMITTED: Invoice has been submitted for processing.
-        PENDING_MATCHING: Invoice is awaiting matching engine processing.
-        MATCHING_IN_PROGRESS: Matching engine is currently processing the invoice.
-        MATCHED: Invoice has been matched to PO and/or delivery note.
-        PARTIALLY_MATCHED: Invoice has been partially matched.
-        EXCEPTION: Invoice has matching exceptions requiring review.
-        APPROVED: Invoice has been approved for payment.
-        REJECTED: Invoice has been rejected.
-        PAID: Invoice has been paid.
-        CANCELLED: Invoice has been cancelled.
+class InvoiceStatus(str, enum.Enum):
+    """Invoice status values.
+    
+    Represents the lifecycle states of an invoice from ingestion
+    through matching and final processing.
     """
-
+    
     DRAFT = "draft"
-    SUBMITTED = "submitted"
-    PENDING_MATCHING = "pending_matching"
-    MATCHING_IN_PROGRESS = "matching_in_progress"
+    RECEIVED = "received"
+    VALIDATED = "validated"
+    MATCHING = "matching"
     MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
     EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
+    
+    @classmethod
+    def active_statuses(cls) -> List["InvoiceStatus"]:
+        """Get list of active (non-terminal) statuses."""
+        return [
+            cls.DRAFT,
+            cls.RECEIVED,
+            cls.VALIDATED,
+            cls.MATCHING,
+            cls.MATCHED,
+            cls.EXCEPTION,
+        ]
+    
+    @classmethod
+    def terminal_statuses(cls) -> List["InvoiceStatus"]:
+        """Get list of terminal statuses."""
+        return [
+            cls.APPROVED,
+            cls.REJECTED,
+            cls.PAID,
+            cls.CANCELLED,
+        ]
+    
+    def is_terminal(self) -> bool:
+        """Check if this status is terminal."""
+        return self in self.terminal_statuses()
 
 
-class PurchaseOrderStatus(str, Enum):
-    """Purchase order status enumeration.
-
-    Attributes:
-        DRAFT: PO is in draft state.
-        ISSUED: PO has been issued to vendor.
-        PARTIALLY_RECEIVED: Some goods have been received.
-        RECEIVED: All goods have been received.
-        CLOSED: PO has been closed.
-        CANCELLED: PO has been cancelled.
-    """
-
+class PurchaseOrderStatus(str, enum.Enum):
+    """Purchase order status values."""
+    
     DRAFT = "draft"
-    ISSUED = "issued"
+    SENT = "sent"
+    ACKNOWLEDGED = "acknowledged"
     PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+    
+    @classmethod
+    def active_statuses(cls) -> List["PurchaseOrderStatus"]:
+        """Get list of active statuses."""
+        return [
+            cls.DRAFT,
+            cls.SENT,
+            cls.ACKNOWLEDGED,
+            cls.PARTIALLY_RECEIVED,
+            cls.RECEIVED,
+        ]
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Delivery note status enumeration.
-
-    Attributes:
-        DRAFT: Delivery note is in draft state.
-        CONFIRMED: Delivery note has been confirmed.
-        PARTIALLY_INVOICED: Some items have been invoiced.
-        INVOICED: All items have been invoiced.
-        CANCELLED: Delivery note has been cancelled.
-    """
-
+class DeliveryNoteStatus(str, enum.Enum):
+    """Delivery note status values."""
+    
     DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    PARTIALLY_INVOICED = "partially_invoiced"
-    INVOICED = "invoiced"
+    ISSUED = "issued"
+    RECEIVED = "received"
+    PARTIALLY_MATCHED = "partially_matched"
+    MATCHED = "matched"
     CANCELLED = "cancelled"
+    
+    @classmethod
+    def active_statuses(cls) -> List["DeliveryNoteStatus"]:
+        """Get list of active statuses."""
+        return [
+            cls.DRAFT,
+            cls.ISSUED,
+            cls.RECEIVED,
+            cls.PARTIALLY_MATCHED,
+        ]
 
 
-class MatchingDecision(str, Enum):
-    """Matching engine decision enumeration.
-
-    Attributes:
-        AUTO_APPROVED: High confidence match, auto-approved.
-        REVIEW_APPROVED: Medium confidence, approved after review.
-        REVIEW_REJECTED: Medium confidence, rejected after review.
-        EXCEPTION: Low confidence, requires exception handling.
-        NO_MATCH: Unable to find matching records.
-        MANUAL_REQUIRED: Manual matching required.
+class MatchStatus(str, enum.Enum):
+    """Match status values.
+    
+    Represents the state of a match between invoice lines
+    and their corresponding PO/DN lines.
     """
+    
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    
+    @classmethod
+    def active_statuses(cls) -> List["MatchStatus"]:
+        """Get list of active statuses."""
+        return [cls.PENDING, cls.IN_PROGRESS]
 
+
+class MatchDecision(str, enum.Enum):
+    """Match decision values.
+    
+    Represents the outcome of the matching algorithm,
+    determining whether an invoice can be auto-approved
+    or needs human review.
+    """
+    
     AUTO_APPROVED = "auto_approved"
-    REVIEW_APPROVED = "review_approved"
-    REVIEW_REJECTED = "review_rejected"
+    ONE_CLICK_REVIEW = "one_click_review"
     EXCEPTION = "exception"
+    REJECTED = "rejected"
+    MANUAL_REVIEW = "manual_review"
     NO_MATCH = "no_match"
-    MANUAL_REQUIRED = "manual_required"
+    
+    @classmethod
+    def from_score(cls, score: float, thresholds: Dict[str, float]) -> "MatchDecision":
+        """Determine decision based on match score and thresholds.
+        
+        Args:
+            score: Match score (0-100).
+            thresholds: Dict with 'high', 'mid', 'low' threshold values.
+        
+        Returns:
+            MatchDecision based on score and thresholds.
+        """
+        high = thresholds.get("high", 95)
+        mid = thresholds.get("mid", 75)
+        low = thresholds.get("low", 50)
+        
+        if score >= high:
+            return cls.AUTO_APPROVED
+        elif score >= mid:
+            return cls.ONE_CLICK_REVIEW
+        elif score >= low:
+            return cls.EXCEPTION
+        else:
+            return cls.MANUAL_REVIEW
+    
+    def requires_review(self) -> bool:
+        """Check if this decision requires human review."""
+        return self in [
+            self.ONE_CLICK_REVIEW,
+            self.EXCEPTION,
+            self.MANUAL_REVIEW,
+        ]
 
 
-class ExceptionType(str, Enum):
-    """Matching exception type enumeration.
-
-    Attributes:
-        PRICE_VARIANCE: Price doesn't match within tolerance.
-        QUANTITY_VARIANCE: Quantity doesn't match within tolerance.
-        MISSING_PO: PO reference is missing or invalid.
-        MISSING_DELIVERY: Delivery note reference is missing or invalid.
-        DUPLICATE_INVOICE: Potential duplicate invoice detected.
-        MULTIPLE_MATCHES: Multiple potential matches found.
-        DATE_VARIANCE: Date mismatch detected.
-        VENDOR_MISMATCH: Vendor doesn't match across documents.
+class ExceptionType(str, enum.Enum):
+    """Exception types for unmatched invoices.
+    
+    Categorizes the type of matching exception to help
+    determine the appropriate resolution workflow.
     """
-
+    
     PRICE_VARIANCE = "price_variance"
     QUANTITY_VARIANCE = "quantity_variance"
     MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
+    MULTIPLE_PO = "multiple_po"
+    PARTIAL_MATCH = "partial_match"
     DUPLICATE_INVOICE = "duplicate_invoice"
-    MULTIPLE_MATCHES = "multiple_matches"
-    DATE_VARIANCE = "date_variance"
-    VENDOR_MISMATCH = "vendor_mismatch"
+    MISSING_DELIVERY_NOTE = "missing_delivery_note"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    INVALID_LINE = "invalid_line"
+    BLOCKED_VENDOR = "blocked_vendor"
+    OTHER = "other"
+    
+    @classmethod
+    def variance_types(cls) -> List["ExceptionType"]:
+        """Get exception types related to value/quantity variances."""
+        return [
+            cls.PRICE_VARIANCE,
+            cls.QUANTITY_VARIANCE,
+            cls.OVER_DELIVERY,
+            cls.UNDER_DELIVERY,
+        ]
+    
+    @classmethod
+    def missing_document_types(cls) -> List["ExceptionType"]:
+        """Get exception types related to missing documents."""
+        return [
+            cls.MISSING_PO,
+            cls.MISSING_DELIVERY_NOTE,
+        ]
 
 
-class ExceptionStatus(str, Enum):
-    """Exception status enumeration.
-
-    Attributes:
-        OPEN: Exception is open and awaiting resolution.
-        UNDER_REVIEW: Exception is being reviewed.
-        RESOLVED: Exception has been resolved.
-        DISMISSED: Exception has been dismissed.
-        ESCALATED: Exception has been escalated.
-    """
-
+class ExceptionStatus(str, enum.Enum):
+    """Exception status values."""
+    
     OPEN = "open"
-    UNDER_REVIEW = "under_review"
+    IN_REVIEW = "in_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
+    
+    @classmethod
+    def active_statuses(cls) -> List["ExceptionStatus"]:
+        """Get list of active (unresolved) statuses."""
+        return [cls.OPEN, cls.IN_REVIEW, cls.ESCALATED]
 
 
-class LineStatus(str, Enum):
-    """Line item status enumeration.
-
-    Attributes:
-        PENDING: Line item is pending.
-        MATCHED: Line item has been matched.
-        PARTIALLY_MATCHED: Line item has been partially matched.
-        EXCEPTION: Line item has exceptions.
-    """
-
+class LineStatus(str, enum.Enum):
+    """Status for individual document lines."""
+    
     PENDING = "pending"
     MATCHED = "matched"
     PARTIALLY_MATCHED = "partially_matched"
+    UNMATCHED = "unmatched"
     EXCEPTION = "exception"
+    CANCELLED = "cancelled"
+    
+    @classmethod
+    def matched_statuses(cls) -> List["LineStatus"]:
+        """Get statuses indicating successful matching."""
+        return [cls.MATCHED, cls.PARTIALLY_MATCHED]
 
 
-class BalanceType(str, Enum):
-    """Balance ledger transaction type.
-
-    Attributes:
-        PO_INITIAL: Initial PO balance created.
-        PO_CANCELLED: PO cancelled, balance released.
-        DELIVERY_RECEIVED: Goods received, reduces PO balance.
-        INVOICE_MATCHED: Invoice matched, reduces available balance.
-        CREDIT_MEMO: Credit memo applied.
-        ADJUSTMENT: Manual adjustment.
-    """
-
-    PO_INITIAL = "po_initial"
-    PO_CANCELLED = "po_cancelled"
-    DELIVERY_RECEIVED = "delivery_received"
-    INVOICE_MATCHED = "invoice_matched"
-    CREDIT_MEMO = "credit_memo"
-    ADJUSTMENT = "adjustment"
-
-
-class MatchConfidence(str, Enum):
-    """Match confidence level from learning system.
-
-    Attributes:
-        HIGH: High confidence match (>90%).
-        MEDIUM: Medium confidence match (70-90%).
-        LOW: Low confidence match (50-70%).
-        UNCERTAIN: Uncertain match (<50%).
-    """
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    UNCERTAIN = "uncertain"
-
-
-class LearningStatus(str, Enum):
-    """Learning loop status for cross-reference records.
-
-    Attributes:
-        ACTIVE: Cross-reference is active and being used.
-        PROMOTED: Cross-reference has been promoted to confirmed.
-        DEMOTED: Cross-reference has been demoted.
-        ARCHIVED: Cross-reference has been archived.
-    """
-
+class LearningStatus(str, enum.Enum):
+    """Learning/cross-reference status values."""
+    
     ACTIVE = "active"
     PROMOTED = "promoted"
     DEMOTED = "demoted"
     ARCHIVED = "archived"
+    
+    def promote(self) -> "LearningStatus":
+        """Promote a cross-reference to higher confidence."""
+        if self == LearningStatus.ACTIVE:
+            return LearningStatus.PROMOTED
+        return self
+    
+    def demote(self) -> "LearningStatus":
+        """Demote a cross-reference to lower confidence."""
+        if self == LearningStatus.PROMOTED:
+            return LearningStatus.ARCHIVED
+        elif self == LearningStatus.ACTIVE:
+            return LearningStatus.DEMOTED
+        return self
 
 
-# SQLAlchemy enum types for use in column definitions
-InvoiceStatusType = SQLEnum(
-    InvoiceStatus,
-    name="invoice_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
+# Display name mappings for UI rendering
+ENUM_DISPLAY_NAMES: Dict[Any, str] = {
+    InvoiceStatus.DRAFT: "Draft",
+    InvoiceStatus.RECEIVED: "Received",
+    InvoiceStatus.VALIDATED: "Validated",
+    InvoiceStatus.MATCHING: "Matching",
+    InvoiceStatus.MATCHED: "Matched",
+    InvoiceStatus.EXCEPTION: "Exception",
+    InvoiceStatus.APPROVED: "Approved",
+    InvoiceStatus.REJECTED: "Rejected",
+    InvoiceStatus.PAID: "Paid",
+    InvoiceStatus.CANCELLED: "Cancelled",
+    MatchDecision.AUTO_APPROVED: "Auto Approved",
+    MatchDecision.ONE_CLICK_REVIEW: "1-Click Review",
+    MatchDecision.EXCEPTION: "Exception",
+    MatchDecision.REJECTED: "Rejected",
+    MatchDecision.MANUAL_REVIEW: "Manual Review",
+    MatchDecision.NO_MATCH: "No Match",
+    ExceptionStatus.OPEN: "Open",
+    ExceptionStatus.IN_REVIEW: "In Review",
+    ExceptionStatus.RESOLVED: "Resolved",
+    ExceptionStatus.DISMISSED: "Dismissed",
+    ExceptionStatus.ESCALATED: "Escalated",
+}
 
-PurchaseOrderStatusType = SQLEnum(
-    PurchaseOrderStatus,
-    name="purchase_order_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
 
-DeliveryNoteStatusType = SQLEnum(
-    DeliveryNoteStatus,
-    name="delivery_note_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-MatchingDecisionType = SQLEnum(
-    MatchingDecision,
-    name="matching_decision",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-ExceptionTypeSQL = SQLEnum(
-    ExceptionType,
-    name="exception_type",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-ExceptionStatusType = SQLEnum(
-    ExceptionStatus,
-    name="exception_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-LineStatusType = SQLEnum(
-    LineStatus,
-    name="line_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-BalanceTypeSQL = SQLEnum(
-    BalanceType,
-    name="balance_type",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-MatchConfidenceType = SQLEnum(
-    MatchConfidence,
-    name="match_confidence",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
-
-LearningStatusType = SQLEnum(
-    LearningStatus,
-    name="learning_status",
-    create_constraint=True,
-    create_type=True,
-    values_callable=lambda x: [e.value for e in x],
-)
+def get_display_name(enum_value: Any) -> str:
+    """Get display name for an enum value.
+    
+    Args:
+        enum_value: Any enum member.
+    
+    Returns:
+        Human-readable display name.
+    """
+    return ENUM_DISPLAY_NAMES.get(enum_value, enum_value.value.replace("_", " ").title())
