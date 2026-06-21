@@ -1,25 +1,17 @@
 // src/app/models/base.py
-"""Base model classes with common functionality."""
+"""
+Base Model Class
+Provides common fields and functionality for all models.
+"""
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Optional
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 
-from src.app.database import Base
-
-
-class UUIDMixin:
-    """Mixin for UUID primary key."""
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        index=True,
-    )
+from app.core.database import Base
 
 
 class TimestampMixin:
@@ -38,20 +30,49 @@ class TimestampMixin:
     )
 
 
-class BaseModel(Base, UUIDMixin, TimestampMixin):
-    """Base model with common fields."""
+class UUIDMixin:
+    """Mixin for UUID primary key."""
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+
+
+class SoftDeleteMixin:
+    """Mixin for soft delete functionality."""
+    
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+
+class BaseModel(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """Base model with common mixins."""
     
     __abstract__ = True
     
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        result = {}
-        for column in self.__table__.columns:
-            value = getattr(self, column.name)
-            if isinstance(value, uuid.UUID):
-                result[column.name] = str(value)
-            elif isinstance(value, datetime):
-                result[column.name] = value.isoformat() if value else None
-            else:
-                result[column.name] = value
-        return result
+    @declared_attr
+    def __tablename__(cls) -> str:
+        """Auto-generate table name from class name."""
+        import re
+        name = cls.__name__
+        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+class AuditableMixin(TimestampMixin):
+    """Mixin for tracking who created/updated records."""
+    
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )

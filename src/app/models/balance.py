@@ -1,72 +1,113 @@
 // src/app/models/balance.py
-"""Balance Ledger models for tracking partial matches."""
+"""
+Balance Ledger Model
+Tracks balances across all document types for partial match resolution.
+"""
 import uuid
 from decimal import Decimal
-from enum import Enum
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import String, Numeric, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.models.base import BaseModel
-
-
-class BalanceType(str, Enum):
-    """Balance type enumeration."""
-    
-    INVOICE = "invoice"
-    DELIVERY_NOTE = "delivery_note"
-    PURCHASE_ORDER = "purchase_order"
-
-
-class BalanceStatus(str, Enum):
-    """Balance status enumeration."""
-    
-    OPEN = "open"
-    PARTIAL = "partial"
-    CLOSED = "closed"
-    OVER_DELIVERED = "over_delivered"
-    UNDER_DELIVERED = "under_delivered"
+from app.models.base import BaseModel
 
 
 class BalanceLedger(BaseModel):
-    """Balance Ledger for tracking partial matches and balances."""
+    """
+    Balance ledger for tracking partial matches and balances.
+    This enables handling of:
+    - Partial shipments
+    - Split invoices
+    - Multi-delivery scenarios
+    """
     
     __tablename__ = "balance_ledger"
     
-    document_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    document_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Reference to the transaction that created this balance
+    transaction_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+    )  # 'invoice', 'delivery_note', 'adjustment'
     
-    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    matched_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    balance_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
     
-    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    matched_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=Decimal("0.000"), nullable=False)
-    balance_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    # Reference document
+    source_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )  # 'PO', 'invoice', 'DN'
     
-    status: Mapped[str] = mapped_column(String(20), default=BalanceStatus.OPEN.value, nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
     
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    # Balance details
+    balance_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )  # 'quantity', 'amount'
     
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    original_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        default=Decimal("0.000"),
+        nullable=False,
+    )
+    
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    applied_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        default=Decimal("0.000"),
+        nullable=False,
+    )
+    
+    applied_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    remaining_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        default=Decimal("0.000"),
+        nullable=False,
+    )
+    
+    remaining_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    
+    # Status
+    is_settled: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )
+    
+    settled_at: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    
+    # Description
+    description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
     
     def __repr__(self) -> str:
-        return f"<BalanceLedger(doc_type={self.document_type}, doc_id={self.document_id}, balance={self.balance_amount})>"
-    
-    @property
-    def is_balanced(self) -> bool:
-        """Check if the balance is fully matched."""
-        return self.balance_amount == Decimal("0.00") and self.balance_quantity == Decimal("0.000")
-    
-    @property
-    def balance_percentage(self) -> Decimal:
-        """Calculate balance percentage."""
-        if self.original_amount == Decimal("0.00"):
-            return Decimal("100.00")
-        return (self.balance_amount / self.original_amount) * Decimal("100.00")
-
-
-from decimal import Decimal
+        return f"<BalanceLedger {self.transaction_type}: {self.remaining_amount}>"

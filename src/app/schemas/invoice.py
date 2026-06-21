@@ -1,113 +1,123 @@
 // src/app/schemas/invoice.py
-"""Invoice schemas."""
+"""
+Invoice schemas for API request/response validation.
+"""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-
-class InvoiceLineBase(BaseModel):
-    """Base invoice line schema."""
-    
-    line_number: int = Field(ge=1)
-    product_code: Optional[str] = Field(default=None, max_length=100)
-    product_name: str = Field(max_length=255)
-    description: Optional[str] = None
-    quantity: Decimal = Field(ge=0, decimal_places=3)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(ge=0, decimal_places=4)
-    tax_code: Optional[str] = None
-    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
-    notes: Optional[str] = None
+from app.schemas.base import BaseSchema, TimestampSchema, PaginationParams, PaginatedResponse
+from app.schemas.supplier import SupplierBrief
+from app.schemas.purchase_order import PurchaseOrderBrief
 
 
-class InvoiceLineCreate(InvoiceLineBase):
-    """Invoice line creation schema."""
-    pass
+# Line item schemas
+class InvoiceLineCreate(BaseSchema):
+    """Schema for creating an invoice line."""
+    line_number: int = Field(..., ge=1)
+    description: str = Field(..., min_length=1, max_length=500)
+    sku: Optional[str] = Field(None, max_length=100)
+    quantity: Decimal = Field(..., gt=0)
+    unit_of_measure: str = Field(default="EA")
+    unit_price: Decimal = Field(..., ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    po_line_id: Optional[UUID] = None
+    delivery_note_line_id: Optional[UUID] = None
 
 
-class InvoiceLineResponse(InvoiceLineBase):
+class InvoiceLineUpdate(BaseSchema):
+    """Schema for updating an invoice line."""
+    description: Optional[str] = Field(None, min_length=1, max_length=500)
+    sku: Optional[str] = Field(None, max_length=100)
+    quantity: Optional[Decimal] = Field(None, gt=0)
+    unit_of_measure: Optional[str] = None
+    unit_price: Optional[Decimal] = Field(None, ge=0)
+    tax_rate: Optional[Decimal] = Field(None, ge=0)
+
+
+class InvoiceLineResponse(BaseSchema):
     """Invoice line response schema."""
-    
-    id: str
-    invoice_id: str
+    id: UUID
+    line_number: int
+    description: str
+    sku: Optional[str]
+    quantity: Decimal
+    unit_of_measure: str
+    unit_price: Decimal
+    tax_rate: Decimal
     line_amount: Decimal
-    po_line_id: Optional[str] = None
-    dn_line_id: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = ConfigDict(from_attributes=True)
+    tax_amount: Decimal
+    total_amount: Decimal
+    po_line_id: Optional[UUID]
+    delivery_note_line_id: Optional[UUID]
 
 
-class InvoiceBase(BaseModel):
-    """Base invoice schema."""
-    
-    invoice_number: str = Field(max_length=50)
-    supplier_id: str
-    supplier_name: str = Field(max_length=255)
-    supplier_code: str = Field(max_length=50)
+# Header schemas
+class InvoiceCreate(BaseSchema):
+    """Schema for creating an invoice."""
+    invoice_number: str = Field(..., min_length=1, max_length=50)
+    supplier_id: UUID
+    po_id: Optional[UUID] = None
     invoice_date: date
-    due_date: date
-    po_reference: Optional[str] = None
+    due_date: Optional[date] = None
     currency: str = Field(default="USD", max_length=3)
     notes: Optional[str] = None
+    lines: List[InvoiceLineCreate]
 
 
-class InvoiceCreate(InvoiceBase):
-    """Invoice creation schema."""
-    
-    lines: list[InvoiceLineCreate] = Field(min_length=1)
-    status: Optional[str] = "draft"
-
-
-class InvoiceUpdate(BaseModel):
-    """Invoice update schema."""
-    
-    supplier_name: Optional[str] = None
-    supplier_code: Optional[str] = None
+class InvoiceUpdate(BaseSchema):
+    """Schema for updating an invoice."""
+    po_id: Optional[UUID] = None
+    invoice_date: Optional[date] = None
     due_date: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    payment_reference: Optional[str] = None
 
 
-class InvoiceResponse(InvoiceBase):
+class InvoiceResponse(TimestampSchema):
     """Invoice response schema."""
-    
-    id: str
-    po_id: Optional[str] = None
+    id: UUID
+    invoice_number: str
+    supplier_id: UUID
+    po_id: Optional[UUID]
+    invoice_date: date
+    due_date: Optional[date]
+    status: str
+    currency: str
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    status: str
-    is_archived: bool
-    lines: list[InvoiceLineResponse] = []
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = ConfigDict(from_attributes=True)
+    amount_paid: Decimal
+    notes: Optional[str]
+    payment_reference: Optional[str]
+    lines: List[InvoiceLineResponse] = []
+    supplier: Optional[SupplierBrief] = None
+    purchase_order: Optional[PurchaseOrderBrief] = None
 
 
-class InvoiceListResponse(BaseModel):
-    """Invoice list response with pagination."""
-    
-    invoices: list[InvoiceResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-class InvoiceSummary(BaseModel):
-    """Invoice summary for matching."""
-    
-    id: str
+class InvoiceBrief(BaseSchema):
+    """Brief invoice information."""
+    id: UUID
     invoice_number: str
-    supplier_code: str
     total_amount: Decimal
-    currency: str
     status: str
-    open_amount: Decimal
-    line_count: int
-    
-    model_config = ConfigDict(from_attributes=True)
+
+
+class InvoiceListResponse(PaginatedResponse[InvoiceResponse]):
+    """Paginated invoice list response."""
+    pass
+
+
+class InvoiceStatusUpdate(BaseSchema):
+    """Schema for updating invoice status."""
+    status: str = Field(..., description="New status: pending, matched, approved, paid, disputed")
+
+
+class InvoicePaymentUpdate(BaseSchema):
+    """Schema for recording payment."""
+    amount: Decimal = Field(..., gt=0)
+    payment_reference: str

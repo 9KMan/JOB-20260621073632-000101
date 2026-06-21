@@ -1,79 +1,108 @@
 // src/app/models/invoice.py
-"""Invoice models."""
+"""
+Invoice Model
+Supplier invoices for AP processing.
+"""
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
-from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, JSON, Numeric, String, Text
+from sqlalchemy import String, Date, Numeric, ForeignKey, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.models.base import BaseModel
-
-
-class InvoiceStatus(str, Enum):
-    """Invoice status enumeration."""
-    
-    DRAFT = "draft"
-    RECEIVED = "received"
-    MATCHED = "matched"
-    APPROVED = "approved"
-    PAID = "paid"
-    DISPUTED = "disputed"
-    CANCELLED = "cancelled"
+from app.models.base import BaseModel
 
 
 class Invoice(BaseModel):
-    """Invoice header model."""
+    """Invoice header."""
     
     __tablename__ = "invoices"
     
-    invoice_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
-    supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    supplier_code: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    invoice_number: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    invoice_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    due_date: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+        index=True,
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="USD",
+        nullable=False,
+    )
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    amount_paid: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    payment_reference: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
     
-    invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
-    due_date: Mapped[date] = mapped_column(Date, nullable=False)
-    
-    po_reference: Mapped[Optional[str]] = mapped_column(String(50), index=True, nullable=True)
-    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    
-    status: Mapped[str] = mapped_column(String(20), default=InvoiceStatus.DRAFT.value, nullable=False)
-    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    
-    lines: Mapped[list["InvoiceLine"]] = relationship(
+    # Relationships
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="invoices")
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        back_populates="invoices",
+    )
+    lines: Mapped[List["InvoiceLine"]] = relationship(
         "InvoiceLine",
         back_populates="invoice",
         cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-    match_records: Mapped[list["MatchRecord"]] = relationship(  # noqa: F821
-        "MatchRecord",
-        back_populates="invoice",
-        foreign_keys="MatchRecord.invoice_id",
     )
     
     def __repr__(self) -> str:
-        return f"<Invoice(invoice_number={self.invoice_number}, supplier={self.supplier_code})>"
-    
-    @property
-    def is_open(self) -> bool:
-        """Check if invoice is open for matching."""
-        return self.status in (InvoiceStatus.RECEIVED.value,) and not self.is_archived
+        return f"<Invoice {self.invoice_number}>"
 
 
 class InvoiceLine(BaseModel):
-    """Invoice line item model."""
+    """Invoice line item."""
     
     __tablename__ = "invoice_lines"
     
@@ -83,32 +112,72 @@ class InvoiceLine(BaseModel):
         nullable=False,
         index=True,
     )
+    line_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    description: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+    sku: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    delivery_note_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+    )
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(20),
+        default="EA",
+        nullable=False,
+    )
+    unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    line_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
     
-    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_code: Mapped[str] = mapped_column(String(100), nullable=True)
-    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    
-    tax_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
-    
-    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    dn_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
-    invoice: Mapped["Invoice"] = relationship(
-        "Invoice",
-        back_populates="lines",
+    # Relationships
+    invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="lines")
+    po_line: Mapped[Optional["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine",
+        back_populates="invoice_lines",
+    )
+    delivery_note_line: Mapped[Optional["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
+        back_populates="invoice_lines",
     )
     
     def __repr__(self) -> str:
-        return f"<InvoiceLine(line_number={self.line_number}, product={self.product_code})>"
-
-
-from datetime import date
+        return f"<InvoiceLine {self.line_number}: {self.description}>"

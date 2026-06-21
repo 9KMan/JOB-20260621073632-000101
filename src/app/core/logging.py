@@ -1,59 +1,67 @@
 // src/app/core/logging.py
 """
-Logging configuration for the application.
+Structured Logging Configuration
+Uses structlog for consistent, machine-readable logging.
 """
 import logging
 import sys
-from typing import Any, Dict
+from typing import Any
+
+import structlog
+from structlog.types import Processor
+
+from app.core.config import settings
 
 
 def setup_logging() -> None:
-    """Configure application logging."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
+    """Configure structured logging for the application."""
+    # Determine log level
+    log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+    
+    # Shared processors for all environments
+    shared_processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.UnicodeDecoder(),
+    ]
+    
+    if settings.ENVIRONMENT == "production":
+        # Production: JSON output
+        shared_processors.extend([
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ])
+    else:
+        # Development: Colored console output
+        shared_processors.extend([
+            structlog.dev.ConsoleRenderer(colors=True),
+        ])
+    
+    # Configure structlog
+    structlog.configure(
+        processors=shared_processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
+    
+    # Configure standard library logging
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=log_level,
+    )
+    
+    # Set third-party loggers to WARNING
+    for logger_name in ["uvicorn", "uvicorn.access", "sqlalchemy.engine", "alembic"]:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
-    # Set SQLAlchemy logging level
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
-    # Set Alembic logging
-    logging.getLogger("alembic").setLevel(logging.INFO)
-
-
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger instance."""
-    return logging.getLogger(name)
-
-
-class StructuredLogger:
-    """Structured logger for JSON logging in production."""
-
-    def __init__(self, name: str):
-        self.logger = logging.getLogger(name)
-
-    def _log(
-        self, level: int, message: str, extra: Dict[str, Any] = None
-    ) -> None:
-        """Log with structured data."""
-        extra = extra or {}
-        self.logger.log(level, message, extra=extra)
-
-    def info(self, message: str, **kwargs: Any) -> None:
-        """Log info level message."""
-        self._log(logging.INFO, message, kwargs)
-
-    def warning(self, message: str, **kwargs: Any) -> None:
-        """Log warning level message."""
-        self._log(logging.WARNING, message, kwargs)
-
-    def error(self, message: str, **kwargs: Any) -> None:
-        """Log error level message."""
-        self._log(logging.ERROR, message, kwargs)
-
-    def debug(self, message: str, **kwargs: Any) -> None:
-        """Log debug level message."""
-        self._log(logging.DEBUG, message, kwargs)
+def get_logger(name: str | None = None) -> Any:
+    """Get a structured logger instance."""
+    return structlog.get_logger(name)

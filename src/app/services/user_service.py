@@ -1,49 +1,77 @@
 // src/app/services/user_service.py
-"""User service."""
+"""
+User Service
+Handles user-related business logic.
+"""
+from typing import Optional
+from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.services.base import BaseService
+from app.core.security import get_password_hash, verify_password
 
 
 class UserService(BaseService[User]):
     """Service for user operations."""
-
-    def __init__(self, db: Session):
-        """Initialize user service."""
-        super().__init__(User, db)
-
-    def get_by_email(self, email: str) -> User | None:
-        """Get a user by email."""
-        return self.db.query(User).filter(User.email == email).first()
-
-    def create(self, email: str, password: str, full_name: str) -> User:
-        """Create a new user with hashed password."""
-        hashed_password = hash_password(password)
-        user_data = {
-            "email": email,
-            "hashed_password": hashed_password,
-            "full_name": full_name,
-        }
-        return super().create(user_data)
-
-    def authenticate(self, email: str, password: str) -> User | None:
-        """Authenticate a user by email and password."""
-        user = self.get_by_email(email)
+    
+    def __init__(self, session: Optional[AsyncSession] = None):
+        super().__init__(User, session)
+    
+    async def get_by_email(self, email: str) -> Optional[User]:
+        """Get user by email."""
+        session = await self._get_session()
+        result = await session.execute(
+            select(User).where(User.email == email.lower())
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_username(self, username: str) -> Optional[User]:
+        """Get user by username."""
+        session = await self._get_session()
+        result = await session.execute(
+            select(User).where(User.username == username.lower())
+        )
+        return result.scalar_one_or_none()
+    
+    async def create_user(self, data: dict) -> User:
+        """Create new user with hashed password."""
+        if "password" in data:
+            data["hashed_password"] = get_password_hash(data.pop("password"))
+        
+        if "email" in data:
+            data["email"] = data["email"].lower()
+        
+        if "username" in data:
+            data["username"] = data["username"].lower()
+        
+        return await self.create(data)
+    
+    async def authenticate(self, username: str, password: str) -> Optional[User]:
+        """Authenticate user with username and password."""
+        user = await self.get_by_username(username)
         if not user:
             return None
+        
+        if not user.is_active:
+            return None
+        
         if not verify_password(password, user.hashed_password):
             return None
+        
         return user
-
-    def update_password(self, user: User, new_password: str) -> User:
+    
+    async def update_password(self, user_id: UUID, new_password: str) -> bool:
         """Update user password."""
-        hashed_password = hash_password(new_password)
-        return self.update(user, {"hashed_password": hashed_password})
-
-    def is_superuser(self, user_id: str) -> bool:
-        """Check if user is a superuser."""
-        user = self.get(user_id)
-        return user.is_superuser if user else False
+        hashed = get_password_hash(new_password)
+        session = await self._get_session()
+        from sqlalchemy import update as sql_update
+        await session.execute(
+            sql_update(User)
+            .where(User.id == user_id)
+            .values(hashed_password=hashed)
+        )
+        await session.flush()
+        return True
