@@ -1,167 +1,72 @@
 // src/app/models/balance.py
-"""Balance and BalanceTransaction models for tracking partial matches."""
-
+"""Balance Ledger models for tracking partial matches."""
 import uuid
-from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 
-from sqlalchemy import String, Date, DateTime, Numeric, Integer, ForeignKey, Text, Index
+from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-import enum
 
-from app.database import Base
-from app.models.base import BaseModel
+from src.app.models.base import BaseModel
 
 
-class BalanceType(str, enum.Enum):
+class BalanceType(str, Enum):
     """Balance type enumeration."""
+    
     INVOICE = "invoice"
     DELIVERY_NOTE = "delivery_note"
     PURCHASE_ORDER = "purchase_order"
 
 
-class TransactionType(str, enum.Enum):
-    """Balance transaction type enumeration."""
-    DEBIT = "debit"
-    CREDIT = "credit"
+class BalanceStatus(str, Enum):
+    """Balance status enumeration."""
+    
+    OPEN = "open"
+    PARTIAL = "partial"
+    CLOSED = "closed"
+    OVER_DELIVERED = "over_delivered"
+    UNDER_DELIVERED = "under_delivered"
 
 
-class Balance(BaseModel):
-    """
-    Balance model for tracking partial matches and outstanding balances
-    across all three document types.
-    """
+class BalanceLedger(BaseModel):
+    """Balance Ledger for tracking partial matches and balances."""
     
-    __tablename__ = "balances"
-    __table_args__ = (
-        Index("ix_balances_document_type_id", "document_type", "document_id"),
-        Index("ix_balances_supplier_id", "supplier_id"),
-        Index("ix_balances_status", "status"),
-    )
+    __tablename__ = "balance_ledger"
     
-    document_type: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-    )
+    document_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    document_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-    )
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    matched_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    balance_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     
-    document_number: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
+    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    matched_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=Decimal("0.000"), nullable=False)
+    balance_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
     
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    status: Mapped[str] = mapped_column(String(20), default=BalanceStatus.OPEN.value, nullable=False)
     
-    original_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     
-    matched_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    balance_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        default="USD",
-        nullable=False,
-    )
-    
-    document_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-    
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default="open",
-        nullable=False,
-    )
-    
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    
-    # Relationships
-    supplier = relationship("Supplier")
-    transactions = relationship(
-        "BalanceTransaction",
-        back_populates="balance",
-        cascade="all, delete-orphan",
-    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     def __repr__(self) -> str:
-        return f"<Balance {self.document_type}:{self.document_number}>"
+        return f"<BalanceLedger(doc_type={self.document_type}, doc_id={self.document_id}, balance={self.balance_amount})>"
+    
+    @property
+    def is_balanced(self) -> bool:
+        """Check if the balance is fully matched."""
+        return self.balance_amount == Decimal("0.00") and self.balance_quantity == Decimal("0.000")
+    
+    @property
+    def balance_percentage(self) -> Decimal:
+        """Calculate balance percentage."""
+        if self.original_amount == Decimal("0.00"):
+            return Decimal("100.00")
+        return (self.balance_amount / self.original_amount) * Decimal("100.00")
 
 
-class BalanceTransaction(BaseModel):
-    """
-    Balance transaction model for tracking balance changes.
-    """
-    
-    __tablename__ = "balance_transactions"
-    __table_args__ = (
-        Index("ix_balance_transactions_balance_id", "balance_id"),
-        Index("ix_balance_transactions_match_id", "match_id"),
-    )
-    
-    balance_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("balances.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    
-    match_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matches.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    
-    transaction_type: Mapped[str] = mapped_column(
-        String(10),
-        nullable=False,
-    )
-    
-    amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    balance_before: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    balance_after: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
-    
-    # Relationships
-    balance = relationship("Balance", back_populates="transactions")
-    
-    def __repr__(self) -> str:
-        return f"<BalanceTransaction {self.balance_id}:{self.transaction_type}>"
+from decimal import Decimal

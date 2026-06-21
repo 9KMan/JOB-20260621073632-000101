@@ -1,152 +1,236 @@
 // src/app/services/delivery_note_service.py
-"""
-Delivery Note service.
-"""
-from typing import Optional, List
+"""Delivery Note service."""
+import uuid
 from decimal import Decimal
-from uuid import UUID
-from datetime import date
+from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.schemas.delivery_note import DeliveryNoteCreate, DeliveryNoteUpdate
-from app.services.base_service import BaseService
+from src.app.models.delivery_note import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
+from src.app.schemas.delivery_note import (
+    DeliveryNoteCreate,
+    DeliveryNoteUpdate,
+    DeliveryNoteResponse,
+    DeliveryNoteSummary,
+)
 
 
-class DeliveryNoteService(BaseService[DeliveryNote]):
+class DeliveryNoteService:
     """Service for Delivery Note operations."""
-
-    def __init__(self, session: AsyncSession):
-        super().__init__(DeliveryNote, session)
-
-    async def get_by_dn_number(self, dn_number: str) -> Optional[DeliveryNote]:
-        """Get delivery note by DN number."""
-        return await self.get_by(
-            "dn_number", dn_number, load_relations=["lines", "supplier"]
-        )
-
-    async def get_with_relations(self, id: UUID) -> Optional[DeliveryNote]:
-        """Get delivery note with all relations loaded."""
-        result = await self.session.execute(
-            select(DeliveryNote)
-            .options(
-                selectinload(DeliveryNote.lines),
-                selectinload(DeliveryNote.supplier),
-            )
-            .where(DeliveryNote.id == id)
-        )
-        return result.scalar_one_or_none()
-
-    async def search_delivery_notes(
-        self,
-        query: str = None,
-        supplier_id: UUID = None,
-        status: str = None,
-        date_from: date = None,
-        date_to: date = None,
-        po_reference: str = None,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[DeliveryNote]:
-        """Search delivery notes."""
-        stmt = select(DeliveryNote).options(selectinload(DeliveryNote.lines))
-        
-        if query:
-            stmt = stmt.where(DeliveryNote.dn_number.ilike(f"%{query}%"))
-        if supplier_id:
-            stmt = stmt.where(DeliveryNote.supplier_id == supplier_id)
-        if status:
-            stmt = stmt.where(DeliveryNote.status == status)
-        if date_from:
-            stmt = stmt.where(DeliveryNote.delivery_date >= date_from)
-        if date_to:
-            stmt = stmt.where(DeliveryNote.delivery_date <= date_to)
-        if po_reference:
-            stmt = stmt.where(DeliveryNote.po_reference == po_reference)
-        
-        stmt = stmt.offset(skip).limit(limit)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
-
-    async def create_delivery_note(
-        self, dn_in: DeliveryNoteCreate
-    ) -> DeliveryNote:
+    
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    async def create_delivery_note(self, dn_data: DeliveryNoteCreate) -> DeliveryNote:
         """Create a new delivery note with lines."""
-        dn_data = dn_in.model_dump(exclude={"lines"})
+        dn = DeliveryNote(
+            dn_number=dn_data.dn_number,
+            supplier_id=uuid.UUID(dn_data.supplier_id),
+            supplier_name=dn_data.supplier_name,
+            supplier_code=dn_data.supplier_code,
+            dn_date=dn_data.dn_date,
+            received_date=dn_data.received_date,
+            po_reference=dn_data.po_reference,
+            currency=dn_data.currency,
+            status=dn_data.status or DeliveryNoteStatus.DRAFT.value,
+            notes=dn_data.notes,
+        )
         
-        # Create delivery note
-        dn = DeliveryNote(**dn_data)
-        self.session.add(dn)
-        await self.session.flush()
+        self.db.add(dn)
+        await self.db.flush()
         
-        # Create lines
-        lines_data = dn_data.pop("lines")
-        for line_data in lines_data:
-            line = DeliveryNoteLine(delivery_note_id=dn.id, **line_data)
-            self.session.add(line)
+        for line_data in dn_data.lines:
+            line = DeliveryNoteLine(
+                delivery_note_id=dn.id,
+                line_number=line_data.line_number,
+                product_code=line_data.product_code,
+                product_name=line_data.product_name,
+                description=line_data.description,
+                quantity_ordered=line_data.quantity_ordered,
+                quantity_delivered=line_data.quantity_delivered,
+                unit_of_measure=line_data.unit_of_measure,
+                unit_price=line_data.unit_price,
+                notes=line_data.notes,
+            )
+            if line_data.unit_price:
+                line.line_amount = line_data.quantity_delivered * line_data.unit_price
+            else:
+                line.line_amount = Decimal("0.00")
+            self.db.add(line)
         
-        await self.session.flush()
-        await self.session.refresh(dn)
+        await self.db.flush()
+        await self._recalculate_totals(dn.id)
+        await self.db.refresh(dn)
         
-        return await self.get_with_relations(dn.id)
-
-    async def update_delivery_note(
-        self, id: UUID, dn_in: DeliveryNoteUpdate
-    ) -> Optional[DeliveryNote]:
-        """Update a delivery note."""
-        update_data = dn_in.model_dump(exclude_unset=True)
-        return await self.update(id, update_data)
-
-    async def update_dn_status(self, id: UUID, status: str) -> Optional[DeliveryNote]:
-        """Update delivery note status."""
-        return await self.update(id, {"status": status})
-
-    async def mark_as_matched(self, id: UUID) -> Optional[DeliveryNote]:
-        """Mark delivery note as matched."""
-        return await self.update(id, {"status": "matched"})
-
-    async def mark_as_completed(self, id: UUID) -> Optional[DeliveryNote]:
-        """Mark delivery note as completed."""
-        return await self.update(id, {"status": "completed"})
-
-    async def get_unmatched_delivery_notes(
-        self,
-        supplier_id: UUID = None,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[DeliveryNote]:
-        """Get delivery notes that haven't been matched."""
-        stmt = (
+        return dn
+    
+    async def get_delivery_note(self, dn_id: str) -> Optional[DeliveryNote]:
+        """Get a delivery note by ID."""
+        result = await self.db.execute(
             select(DeliveryNote)
             .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.status == "pending")
+            .where(DeliveryNote.id == uuid.UUID(dn_id))
         )
-        if supplier_id:
-            stmt = stmt.where(DeliveryNote.supplier_id == supplier_id)
-        stmt = stmt.offset(skip).limit(limit)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
-
-    async def get_total_quantity(self, id: UUID) -> Decimal:
-        """Get total quantity delivered for a DN."""
-        dn = await self.get_with_relations(id)
-        if not dn:
-            return Decimal("0.000")
-        return sum(line.net_quantity for line in dn.lines)
-
-    async def get_pending_delivery_notes_for_review(
-        self, skip: int = 0, limit: int = 100
-    ) -> List[DeliveryNote]:
-        """Get all pending delivery notes that need review."""
-        stmt = (
+        return result.scalar_one_or_none()
+    
+    async def get_delivery_note_by_number(self, dn_number: str) -> Optional[DeliveryNote]:
+        """Get a delivery note by DN number."""
+        result = await self.db.execute(
             select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines), selectinload(DeliveryNote.supplier))
-            .where(DeliveryNote.status == "pending")
-            .order_by(DeliveryNote.delivery_date.desc())
+            .options(selectinload(DeliveryNote.lines))
+            .where(DeliveryNote.dn_number == dn_number)
         )
-        stmt = stmt.offset(skip).limit(limit)
-        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def list_delivery_notes(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        supplier_code: Optional[str] = None,
+        status: Optional[str] = None,
+        po_reference: Optional[str] = None,
+        is_archived: bool = False,
+    ) -> tuple[list[DeliveryNote], int]:
+        """List delivery notes with pagination and filters."""
+        query = select(DeliveryNote).options(selectinload(DeliveryNote.lines))
+        
+        if supplier_code:
+            query = query.where(DeliveryNote.supplier_code == supplier_code)
+        if status:
+            query = query.where(DeliveryNote.status == status)
+        if po_reference:
+            query = query.where(DeliveryNote.po_reference == po_reference)
+        if is_archived is not None:
+            query = query.where(DeliveryNote.is_archived == is_archived)
+        
+        count_query = select(func.count(DeliveryNote.id))
+        if supplier_code:
+            count_query = count_query.where(DeliveryNote.supplier_code == supplier_code)
+        if status:
+            count_query = count_query.where(DeliveryNote.status == status)
+        if po_reference:
+            count_query = count_query.where(DeliveryNote.po_reference == po_reference)
+        if is_archived is not None:
+            count_query = count_query.where(DeliveryNote.is_archived == is_archived)
+        
+        count_result = await self.db.execute(count_query)
+        total = count_result.scalar() or 0
+        
+        query = query.order_by(DeliveryNote.created_at.desc())
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        
+        result = await self.db.execute(query)
+        delivery_notes = result.scalars().all()
+        
+        return list(delivery_notes), total
+    
+    async def update_delivery_note(
+        self,
+        dn_id: str,
+        dn_data: DeliveryNoteUpdate,
+    ) -> Optional[DeliveryNote]:
+        """Update a delivery note."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return None
+        
+        update_data = dn_data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(dn, field, value)
+        
+        await self.db.flush()
+        await self.db.refresh(dn)
+        return dn
+    
+    async def delete_delivery_note(self, dn_id: str) -> bool:
+        """Delete a delivery note."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return False
+        
+        await self.db.delete(dn)
+        await self.db.flush()
+        return True
+    
+    async def archive_delivery_note(self, dn_id: str) -> Optional[DeliveryNote]:
+        """Archive a delivery note."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return None
+        
+        dn.is_archived = True
+        await self.db.flush()
+        await self.db.refresh(dn)
+        return dn
+    
+    async def update_status(self, dn_id: str, status: str) -> Optional[DeliveryNote]:
+        """Update delivery note status."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return None
+        
+        dn.status = status
+        await self.db.flush()
+        await self.db.refresh(dn)
+        return dn
+    
+    async def link_to_po(self, dn_id: str, po_id: str) -> Optional[DeliveryNote]:
+        """Link delivery note to purchase order."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return None
+        
+        dn.po_id = uuid.UUID(po_id)
+        await self.db.flush()
+        await self.db.refresh(dn)
+        return dn
+    
+    async def get_open_delivery_notes(
+        self,
+        supplier_code: Optional[str] = None,
+    ) -> list[DeliveryNote]:
+        """Get all open (unmatched) delivery notes."""
+        query = select(DeliveryNote).options(selectinload(DeliveryNote.lines)).where(
+            DeliveryNote.status == DeliveryNoteStatus.RECEIVED.value,
+            DeliveryNote.is_archived == False,
+        )
+        
+        if supplier_code:
+            query = query.where(DeliveryNote.supplier_code == supplier_code)
+        
+        result = await self.db.execute(query)
         return list(result.scalars().all())
+    
+    async def get_delivery_note_summary(self, dn_id: str) -> Optional[DeliveryNoteSummary]:
+        """Get delivery note summary for matching."""
+        dn = await self.get_delivery_note(dn_id)
+        if not dn:
+            return None
+        
+        return DeliveryNoteSummary(
+            id=str(dn.id),
+            dn_number=dn.dn_number,
+            supplier_code=dn.supplier_code,
+            total_amount=dn.total_amount,
+            currency=dn.currency,
+            status=dn.status,
+            open_amount=dn.total_amount,
+            line_count=len(dn.lines),
+        )
+    
+    async def _recalculate_totals(self, dn_id: uuid.UUID) -> None:
+        """Recalculate delivery note totals from lines."""
+        result = await self.db.execute(
+            select(func.sum(DeliveryNoteLine.line_amount).label("total"))
+            .where(DeliveryNoteLine.delivery_note_id == dn_id)
+        )
+        total = result.scalar() or Decimal("0.00")
+        
+        dn_result = await self.db.execute(
+            select(DeliveryNote).where(DeliveryNote.id == dn_id)
+        )
+        dn = dn_result.scalar_one()
+        dn.total_amount = total
+        await self.db.flush()

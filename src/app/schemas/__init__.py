@@ -1,105 +1,76 @@
 // src/app/schemas/__init__.py
-"""Pydantic schemas for FinaRo AP Automation Core Engine."""
-
-from app.schemas.user import (
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    UserLogin,
+"""Pydantic schemas for API request/response validation."""
+from src.app.schemas.auth import (
     Token,
     TokenData,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    UserUpdate,
 )
-from app.schemas.supplier import (
-    SupplierCreate,
-    SupplierUpdate,
-    SupplierResponse,
-)
-from app.schemas.purchase_order import (
+from src.app.schemas.common import PaginationParams, ResponseMeta
+from src.app.schemas.purchase_order import (
     PurchaseOrderCreate,
-    PurchaseOrderUpdate,
-    PurchaseOrderResponse,
     PurchaseOrderLineCreate,
-    PurchaseOrderLineUpdate,
+    PurchaseOrderResponse,
     PurchaseOrderLineResponse,
+    PurchaseOrderListResponse,
 )
-from app.schemas.invoice import (
+from src.app.schemas.invoice import (
     InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
     InvoiceLineCreate,
-    InvoiceLineUpdate,
+    InvoiceResponse,
     InvoiceLineResponse,
+    InvoiceListResponse,
 )
-from app.schemas.delivery_note import (
+from src.app.schemas.delivery_note import (
     DeliveryNoteCreate,
-    DeliveryNoteUpdate,
-    DeliveryNoteResponse,
     DeliveryNoteLineCreate,
-    DeliveryNoteLineUpdate,
+    DeliveryNoteResponse,
     DeliveryNoteLineResponse,
+    DeliveryNoteListResponse,
 )
-from app.schemas.match import (
-    MatchCreate,
-    MatchUpdate,
+from src.app.schemas.match import (
+    MatchRequest,
     MatchResponse,
-    MatchLineCreate,
-    MatchLineUpdate,
-    MatchLineResponse,
-    MatchDecisionUpdate,
+    MatchRecordResponse,
+    MatchReviewRequest,
+    MatchDecisionResponse,
 )
-from app.schemas.balance import (
-    BalanceCreate,
-    BalanceUpdate,
+from src.app.schemas.balance import (
     BalanceResponse,
-    BalanceTransactionCreate,
-    BalanceTransactionResponse,
+    BalanceListResponse,
 )
 
 __all__ = [
-    # User
-    "UserCreate",
-    "UserUpdate",
-    "UserResponse",
-    "UserLogin",
     "Token",
     "TokenData",
-    # Supplier
-    "SupplierCreate",
-    "SupplierUpdate",
-    "SupplierResponse",
-    # Purchase Order
+    "UserCreate",
+    "UserLogin",
+    "UserResponse",
+    "UserUpdate",
+    "PaginationParams",
+    "ResponseMeta",
     "PurchaseOrderCreate",
-    "PurchaseOrderUpdate",
-    "PurchaseOrderResponse",
     "PurchaseOrderLineCreate",
-    "PurchaseOrderLineUpdate",
+    "PurchaseOrderResponse",
     "PurchaseOrderLineResponse",
-    # Invoice
+    "PurchaseOrderListResponse",
     "InvoiceCreate",
-    "InvoiceUpdate",
-    "InvoiceResponse",
     "InvoiceLineCreate",
-    "InvoiceLineUpdate",
+    "InvoiceResponse",
     "InvoiceLineResponse",
-    # Delivery Note
+    "InvoiceListResponse",
     "DeliveryNoteCreate",
-    "DeliveryNoteUpdate",
-    "DeliveryNoteResponse",
     "DeliveryNoteLineCreate",
-    "DeliveryNoteLineUpdate",
+    "DeliveryNoteResponse",
     "DeliveryNoteLineResponse",
-    # Match
-    "MatchCreate",
-    "MatchUpdate",
+    "DeliveryNoteListResponse",
+    "MatchRequest",
     "MatchResponse",
-    "MatchLineCreate",
-    "MatchLineUpdate",
-    "MatchLineResponse",
-    "MatchDecisionUpdate",
-    # Balance
-    "BalanceCreate",
-    "BalanceUpdate",
+    "MatchRecordResponse",
+    "MatchReviewRequest",
+    "MatchDecisionResponse",
     "BalanceResponse",
-    "BalanceTransactionCreate",
-    "BalanceTransactionResponse",
+    "BalanceListResponse",
 ]

@@ -1,198 +1,109 @@
 // src/app/models/delivery_note.py
-"""Delivery Note and Delivery Note Line models."""
-
+"""Delivery Note models."""
 import uuid
-from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
+from enum import Enum
+from typing import Optional
 
-from sqlalchemy import String, Date, Numeric, Integer, ForeignKey, Text, Index
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models.base import BaseModel
+from src.app.models.base import BaseModel
+
+
+class DeliveryNoteStatus(str, Enum):
+    """Delivery Note status enumeration."""
+    
+    DRAFT = "draft"
+    RECEIVED = "received"
+    MATCHED = "matched"
+    CLOSED = "closed"
+    DISPUTED = "disputed"
+    CANCELLED = "cancelled"
 
 
 class DeliveryNote(BaseModel):
-    """Delivery Note / Goods Receipt model - one of the three documents in 3-way matching."""
+    """Delivery Note header model."""
     
     __tablename__ = "delivery_notes"
-    __table_args__ = (
-        Index("ix_delivery_notes_supplier_dn_number", "supplier_id", "dn_number"),
-        Index("ix_delivery_notes_status", "status"),
-        Index("ix_delivery_notes_dn_date", "dn_date"),
-    )
     
-    dn_number: Mapped[str] = mapped_column(
-        String(50),
-        unique=True,
-        nullable=False,
-        index=True,
-    )
+    dn_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    supplier_code: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
     
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    dn_date: Mapped[date] = mapped_column(Date, nullable=False)
+    received_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     
-    supplier_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
+    po_reference: Mapped[Optional[str]] = mapped_column(String(50), index=True, nullable=True)
+    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     
-    po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
     
-    po_number: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
+    status: Mapped[str] = mapped_column(String(20), default=DeliveryNoteStatus.DRAFT.value, nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
-    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
-    dn_date: Mapped[date] = mapped_column(
-        Date,
-        nullable=False,
-    )
-    
-    received_date: Mapped[Optional[date]] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default="pending",
-        nullable=False,
-    )
-    
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    total_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        default="USD",
-        nullable=False,
-    )
-    
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    
-    matched_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    open_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    # Relationships
-    supplier = relationship("Supplier", back_populates="delivery_notes")
-    purchase_order = relationship("PurchaseOrder", foreign_keys=[po_id])
-    invoice = relationship("Invoice", foreign_keys=[invoice_id])
-    lines = relationship(
+    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
         "DeliveryNoteLine",
         back_populates="delivery_note",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    match = relationship("Match", back_populates="delivery_note", uselist=False)
+    match_records: Mapped[list["MatchRecord"]] = relationship(  # noqa: F821
+        "MatchRecord",
+        back_populates="delivery_note",
+        foreign_keys="MatchRecord.delivery_note_id",
+    )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNote {self.dn_number}>"
+        return f"<DeliveryNote(dn_number={self.dn_number}, supplier={self.supplier_code})>"
+    
+    @property
+    def is_open(self) -> bool:
+        """Check if DN is open for matching."""
+        return self.status in (DeliveryNoteStatus.RECEIVED.value,) and not self.is_archived
 
 
 class DeliveryNoteLine(BaseModel):
-    """Line item on a Delivery Note."""
+    """Delivery Note line item model."""
     
     __tablename__ = "delivery_note_lines"
-    __table_args__ = (
-        Index("ix_delivery_note_lines_dn_id", "delivery_note_id"),
-    )
     
     delivery_note_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     
-    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    line_number: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-    )
+    quantity_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    quantity_delivered: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    unit_of_measure: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=True)
+    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
     
-    item_code: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
+    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     
-    description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    quantity: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        nullable=False,
-    )
-    
-    unit_of_measure: Mapped[str] = mapped_column(
-        String(20),
-        default="EA",
-        nullable=False,
-    )
-    
-    unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(12, 4),
-        nullable=True,
-    )
-    
-    line_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
-    )
-    
-    # Relationships
-    delivery_note = relationship("DeliveryNote", back_populates="lines")
-    po_line = relationship(
-        "PurchaseOrderLine",
-        back_populates="delivery_note_lines",
-        foreign_keys=[po_line_id],
-    )
-    invoice_lines = relationship(
-        "InvoiceLine",
-        back_populates="dn_line",
-        foreign_keys="InvoiceLine.dn_line_id",
+    delivery_note: Mapped["DeliveryNote"] = relationship(
+        "DeliveryNote",
+        back_populates="lines",
     )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNoteLine {self.delivery_note_id}:{self.line_number}>"
+        return f"<DeliveryNoteLine(line_number={self.line_number}, product={self.product_code})>"
+
+
+from datetime import date

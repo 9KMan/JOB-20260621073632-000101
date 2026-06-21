@@ -1,71 +1,81 @@
 // src/app/config.py
-"""
-Configuration management for FinaRo AP Automation Core Engine.
-All configuration is loaded from environment variables.
-"""
-
+"""Configuration management for FinaRo AP Automation Engine."""
 import os
 from functools import lru_cache
-from typing import List
+from typing import Optional
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+
+
+class DatabaseSettings(BaseModel):
+    """Database configuration settings."""
+    
+    host: str = Field(default_factory=lambda: os.getenv("DB_HOST", "localhost"))
+    port: int = Field(default_factory=lambda: int(os.getenv("DB_PORT", "5432")))
+    name: str = Field(default_factory=lambda: os.getenv("DB_NAME", "finaro_ap"))
+    user: str = Field(default_factory=lambda: os.getenv("DB_USER", "postgres"))
+    password: str = Field(default_factory=lambda: os.getenv("DB_PASSWORD", "postgres"))
+    pool_size: int = Field(default_factory=lambda: int(os.getenv("DB_POOL_SIZE", "10")))
+    max_overflow: int = Field(default_factory=lambda: int(os.getenv("DB_MAX_OVERFLOW", "20")))
+    
+    @property
+    def async_url(self) -> str:
+        """Get async database URL for SQLAlchemy."""
+        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+    
+    @property
+    def sync_url(self) -> str:
+        """Get sync database URL for SQLAlchemy."""
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+
+
+class JWTSettings(BaseModel):
+    """JWT authentication settings."""
+    
+    secret_key: str = Field(default_factory=lambda: os.getenv("JWT_SECRET_KEY", "change-me-in-production"))
+    algorithm: str = Field(default_factory=lambda: os.getenv("JWT_ALGORITHM", "HS256"))
+    access_token_expire_minutes: int = Field(default_factory=lambda: int(os.getenv("JWT_EXPIRE_MINUTES", "30")))
+    refresh_token_expire_days: int = Field(default_factory=lambda: int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7")))
+
+
+class MatchingSettings(BaseModel):
+    """Matching engine configuration."""
+    
+    line_match_weight: float = Field(default_factory=lambda: float(os.getenv("LINE_MATCH_WEIGHT", "0.70")))
+    amount_match_weight: float = Field(default_factory=lambda: float(os.getenv("AMOUNT_MATCH_WEIGHT", "0.20")))
+    date_match_weight: float = Field(default_factory=lambda: float(os.getenv("DATE_MATCH_WEIGHT", "0.10")))
+    
+    auto_approve_threshold: float = Field(default_factory=lambda: float(os.getenv("AUTO_APPROVE_THRESHOLD", "0.95")))
+    pending_threshold: float = Field(default_factory=lambda: float(os.getenv("PENDING_THRESHOLD", "0.70")))
+    
+    date_tolerance_days: int = Field(default_factory=lambda: int(os.getenv("DATE_TOLERANCE_DAYS", "7")))
+    amount_tolerance_percent: float = Field(default_factory=lambda: float(os.getenv("AMOUNT_TOLERANCE_PERCENT", "5.0")))
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings."""
     
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    # Application
-    APP_NAME: str = "FinaRo AP Automation Core Engine"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False)
+    app_name: str = "FinaRo AP Automation Engine"
+    app_version: str = "1.0.0"
+    debug: bool = Field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")
+    environment: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT", "development"))
     
-    # Security
-    SECRET_KEY: str = Field(default="change-me-in-production")
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    api_v1_prefix: str = "/api/v1"
     
-    # Database
-    DATABASE_URL: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro")
-    DATABASE_SYNC_URL: str = Field(default="postgresql://postgres:postgres@localhost:5432/finaro")
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 10
-    DB_POOL_TIMEOUT: int = 30
+    cors_origins: list[str] = Field(default_factory=lambda: os.getenv("CORS_ORIGINS", "*").split(","))
     
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
-    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    matching: MatchingSettings = Field(default_factory=MatchingSettings)
     
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-    
-    # Matching Engine
-    MATCHING_LINE_WEIGHT: float = 0.70
-    MATCHING_AMOUNT_WEIGHT: float = 0.20
-    MATCHING_DATE_WEIGHT: float = 0.10
-    
-    # Auto-approve threshold (0.0 - 1.0)
-    AUTO_APPROVE_THRESHOLD: float = 0.95
-    # Human review threshold (0.0 - 1.0)
-    HUMAN_REVIEW_THRESHOLD: float = 0.70
-    
-    # Tolerance percentages for matching
-    AMOUNT_TOLERANCE_PERCENT: float = 5.0
-    DATE_TOLERANCE_DAYS: int = 7
+    class Config:
+        env_file = ".env"
+        env_nested_delimiter = "__"
+        case_sensitive = False
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
-
-
-settings = get_settings()

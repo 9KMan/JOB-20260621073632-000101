@@ -1,16 +1,18 @@
 // src/app/models/__init__.py
-"""Database models for FinaRo AP Automation Core Engine."""
-
-from app.models.base import BaseModel
-from app.models.user import User
-from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from app.models.invoice import Invoice, InvoiceLine
-from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.models.match import Match, MatchLine, MatchDecision, CrossReference
-from app.models.balance import Balance, BalanceTransaction
+"""Database models for FinaRo AP Automation Engine."""
+from src.app.models.base import BaseModel, TimestampMixin, UUIDMixin
+from src.app.models.user import User
+from src.app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from src.app.models.invoice import Invoice, InvoiceLine
+from src.app.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from src.app.models.match import MatchRecord, MatchStatus, MatchType
+from src.app.models.balance import BalanceLedger, BalanceType, BalanceStatus
+from src.app.models.document import DocumentType
 
 __all__ = [
     "BaseModel",
+    "TimestampMixin",
+    "UUIDMixin",
     "User",
     "PurchaseOrder",
     "PurchaseOrderLine",
@@ -18,10 +20,11 @@ __all__ = [
     "InvoiceLine",
     "DeliveryNote",
     "DeliveryNoteLine",
-    "Match",
-    "MatchLine",
-    "MatchDecision",
-    "CrossReference",
-    "Balance",
-    "BalanceTransaction",
+    "MatchRecord",
+    "MatchStatus",
+    "MatchType",
+    "BalanceLedger",
+    "BalanceType",
+    "BalanceStatus",
+    "DocumentType",
 ]
