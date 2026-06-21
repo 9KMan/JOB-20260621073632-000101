@@ -1,27 +1,11 @@
-# src/services/__init__.py
-"""Services package."""
-from src.services.auth import (
-    authenticate_user,
-    create_access_token,
-    get_password_hash,
-    get_user_by_username,
-    create_user,
-)
-from src.services.matching import MatchingService
-from src.services.decision import DecisionService
-from src.services.balance import BalanceService
+// src/services/__init__.py
+"""Business logic services package."""
+from app.services.match_service import MatchService
+from app.services.balance_service import BalanceService
+from app.services.document_service import DocumentService
 
 __all__ = [
-    # Auth
-    "authenticate_user",
-    "create_access_token",
-    "get_password_hash",
-    "get_user_by_username",
-    "create_user",
-    # Matching
-    "MatchingService",
-    # Decision
-    "DecisionService",
-    # Balance
+    "MatchService",
     "BalanceService",
+    "DocumentService",
 ]

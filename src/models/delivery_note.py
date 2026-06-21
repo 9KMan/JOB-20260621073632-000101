@@ -1,88 +1,187 @@
-# src/models/delivery_note.py
-"""Delivery Note model."""
+// src/models/delivery_note.py
+"""
+FinaRo AP Automation Core Engine
+Delivery Note Models
+"""
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
-from sqlalchemy import Column, String, Numeric, Date, Text, ForeignKey
+from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer, ForeignKey, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 
-from src.models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
+from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from src.models.match_result import MatchResult
+    from app.models.purchase_order import PurchaseOrder
+    from app.models.invoice import Invoice
+    from app.models.match import Match
 
 
-class DeliveryNote(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Delivery Note model for goods receipt tracking."""
-    
+class DeliveryNote(BaseModel):
+    """
+    Delivery Note model representing a goods receipt document.
+    Part of the 3-way matching process.
+    """
     __tablename__ = "delivery_notes"
     
-    dn_number = Column(String(50), unique=True, nullable=False, index=True)
-    supplier_id = Column(String(50), nullable=False, index=True)
+    # DN Identification
+    dn_number = Column(String(50), nullable=False, unique=True, index=True)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     supplier_name = Column(String(255), nullable=False)
-    supplier_code = Column(String(50), nullable=True)
+    supplier_code = Column(String(50), nullable=True, index=True)
     
-    po_reference = Column(String(50), nullable=True, index=True)
-    invoice_reference = Column(String(50), nullable=True, index=True)
-    delivery_date = Column(Date, nullable=False)
+    # Reference Information
+    po_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    supplier_dn_number = Column(String(100), nullable=True, index=True)
     
-    currency = Column(String(3), default="USD", nullable=False)
-    total_amount = Column(Numeric(15, 2), nullable=False)
+    # DN Dates
+    dn_date = Column(Date, nullable=False, index=True)
+    received_date = Column(Date, nullable=True, index=True)
+    goods_receipt_date = Column(Date, nullable=True)
     
+    # DN Status
     status = Column(
-        String(20),
-        default="RECEIVED",
+        SQLEnum(
+            'CREATED', 'SHIPPED', 'IN_TRANSIT', 'RECEIVED',
+            'INSPECTED', 'ACCEPTED', 'REJECTED', 'RETURNED',
+            name='dn_status'
+        ),
+        default='CREATED',
         nullable=False,
-        index=True,
-    )  # RECEIVED, PARTIALLY_MATCHED, MATCHED, CANCELLED
+        index=True
+    )
     
+    # Financial
+    currency = Column(String(3), default='USD', nullable=False)
+    total_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
+    
+    # Transport Information
+    carrier_name = Column(String(100), nullable=True)
+    tracking_number = Column(String(100), nullable=True, index=True)
+    vehicle_number = Column(String(50), nullable=True)
+    
+    # Additional Information
     notes = Column(Text, nullable=True)
-    carrier_name = Column(String(255), nullable=True)
-    tracking_number = Column(String(100), nullable=True)
+    inspection_notes = Column(Text, nullable=True)
+    department = Column(String(100), nullable=True, index=True)
+    
+    # Receiver Information
+    received_by = Column(String(255), nullable=True)
+    warehouse_location = Column(String(100), nullable=True)
     
     # Relationships
-    line_items = relationship(
-        "DeliveryNoteLineItem",
+    po: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[po_id],
+        lazy="selectin"
+    )
+    lines: Mapped[List["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
         back_populates="delivery_note",
         cascade="all, delete-orphan",
+        lazy="selectin"
     )
-    matched_pos = relationship(
-        "MatchResult",
-        foreign_keys="MatchResult.delivery_note_id",
+    matches: Mapped[List["Match"]] = relationship(
+        "Match",
         back_populates="delivery_note",
+        foreign_keys="Match.dn_id",
+        lazy="selectin"
     )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNote(id={self.id}, dn_number={self.dn_number})>"
+        return f"<DeliveryNote(id={self.id}, dn_number='{self.dn_number}', status='{self.status}')>"
+    
+    @property
+    def is_received(self) -> bool:
+        """Check if delivery note has been received."""
+        return self.status in ('RECEIVED', 'INSPECTED', 'ACCEPTED')
 
 
-class DeliveryNoteLineItem(Base, UUIDMixin, TimestampMixin):
-    """Delivery Note Line Item model."""
+class DeliveryNoteLine(BaseModel):
+    """
+    Delivery Note Line Item model.
+    Represents individual line items within a Delivery Note.
+    """
+    __tablename__ = "delivery_note_lines"
     
-    __tablename__ = "delivery_note_line_items"
-    
-    delivery_note_id = Column(
+    # Foreign Key
+    dn_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        index=True
     )
     
-    line_number = Column(String(10), nullable=False)
-    sku = Column(String(100), nullable=True, index=True)
-    description = Column(String(500), nullable=False)
+    # Line Identification
+    line_number = Column(Integer, nullable=False)
+    internal_reference = Column(String(100), nullable=True)
     
-    quantity_delivered = Column(Numeric(15, 3), nullable=False)
-    quantity_accepted = Column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
-    quantity_rejected = Column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
+    # Product/Service Information
+    product_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    product_code = Column(String(50), nullable=True, index=True)
+    product_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
     
-    unit_of_measure = Column(String(20), default="EA", nullable=False)
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    line_total = Column(Numeric(15, 2), nullable=False)
+    # Quantities
+    quantity_delivered = Column(Numeric(15, 3), nullable=False, default=Decimal('0.000'))
+    quantity_received = Column(Numeric(15, 3), nullable=False, default=Decimal('0.000'))
+    quantity_rejected = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
+    quantity_returned = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
     
-    # Relationships
-    delivery_note = relationship("DeliveryNote", back_populates="line_items")
+    # Unit of Measure
+    unit_of_measure = Column(String(20), default='EA', nullable=False)
+    
+    # Pricing
+    unit_price = Column(Numeric(15, 4), nullable=True)
+    line_total = Column(Numeric(15, 2), nullable=True)
+    
+    # Quality Status
+    quality_status = Column(
+        SQLEnum(
+            'PENDING', 'INSPECTED', 'ACCEPTED', 'REJECTED',
+            name='quality_status'
+        ),
+        default='PENDING',
+        nullable=False,
+        index=True
+    )
+    
+    # Matched Quantities
+    quantity_matched = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
+    
+    # Status
+    status = Column(
+        SQLEnum(
+            'PENDING', 'PARTIAL', 'FULFILLED', 'DISPUTED',
+            name='dnline_status'
+        ),
+        default='PENDING',
+        nullable=False,
+        index=True
+    )
+    
+    # Relationship
+    delivery_note: Mapped["DeliveryNote"] = relationship(
+        "DeliveryNote",
+        back_populates="lines"
+    )
     
     def __repr__(self) -> str:
-        return f"<DeliveryNoteLineItem(id={self.id}, sku={self.sku})>"
+        return f"<DeliveryNoteLine(id={self.id}, dn_id={self.dn_id}, line_number={self.line_number})>"
+    
+    @property
+    def quantity_unmatched(self) -> Decimal:
+        """Calculate unmatched quantity."""
+        return self.quantity_received - self.quantity_matched
+    
+    def calculate_received_quantity(self) -> None:
+        """Calculate actual received quantity (delivered minus rejected/returned)."""
+        self.quantity_received = self.quantity_delivered - self.quantity_rejected - self.quantity_returned

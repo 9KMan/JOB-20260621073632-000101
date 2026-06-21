@@ -1,175 +1,229 @@
 // src/services/base_service.py
-"""Base service class with common CRUD operations."""
-from typing import TypeVar, Generic, Type, Optional, List, Any
+"""
+FinaRo AP Automation Core Engine
+Base Service with Common Functionality
+"""
+import logging
+from typing import Any, Generic, List, Optional, TypeVar, Type
 from uuid import UUID
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
-from src.models.base import BaseModel
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.base import BaseModel
+
+logger = logging.getLogger(__name__)
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
-CreateSchemaType = TypeVar("CreateSchemaType")
-UpdateSchemaType = TypeVar("UpdateSchemaType")
 
 
-class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
+class BaseService(Generic[ModelType]):
     """
     Base service class providing common CRUD operations.
-    
-    Type Parameters:
-        ModelType: The SQLAlchemy model class
-        CreateSchemaType: The Pydantic schema for creating records
-        UpdateSchemaType: The Pydantic schema for updating records
+    All other services should inherit from this class.
     """
     
-    def __init__(self, model: Type[ModelType], db: Session):
+    def __init__(self, model: Type[ModelType]):
         """
-        Initialize the service.
+        Initialize the service with the model class.
         
         Args:
             model: The SQLAlchemy model class
-            db: Database session
         """
         self.model = model
-        self.db = db
     
-    def get(self, id: UUID) -> Optional[ModelType]:
-        """
-        Get a single record by ID.
-        
-        Args:
-            id: The record UUID
-            
-        Returns:
-            The record or None if not found
-        """
-        return self.db.query(self.model).filter(
-            self.model.id == id,
-            self.model.is_deleted == False  # noqa: E712
-        ).first()
-    
-    def get_by(self, **kwargs) -> Optional[ModelType]:
-        """
-        Get a single record by arbitrary filters.
-        
-        Args:
-            **kwargs: Filter conditions
-            
-        Returns:
-            The record or None if not found
-        """
-        query = self.db.query(self.model).filter(self.model.is_deleted == False)
-        for key, value in kwargs.items():
-            if hasattr(self.model, key):
-                query = query.filter(getattr(self.model, key) == value)
-        return query.first()
-    
-    def get_all(
+    async def get_by_id(
         self,
+        db: AsyncSession,
+        record_id: UUID,
+        include_deleted: bool = False
+    ) -> Optional[ModelType]:
+        """
+        Get a record by its ID.
+        
+        Args:
+            db: Database session
+            record_id: The UUID of the record
+            include_deleted: Whether to include soft-deleted records
+            
+        Returns:
+            The record or None if not found
+        """
+        query = select(self.model).where(self.model.id == record_id)
+        
+        if not include_deleted:
+            query = query.where(self.model.is_deleted == False)
+        
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+    
+    async def get_all(
+        self,
+        db: AsyncSession,
         skip: int = 0,
         limit: int = 100,
-        **kwargs
+        include_deleted: bool = False
     ) -> List[ModelType]:
         """
         Get all records with pagination.
         
         Args:
+            db: Database session
             skip: Number of records to skip
             limit: Maximum number of records to return
-            **kwargs: Additional filter conditions
+            include_deleted: Whether to include soft-deleted records
             
         Returns:
             List of records
         """
-        query = self.db.query(self.model).filter(self.model.is_deleted == False)
-        for key, value in kwargs.items():
-            if hasattr(self.model, key):
-                query = query.filter(getattr(self.model, key) == value)
-        return query.offset(skip).limit(limit).all()
+        query = select(self.model)
+        
+        if not include_deleted:
+            query = query.where(self.model.is_deleted == False)
+        
+        query = query.offset(skip).limit(limit).order_by(self.model.created_at.desc())
+        
+        result = await db.execute(query)
+        return list(result.scalars().all())
     
-    def create(self, schema: CreateSchemaType) -> ModelType:
+    async def count(
+        self,
+        db: AsyncSession,
+        include_deleted: bool = False
+    ) -> int:
+        """
+        Count total records.
+        
+        Args:
+            db: Database session
+            include_deleted: Whether to include soft-deleted records
+            
+        Returns:
+            Total count of records
+        """
+        query = select(func.count(self.model.id))
+        
+        if not include_deleted:
+            query = query.where(self.model.is_deleted == False)
+        
+        result = await db.execute(query)
+        return result.scalar() or 0
+    
+    async def create(
+        self,
+        db: AsyncSession,
+        data: dict,
+        commit: bool = True
+    ) -> ModelType:
         """
         Create a new record.
         
         Args:
-            schema: The create schema
+            db: Database session
+            data: Dictionary of data to create the record with
+            commit: Whether to commit the transaction
             
         Returns:
             The created record
         """
-        data = schema.model_dump() if hasattr(schema, 'model_dump') else schema.dict()
-        db_obj = self.model(**data)
-        self.db.add(db_obj)
-        self.db.commit()
-        self.db.refresh(db_obj)
-        return db_obj
+        record = self.model(**data)
+        db.add(record)
+        
+        if commit:
+            await db.commit()
+            await db.refresh(record)
+        
+        logger.info(f"Created {self.model.__name__} with id {record.id}")
+        return record
     
-    def update(
+    async def update(
         self,
-        id: UUID,
-        schema: UpdateSchemaType
-    ) -> Optional[ModelType]:
+        db: AsyncSession,
+        record: ModelType,
+        data: dict,
+        commit: bool = True
+    ) -> ModelType:
         """
         Update an existing record.
         
         Args:
-            id: The record UUID
-            schema: The update schema
+            db: Database session
+            record: The record to update
+            data: Dictionary of data to update
+            commit: Whether to commit the transaction
             
         Returns:
-            The updated record or None if not found
+            The updated record
         """
-        db_obj = self.get(id)
-        if not db_obj:
-            return None
+        for key, value in data.items():
+            if hasattr(record, key) and value is not None:
+                setattr(record, key, value)
         
-        update_data = schema.model_dump(exclude_unset=True) if hasattr(schema, 'model_dump') else schema.dict(exclude_unset=True)
-        for key, value in update_data.items():
-            if hasattr(db_obj, key):
-                setattr(db_obj, key, value)
+        if commit:
+            await db.commit()
+            await db.refresh(record)
         
-        self.db.commit()
-        self.db.refresh(db_obj)
-        return db_obj
+        logger.info(f"Updated {self.model.__name__} with id {record.id}")
+        return record
     
-    def delete(self, id: UUID, soft: bool = True) -> bool:
+    async def delete(
+        self,
+        db: AsyncSession,
+        record: ModelType,
+        hard: bool = False,
+        commit: bool = True
+    ) -> bool:
         """
-        Delete a record.
+        Delete a record (soft delete by default).
         
         Args:
-            id: The record UUID
-            soft: If True, perform soft delete; otherwise hard delete
+            db: Database session
+            record: The record to delete
+            hard: Whether to perform a hard delete
+            commit: Whether to commit the transaction
             
         Returns:
-            True if deleted, False if not found
+            True if deleted successfully
         """
-        db_obj = self.get(id)
-        if not db_obj:
-            return False
-        
-        if soft:
-            from datetime import datetime, timezone
-            db_obj.is_deleted = True
-            db_obj.deleted_at = datetime.now(timezone.utc)
-            self.db.commit()
+        if hard:
+            await db.delete(record)
+            logger.info(f"Hard deleted {self.model.__name__} with id {record.id}")
         else:
-            self.db.delete(db_obj)
-            self.db.commit()
+            record.soft_delete()
+            logger.info(f"Soft deleted {self.model.__name__} with id {record.id}")
+        
+        if commit:
+            await db.commit()
         
         return True
     
-    def count(self, **kwargs) -> int:
+    async def search(
+        self,
+        db: AsyncSession,
+        filters: dict,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[ModelType]:
         """
-        Count records matching filters.
+        Search for records with filters.
         
         Args:
-            **kwargs: Filter conditions
+            db: Database session
+            filters: Dictionary of filter conditions
+            skip: Number of records to skip
+            limit: Maximum number of records to return
             
         Returns:
-            Count of matching records
+            List of matching records
         """
-        query = self.db.query(self.model).filter(self.model.is_deleted == False)
-        for key, value in kwargs.items():
-            if hasattr(self.model, key):
-                query = query.filter(getattr(self.model, key) == value)
-        return query.count()
+        query = select(self.model).where(self.model.is_deleted == False)
+        
+        for key, value in filters.items():
+            if value is not None and hasattr(self.model, key):
+                query = query.where(getattr(self.model, key) == value)
+        
+        query = query.offset(skip).limit(limit).order_by(self.model.created_at.desc())
+        
+        result = await db.execute(query)
+        return list(result.scalars().all())

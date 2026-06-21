@@ -1,131 +1,83 @@
-# src/app/main.py
-"""Main FastAPI application entry point."""
+// src/app/main.py
+"""
+FinaRo AP Automation Core Engine
+FastAPI Application Entry Point
+"""
+import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-from src.app.api.v1.router import api_router
-from src.app.config import settings
-from src.app.database import engine, Base
-from src.app.logging_config import setup_logging
+from app.api.v1 import api_router
+from app.config import settings
+from app.database import engine, Base
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan handler for startup and shutdown."""
-    # Startup
-    setup_logging()
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup and shutdown events."""
+    logger.info("Starting FinaRo AP Automation Core Engine...")
     
-    # Create database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Create database tables on startup (for development)
+    if settings.DEBUG:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created successfully")
     
     yield
     
-    # Shutdown
+    logger.info("Shutting down FinaRo AP Automation Core Engine...")
     await engine.dispose()
 
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="""
-    ## FinaRo AP Automation Core Engine
+def create_application() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title="FinaRo AP Automation Core Engine",
+        description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
+    )
     
-    A 3-Way Matching Engine for Accounts Payable automation.
-    
-    ### Features:
-    - **Purchase Order (PO) Management** - Single source of truth for anchoring
-    - **Invoice Processing** - Automated invoice validation and matching
-    - **Delivery Note Tracking** - DN matching with PO and Invoice
-    - **3-Way Matching Engine** - Automated matching with confidence scoring
-    - **Balance Resolution** - Partial match and balance tracking
-    - **Decision Routing** - Auto-approve, human review, or dispute workflows
-    """,
-    openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
-    docs_url=f"{settings.API_V1_PREFIX}/docs",
-    redoc_url=f"{settings.API_V1_PREFIX}/redoc",
-    lifespan=lifespan,
-)
-
-
-# Configure CORS
-if settings.BACKEND_CORS_ORIGINS:
+    # Configure CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests."""
-    import logging
-    logger = logging.getLogger(__name__)
     
-    logger.info(
-        "Request started",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "client_ip": request.client.host if request.client else None,
-        }
+    # Include API router
+    app.include_router(api_router, prefix="/api/v1")
+    
+    # Health check endpoint
+    @app.get("/health", tags=["health"])
+    async def health_check():
+        return {"status": "healthy", "service": "finaro-ap-automation"}
+    
+    return app
+
+
+app = create_application()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
     )
-    
-    response = await call_next(request)
-    
-    logger.info(
-        "Request completed",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-        }
-    )
-    
-    return response
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler for unhandled errors."""
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "An internal server error occurred",
-            "type": type(exc).__name__,
-        },
-    )
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-    }
-
-
-@app.get(f"{settings.API_V1_PREFIX}/health")
-async def api_health_check():
-    """API health check endpoint."""
-    return {
-        "status": "healthy",
-        "api_version": settings.API_VERSION,
-    }
-
-
-# Include API router
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
