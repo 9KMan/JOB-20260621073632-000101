@@ -1,83 +1,71 @@
 // src/app/main.py
-"""
-FinaRo AP Automation Core Engine
-FastAPI Application Entry Point
-"""
-import logging
+"""FastAPI application entry point."""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.api.v1 import api_router
-from app.config import settings
-from app.database import engine, Base
+from src.app.config import get_settings
+from src.app.database import init_db
+from src.app.middleware.logging import LoggingMiddleware
+from src.app.middleware.error_handler import ErrorHandlerMiddleware
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler for startup and shutdown events."""
-    logger.info("Starting FinaRo AP Automation Core Engine...")
-    
-    # Create database tables on startup (for development)
-    if settings.DEBUG:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created successfully")
-    
+    """Application lifespan events."""
+    # Startup
+    init_db()
     yield
-    
-    logger.info("Shutting down FinaRo AP Automation Core Engine...")
-    await engine.dispose()
+    # Shutdown
+    pass
 
 
-def create_application() -> FastAPI:
-    """Create and configure the FastAPI application."""
-    app = FastAPI(
-        title="FinaRo AP Automation Core Engine",
-        description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
-        version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
-        lifespan=lifespan,
-    )
-    
-    # Configure CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    
-    # Include API router
-    app.include_router(api_router, prefix="/api/v1")
-    
-    # Health check endpoint
-    @app.get("/health", tags=["health"])
-    async def health_check():
-        return {"status": "healthy", "service": "finaro-ap-automation"}
-    
-    return app
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="3-Way Matching Engine for AP Automation",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Custom middleware
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(ErrorHandlerMiddleware)
+
+# Include routers
+from src.api.v1.routes import auth, documents, matching, users
+
+app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["Authentication"])
+app.include_router(documents.router, prefix=settings.API_V1_PREFIX, tags=["Documents"])
+app.include_router(matching.router, prefix=settings.API_V1_PREFIX, tags=["Matching"])
+app.include_router(users.router, prefix=settings.API_V1_PREFIX, tags=["Users"])
 
 
-app = create_application()
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "version": settings.APP_VERSION}
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-    )
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "name": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "docs": "/docs",
+    }

@@ -17,30 +17,31 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
 
     # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://finaro:finaro_password@localhost:5432/finaro_db"
-    )
-    DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
-    DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/finaro"
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 3600
 
     # Authentication
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
+    SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-
-    # Matching Engine
-    MATCH_THRESHOLD_AUTO_APPROVE: float = float(os.getenv("MATCH_THRESHOLD_AUTO_APPROVE", "0.95"))
-    MATCH_THRESHOLD_PENDING: float = float(os.getenv("MATCH_THRESHOLD_PENDING", "0.70"))
-    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
-    MATCH_WEIGHT_AMOUNT: float = 0.20
-    MATCH_WEIGHT_DATE: float = 0.10
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
 
-    # Logging
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # Matching Thresholds
+    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
+    MATCH_THRESHOLD_HUMAN_REVIEW: float = 0.70
+    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
+    MATCH_WEIGHT_AMOUNT: float = 0.20
+    MATCH_WEIGHT_DATE: float = 0.10
+
+    # Balance Resolution
+    BALANCE_TOLERANCE_AMOUNT: float = 0.01
+    BALANCE_TOLERANCE_PERCENT: float = 0.001
 
     class Config:
         env_file = ".env"

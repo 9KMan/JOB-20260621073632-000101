@@ -1,56 +1,35 @@
 // src/models/base.py
-"""Base models with common mixins."""
+"""Base models with common fields."""
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.ext.declarative import declared_attr
 
 
-class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
-    
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-
-class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
-    
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        default=None,
-    )
-    
-    @property
-    def is_deleted(self) -> bool:
-        """Check if record is soft deleted."""
-        return self.deleted_at is not None
-
-
-class UUIDMixin:
+class UUIDModel:
     """Mixin for UUID primary key."""
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+
+class TimestampModel:
+    """Mixin for created_at and updated_at timestamps."""
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
 
-class BaseModel(UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Base model with all common mixins."""
-    
-    __abstract__ = True
+class BaseModel(UUIDModel, TimestampModel):
+    """Base model with common fields."""
+
+    @declared_attr
+    def __tablename__(cls):
+        """Generate __tablename__ from class name."""
+        return cls.__name__.lower()
