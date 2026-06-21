@@ -1,19 +1,38 @@
 # models/base.py
-"""SQLAlchemy declarative base and mixins."""
+"""SQLAlchemy declarative base and common mixins."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Index, String, func
+from sqlalchemy import DateTime, MetaData, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, declared_attr, mapped_column
+
+# Standard naming convention for constraints
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+metadata = MetaData(naming_convention=convention)
 
 
-class Base(DeclarativeBase):
+class Base(MappedAsDataclass, DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
-    pass
+    metadata = metadata
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        """Generate table name from class name (snake_case)."""
+        import re
+
+        name = cls.__name__
+        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class TimestampMixin:
@@ -23,26 +42,25 @@ class TimestampMixin:
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
-        comment="Record creation timestamp",
+        init=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
-        comment="Record last update timestamp",
+        init=False,
     )
 
 
-class UUIDPrimaryKeyMixin:
+class UUIDPrimaryKey:
     """Mixin for UUID primary key."""
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        nullable=False,
-        comment="Primary key UUID",
+        init=False,
     )
 
 
@@ -52,46 +70,19 @@ class SoftDeleteMixin:
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
-        comment="Soft delete timestamp",
+        default=None,
+        init=False,
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-        index=True,
-        comment="Soft delete flag",
-    )
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if record is soft deleted."""
+        return self.deleted_at is not None
 
     def soft_delete(self) -> None:
-        """Mark record as deleted."""
-        self.is_deleted = True
-        self.deleted_at = datetime.utcnow()
+        """Soft delete the record."""
+        self.deleted_at = datetime.now(timezone.utc)
 
     def restore(self) -> None:
-        """Restore soft-deleted record."""
-        self.is_deleted = False
+        """Restore a soft deleted record."""
         self.deleted_at = None
-
-
-class VersionMixin:
-    """Mixin for optimistic locking."""
-
-    version: Mapped[int] = mapped_column(
-        default=1,
-        nullable=False,
-        comment="Optimistic locking version",
-    )
-
-
-def create_indexes(
-    table_name: str,
-    *columns: tuple[str, ...],
-    unique: bool = False,
-) -> Index:
-    """Create an index specification for model definition."""
-    ix_name = f"ix_{table_name}_{'_'.join(col for col in columns)}"
-    return Index(
-        ix_name,
-        *columns,
-        unique=unique,
-    )

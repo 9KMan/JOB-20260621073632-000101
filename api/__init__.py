@@ -1,14 +1,6 @@
 # api/__init__.py
 """API package for AP Automation Engine."""
 
-from api.schemas import (
-    PaginatedResponse,
-    ErrorResponse,
-    SuccessResponse,
-)
+from api.schemas import BaseResponse, ErrorResponse, PaginatedResponse
 
-__all__ = [
-    "PaginatedResponse",
-    "ErrorResponse",
-    "SuccessResponse",
-]
+__all__ = ["BaseResponse", "ErrorResponse", "PaginatedResponse"]
