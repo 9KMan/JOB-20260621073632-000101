@@ -1,24 +1,45 @@
-// core/__init__.py
-"""Core package initialization.
+# core/__init__.py
+"""
+Core module initialization.
 
-This module exports commonly used classes and functions from the core package.
+This module contains the foundational infrastructure components:
+- Configuration management via pydantic-settings
+- Database session management for async SQLAlchemy
+- Security utilities for JWT and password hashing
 """
 
-from core.config import Settings, get_settings
+from core.config import get_settings, Settings
 from core.database import (
-    Base,
-    DatabaseSession,
-    async_engine,
-    async_session_maker,
     get_db,
+    AsyncSessionLocal,
+    async_engine,
+    sync_engine,
+    init_db,
+    close_db,
+)
+from core.security import (
+    create_access_token,
+    create_refresh_token,
+    verify_password,
+    get_password_hash,
+    decode_token,
 )
 
 __all__ = [
-    "Settings",
+    # Config
     "get_settings",
-    "Base",
-    "DatabaseSession",
-    "async_engine",
-    "async_session_maker",
+    "Settings",
+    # Database
     "get_db",
+    "AsyncSessionLocal",
+    "async_engine",
+    "sync_engine",
+    "init_db",
+    "close_db",
+    # Security
+    "create_access_token",
+    "create_refresh_token",
+    "verify_password",
+    "get_password_hash",
+    "decode_token",
 ]
