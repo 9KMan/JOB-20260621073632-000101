@@ -1,7 +1,7 @@
 # api/v1/__init__.py
 """API v1 package.
 
-This package contains versioned API endpoints for v1.
+Contains all versioned API endpoints for the AP Automation Engine.
 """
 
 from api.v1.router import api_router

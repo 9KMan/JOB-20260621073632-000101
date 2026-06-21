@@ -1,83 +1,60 @@
 # models/enums.py
-"""Enumerations for AP Automation Engine models."""
+"""SQLAlchemy enum types for status fields and decision types.
 
-from enum import Enum
+These enums map to PostgreSQL enum types.
+"""
+
+import enum
 
 
-class InvoiceStatus(str, Enum):
-    """Invoice status values."""
+class InvoiceStatus(str, enum.Enum):
+    """Invoice status enumeration."""
 
     DRAFT = "draft"
     PENDING = "pending"
-    MATCHING = "matching"
+    SUBMITTED = "submitted"
     MATCHED = "matched"
-    EXCEPTION = "exception"
     APPROVED = "approved"
+    EXCEPTION = "exception"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, Enum):
-    """Purchase order status values."""
+class PurchaseOrderStatus(str, enum.Enum):
+    """Purchase order status enumeration."""
 
     DRAFT = "draft"
-    SUBMITTED = "submitted"
+    PENDING = "pending"
     APPROVED = "approved"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+    COMPLETED = "completed"
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Delivery note status values."""
+class DeliveryNoteStatus(str, enum.Enum):
+    """Delivery note status enumeration."""
 
     DRAFT = "draft"
     RECEIVED = "received"
     PARTIAL = "partial"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    EXCEPTION = "exception"
 
 
-class MatchDecision(str, Enum):
-    """Matching decision types."""
+class MatchDecision(str, enum.Enum):
+    """Matching engine decision types."""
 
     AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVE = "one_click_approve"
-    ONE_CLICK_REJECT = "one_click_reject"
+    AUTO_REJECTED = "auto_rejected"
     MANUAL_REVIEW = "manual_review"
     EXCEPTION = "exception"
-    NO_MATCH = "no_match"
+    PENDING = "pending"
+    DISPUTED = "disputed"
 
 
-class ExceptionType(str, Enum):
-    """Exception types in matching."""
-
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    DUPLICATE_PAYMENT = "duplicate_payment"
-    UNMATCHED_LINES = "unmatched_lines"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    DUPLICATE_PO = "duplicate_po"
-    EXPIRED_PO = "expired_po"
-    CANCELLED_PO = "cancelled_po"
-    CLOSED_PO = "closed_po"
-
-
-class ExceptionStatus(str, Enum):
-    """Exception status values."""
-
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
-
-
-class MatchConfidence(str, Enum):
+class MatchConfidence(str, enum.Enum):
     """Match confidence levels."""
 
     HIGH = "high"
@@ -86,33 +63,27 @@ class MatchConfidence(str, Enum):
     NONE = "none"
 
 
-class LedgerTransactionType(str, Enum):
-    """Balance ledger transaction types."""
+class ExceptionType(str, enum.Enum):
+    """Types of matching exceptions."""
 
-    INVOICE = "invoice"
-    PAYMENT = "payment"
-    CREDIT_MEMO = "credit_memo"
-    ADJUSTMENT = "adjustment"
-    WRITE_OFF = "write_off"
-
-
-class MatchSource(str, Enum):
-    """Source of match confirmation for learning."""
-
-    MANUAL = "manual"
-    AUTO_APPROVED = "auto_approved"
-    USER_CONFIRMATION = "user_confirmation"
-    LEARNING_PROMOTED = "learning_promoted"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY = "missing_delivery"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    PARTIAL_MATCH = "partial_match"
+    OVERDELIVERY = "overdelivery"
+    UNDERDELIVERY = "underdelivery"
+    DATE_VARIANCE = "date_variance"
+    VENDOR_MISMATCH = "vendor_mismatch"
 
 
-__all__ = [
-    "InvoiceStatus",
-    "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
-    "MatchDecision",
-    "ExceptionType",
-    "ExceptionStatus",
-    "MatchConfidence",
-    "LedgerTransactionType",
-    "MatchSource",
-]
+class ExceptionResolution(str, enum.Enum):
+    """Exception resolution statuses."""
+
+    PENDING = "pending"
+    APPROVED_WITH_EXCEPTION = "approved_with_exception"
+    REJECTED = "rejected"
+    DISMISSED = "dismissed"
+    ESCALATED = "escalated"
+    RESOLVED = "resolved"

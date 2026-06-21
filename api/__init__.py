@@ -1,19 +1,19 @@
 # api/__init__.py
-"""API module for AP Automation Engine.
+"""API package for AP Automation Engine.
 
-This package contains the FastAPI application, routers, and schemas.
+Exposes FastAPI application and router components.
 """
 
 from api.schemas import (
-    HealthCheckResponse,
     ErrorResponse,
-    PaginationParams,
+    HealthCheck,
     PaginatedResponse,
+    MessageResponse,
 )
 
 __all__ = [
-    "HealthCheckResponse",
     "ErrorResponse",
-    "PaginationParams",
+    "HealthCheck",
     "PaginatedResponse",
+    "MessageResponse",
 ]

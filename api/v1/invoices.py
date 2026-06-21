@@ -1,231 +1,354 @@
-// api/v1/invoices.py
-"""Invoice API endpoints."""
+# api/v1/invoices.py
+"""Invoice endpoints for the AP Automation Engine.
 
+Provides CRUD operations and matching triggers for invoices.
+"""
+
+from datetime import datetime
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from core.database import get_db
-from core.config import settings
-from models.invoice import Invoice, InvoiceLineItem
-from models.enums import InvoiceStatus
 from api.schemas import (
     InvoiceCreate,
-    InvoiceUpdate,
     InvoiceResponse,
-    InvoiceDetailResponse,
+    InvoiceUpdate,
+    InvoiceLineResponse,
     PaginatedResponse,
-    PaginationMeta,
+    MessageResponse,
+    ErrorResponse,
+    PaginationParams,
 )
+from models import Invoice, InvoiceLine, InvoiceStatus
+from services import MatchingService
 
 router = APIRouter()
-
-DB = Annotated[AsyncSession, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 @router.post(
     "",
     response_model=InvoiceResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Ingest a new invoice",
+    responses={
+        201: {"description": "Invoice created successfully"},
+        400: {"model": ErrorResponse, "description": "Invalid invoice data"},
+        409: {"model": ErrorResponse, "description": "Invoice number already exists"},
+    },
 )
 async def create_invoice(
     invoice_data: InvoiceCreate,
-    db: DB,
-) -> Invoice:
-    """Ingest a new invoice into the system.
-    
-    Creates a new invoice with optional line items.
-    The invoice will be in PENDING status until matched.
+    db: DbSession,
+) -> InvoiceResponse:
+    """Create a new invoice with line items.
+
+    Creates an invoice and its associated line items.
+    The invoice starts in PENDING status.
     """
     # Check for duplicate invoice number
     existing = await db.execute(
-        select(Invoice).where(Invoice.invoice_number == invoice_data.invoice_number)
+        select(Invoice).where(
+            and_(
+                Invoice.invoice_number == invoice_data.invoice_number,
+                Invoice.deleted_at.is_(None),
+            )
+        )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Invoice with number {invoice_data.invoice_number} already exists",
+            detail=f"Invoice number '{invoice_data.invoice_number}' already exists",
         )
-    
+
     # Create invoice
     invoice = Invoice(
+        vendor_id=invoice_data.vendor_id,
+        vendor_name=invoice_data.vendor_name,
+        vendor_tax_id=invoice_data.vendor_tax_id,
         invoice_number=invoice_data.invoice_number,
-        supplier_id=invoice_data.supplier_id,
-        supplier_name=invoice_data.supplier_name,
         invoice_date=invoice_data.invoice_date,
         due_date=invoice_data.due_date,
-        total_amount=invoice_data.total_amount,
+        subtotal=invoice_data.subtotal,
         tax_amount=invoice_data.tax_amount,
+        total_amount=invoice_data.total_amount,
         currency=invoice_data.currency,
-        status=InvoiceStatus.PENDING,
+        payment_terms=invoice_data.payment_terms,
         notes=invoice_data.notes,
-        erp_reference=invoice_data.erp_reference,
+        po_reference=invoice_data.po_reference,
+        status=InvoiceStatus.PENDING,
     )
     db.add(invoice)
     await db.flush()
-    
+
     # Create line items
-    for item_data in invoice_data.line_items:
-        line_item = InvoiceLineItem(
+    for line_data in invoice_data.lines:
+        line = InvoiceLine(
             invoice_id=invoice.id,
-            line_number=item_data.line_number,
-            description=item_data.description,
-            quantity=item_data.quantity,
-            unit_price=item_data.unit_price,
-            amount=item_data.amount,
-            uom=item_data.uom,
-            tax_code=item_data.tax_code,
+            line_number=line_data.line_number,
+            description=line_data.description,
+            sku=line_data.sku,
+            quantity=line_data.quantity,
+            unit_of_measure=line_data.unit_of_measure,
+            unit_price=line_data.unit_price,
+            line_amount=line_data.line_amount,
+            po_line_reference=line_data.po_line_reference,
         )
-        db.add(line_item)
-    
+        db.add(line)
+
     await db.commit()
     await db.refresh(invoice)
-    
-    return invoice
+
+    return InvoiceResponse.model_validate(invoice)
 
 
 @router.get(
     "",
     response_model=PaginatedResponse[InvoiceResponse],
-    summary="List all invoices",
+    responses={
+        200: {"description": "List of invoices"},
+    },
 )
 async def list_invoices(
-    db: DB,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    supplier_id: str | None = Query(None, description="Filter by supplier"),
-    status: InvoiceStatus | None = Query(None, description="Filter by status"),
-    from_date: str | None = Query(None, description="Filter from date (YYYY-MM-DD)"),
-    to_date: str | None = Query(None, description="Filter to date (YYYY-MM-DD)"),
+    db: DbSession,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    vendor_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    invoice_date_from: datetime | None = Query(default=None),
+    invoice_date_to: datetime | None = Query(default=None),
 ) -> PaginatedResponse[InvoiceResponse]:
-    """List all invoices with optional filters and pagination."""
-    # Build base query
-    query = select(Invoice)
-    count_query = select(func.count(Invoice.id))
-    
-    # Apply filters
-    if supplier_id:
-        query = query.where(Invoice.supplier_id == supplier_id)
-        count_query = count_query.where(Invoice.supplier_id == supplier_id)
+    """List all invoices with optional filtering.
+
+    Supports filtering by vendor, status, and date range.
+    Results are paginated and sorted by invoice date descending.
+    """
+    # Build query
+    query = select(Invoice).where(Invoice.deleted_at.is_(None))
+    count_query = select(func.count(Invoice.id)).where(Invoice.deleted_at.is_(None))
+
+    if vendor_id:
+        query = query.where(Invoice.vendor_id == vendor_id)
+        count_query = count_query.where(Invoice.vendor_id == vendor_id)
+
     if status:
-        query = query.where(Invoice.status == status)
-        count_query = count_query.where(Invoice.status == status)
-    if from_date:
-        query = query.where(Invoice.invoice_date >= from_date)
-        count_query = count_query.where(Invoice.invoice_date >= from_date)
-    if to_date:
-        query = query.where(Invoice.invoice_date <= to_date)
-        count_query = count_query.where(Invoice.invoice_date <= to_date)
-    
+        try:
+            status_enum = InvoiceStatus(status)
+            query = query.where(Invoice.status == status_enum)
+            count_query = count_query.where(Invoice.status == status_enum)
+        except ValueError:
+            pass  # Invalid status, ignore filter
+
+    if invoice_date_from:
+        query = query.where(Invoice.invoice_date >= invoice_date_from.date())
+        count_query = count_query.where(Invoice.invoice_date >= invoice_date_from.date())
+
+    if invoice_date_to:
+        query = query.where(Invoice.invoice_date <= invoice_date_to.date())
+        count_query = count_query.where(Invoice.invoice_date <= invoice_date_to.date())
+
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
-    
-    # Apply pagination
-    offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size).order_by(Invoice.created_at.desc())
-    
+
+    # Get paginated results
+    query = query.order_by(Invoice.invoice_date.desc())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+
     result = await db.execute(query)
     invoices = result.scalars().all()
-    
-    # Calculate pagination metadata
-    total_pages = (total + page_size - 1) // page_size
-    meta = PaginationMeta(
+
+    # Convert to response models
+    items = [InvoiceResponse.model_validate(inv) for inv in invoices]
+
+    return PaginatedResponse.create(
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
-        total_pages=total_pages,
-        has_next=page < total_pages,
-        has_previous=page > 1,
     )
-    
-    return PaginatedResponse(data=list(invoices), meta=meta)
 
 
 @router.get(
     "/{invoice_id}",
-    response_model=InvoiceDetailResponse,
-    summary="Get invoice details",
+    response_model=InvoiceResponse,
+    responses={
+        200: {"description": "Invoice details"},
+        404: {"model": ErrorResponse, "description": "Invoice not found"},
+    },
 )
 async def get_invoice(
     invoice_id: UUID,
-    db: DB,
-) -> Invoice:
-    """Get detailed invoice information including line items."""
-    query = (
-        select(Invoice)
-        .options(selectinload(Invoice.line_items))
-        .where(Invoice.id == invoice_id)
+    db: DbSession,
+) -> InvoiceResponse:
+    """Get a single invoice by ID.
+
+    Returns the invoice with all line items.
+    """
+    result = await db.execute(
+        select(Invoice).where(
+            and_(
+                Invoice.id == invoice_id,
+                Invoice.deleted_at.is_(None),
+            )
+        )
     )
-    result = await db.execute(query)
     invoice = result.scalar_one_or_none()
-    
+
     if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice with id {invoice_id} not found",
+            detail=f"Invoice {invoice_id} not found",
         )
-    
-    return invoice
+
+    return InvoiceResponse.model_validate(invoice)
 
 
 @router.patch(
     "/{invoice_id}",
     response_model=InvoiceResponse,
-    summary="Update invoice",
+    responses={
+        200: {"description": "Invoice updated"},
+        404: {"model": ErrorResponse, "description": "Invoice not found"},
+    },
 )
 async def update_invoice(
     invoice_id: UUID,
-    invoice_data: InvoiceUpdate,
-    db: DB,
-) -> Invoice:
-    """Update invoice status or other fields."""
-    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    update_data: InvoiceUpdate,
+    db: DbSession,
+) -> InvoiceResponse:
+    """Update an invoice.
+
+    Allows updating status, notes, and approval information.
+    """
+    result = await db.execute(
+        select(Invoice).where(
+            and_(
+                Invoice.id == invoice_id,
+                Invoice.deleted_at.is_(None),
+            )
+        )
+    )
     invoice = result.scalar_one_or_none()
-    
+
     if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice with id {invoice_id} not found",
+            detail=f"Invoice {invoice_id} not found",
         )
-    
-    # Update allowed fields
-    if invoice_data.status:
-        invoice.status = InvoiceStatus(invoice_data.status)
-    if invoice_data.notes is not None:
-        invoice.notes = invoice_data.notes
-    if invoice_data.match_decision:
-        invoice.match_decision = invoice_data.match_decision
-    
+
+    # Update fields
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for field, value in update_dict.items():
+        if field == "status" and value:
+            setattr(invoice, field, InvoiceStatus(value))
+        elif field == "approved_at" and value:
+            setattr(invoice, field, datetime.utcnow())
+        else:
+            setattr(invoice, field, value)
+
     await db.commit()
     await db.refresh(invoice)
-    
-    return invoice
+
+    return InvoiceResponse.model_validate(invoice)
 
 
 @router.delete(
     "/{invoice_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete invoice",
+    response_model=MessageResponse,
+    responses={
+        200: {"description": "Invoice deleted"},
+        404: {"model": ErrorResponse, "description": "Invoice not found"},
+    },
 )
 async def delete_invoice(
     invoice_id: UUID,
-    db: DB,
-) -> None:
-    """Delete an invoice (soft delete in production)."""
-    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    db: DbSession,
+    deleted_by: str = Query(default="system"),
+) -> MessageResponse:
+    """Soft delete an invoice.
+
+    The invoice is marked as deleted but not removed from the database.
+    """
+    result = await db.execute(
+        select(Invoice).where(
+            and_(
+                Invoice.id == invoice_id,
+                Invoice.deleted_at.is_(None),
+            )
+        )
+    )
     invoice = result.scalar_one_or_none()
-    
+
     if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice with id {invoice_id} not found",
+            detail=f"Invoice {invoice_id} not found",
         )
-    
-    await db.delete(invoice)
+
+    invoice.deleted_at = datetime.utcnow()
+    invoice.deleted_by = deleted_by
+
     await db.commit()
+
+    return MessageResponse(message=f"Invoice {invoice_id} deleted successfully")
+
+
+@router.post(
+    "/{invoice_id}/match",
+    response_model=dict,
+    responses={
+        200: {"description": "Matching triggered"},
+        404: {"model": ErrorResponse, "description": "Invoice not found"},
+        422: {"model": ErrorResponse, "description": "Invoice not in valid state for matching"},
+    },
+)
+async def trigger_matching(
+    invoice_id: UUID,
+    db: DbSession,
+    auto_match: bool = Query(default=True),
+) -> dict:
+    """Trigger the matching engine for an invoice.
+
+    Processes the invoice through the matching cascade:
+    1. PO Anchoring (Layer 1)
+    2. Line Matching Cascade (Layer 2)
+    3. Scoring and Decision
+    4. Learning Loop Integration
+    """
+    result = await db.execute(
+        select(Invoice).where(
+            and_(
+                Invoice.id == invoice_id,
+                Invoice.deleted_at.is_(None),
+            )
+        )
+    )
+    invoice = result.scalar_one_or_none()
+
+    if not invoice:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Invoice {invoice_id} not found",
+        )
+
+    # Validate invoice state
+    if invoice.status not in [InvoiceStatus.PENDING, InvoiceStatus.SUBMITTED]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invoice is in '{invoice.status}' state and cannot be matched",
+        )
+
+    # Run matching service
+    matching_service = MatchingService(db)
+    result = await matching_service.process_invoice(invoice, auto_trigger=auto_match)
+
+    return {
+        "invoice_id": str(invoice_id),
+        "invoice_number": invoice.invoice_number,
+        "match_result": result,
+    }

@@ -1,97 +1,81 @@
 # models/base.py
-"""SQLAlchemy declarative base and common mixins."""
+"""SQLAlchemy declarative base configuration.
+
+Defines the base class for all database models with common mixins.
+"""
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from sqlalchemy import DateTime, Index, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID
 
 
-class BaseMixin:
-    """Common mixin providing UUID primary key and timestamps."""
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
 
-    id: Mapped[UUID] = mapped_column(
-        primary_key=True,
-        default=uuid4,
-        sort_order=0,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        nullable=False,
-        sort_order=99,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
-        sort_order=100,
-    )
+    pass
 
 
 class TimestampMixin:
-    """Mixin providing only timestamp fields (no ID)."""
+    """Mixin for created_at and updated_at timestamps."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default_factory=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class UUIDMixin:
+    """Mixin for UUID primary key."""
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
         nullable=False,
     )
 
 
 class SoftDeleteMixin:
-    """Mixin providing soft delete functionality."""
+    """Mixin for soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-        server_default=text("false"),
+    deleted_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
     )
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if record is soft deleted."""
+        return self.deleted_at is not None
+
+    def soft_delete(self, deleted_by: str | None = None) -> None:
+        """Soft delete this record."""
+        self.deleted_at = datetime.now(timezone.utc)
+        self.deleted_by = deleted_by
 
 
 class TenantMixin:
-    """Mixin providing tenant ID for multi-tenant support."""
+    """Mixin for multi-tenant support."""
 
     tenant_id: Mapped[UUID] = mapped_column(
-        primary_key=True,
-        default=uuid4,
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
     )
-
-
-def utc_now() -> datetime:
-    """Get current UTC datetime."""
-    return datetime.now(timezone.utc)
-
-
-def generate_uuid() -> UUID:
-    """Generate a new UUID4."""
-    return uuid4()
-
-
-# Import Base from core.database for model declarations
-# This is done at import time to ensure proper model registration
-from core.database import Base
-
-__all__ = [
-    "Base",
-    "BaseMixin",
-    "TimestampMixin",
-    "SoftDeleteMixin",
-    "TenantMixin",
-    "utc_now",
-    "generate_uuid",
-]
