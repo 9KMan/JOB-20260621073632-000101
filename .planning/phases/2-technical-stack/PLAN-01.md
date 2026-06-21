@@ -203,3 +203,98 @@ This phase produces:
 2. `-SUMMARY-01.md` — condensed technical stack summary
 
 > **Note:** This plan defines the stack and structure. Implementation details for each API domain, service, and data model will be detailed in subsequent phase plans.
+
+---
+
+## 12. Files to Create
+
+The following files are produced by this phase (implementation files scaffolded for subsequent phases):
+
+### Configuration Files
+| # | File | Purpose |
+|---|------|---------|
+| 1 | `pyproject.toml` | Python project metadata, dependencies |
+| 2 | `alembic.ini` | Alembic migration configuration |
+| 3 | `Dockerfile` | Python 3.11 slim container image |
+| 4 | `docker-compose.yml` | PostgreSQL + PGBouncer + API local dev stack |
+| 5 | `.env.example` | Environment variable template |
+
+### Core Module (`core/`)
+| # | File | Purpose |
+|---|------|---------|
+| 6 | `core/__init__.py` | Package init |
+| 7 | `core/config.py` | Environment/settings via pydantic-settings |
+| 8 | `core/security.py` | JWT (HS256) + bcrypt utilities |
+| 9 | `core/database.py` | Async SQLAlchemy session management |
+
+### Data Models (`models/`)
+| # | File | Purpose |
+|---|------|---------|
+| 10 | `models/__init__.py` | Package init + model exports |
+| 11 | `models/base.py` | SQLAlchemy declarative base |
+| 12 | `models/enums.py` | Status enums, decision types |
+| 13 | `models/invoice.py` | Invoice table + SQLAlchemy model |
+| 14 | `models/purchase_order.py` | Purchase order table + model |
+| 15 | `models/delivery_note.py` | Delivery note table + model |
+| 16 | `models/balance_ledger.py` | Balance ledger table + model |
+| 17 | `models/cross_ref.py` | Learning loop / cross-reference table |
+
+### API Layer (`api/`)
+| # | File | Purpose |
+|---|------|---------|
+| 18 | `api/__init__.py` | Package init |
+| 19 | `api/schemas.py` | Shared Pydantic request/response models |
+| 20 | `api/v1/__init__.py` | API v1 package init |
+| 21 | `api/v1/router.py` | API router aggregator |
+| 22 | `api/v1/invoices.py` | Invoice ingestion + CRUD endpoints |
+| 23 | `api/v1/purchase_orders.py` | PO ingestion + list/get endpoints |
+| 24 | `api/v1/delivery_notes.py` | Delivery note endpoints |
+| 25 | `api/v1/matching.py` | Matching engine trigger + decision endpoints |
+| 26 | `api/v1/exceptions.py` | Exception list/resolve/dismiss endpoints |
+
+### Business Logic Services (`services/`)
+| # | File | Purpose |
+|---|------|---------|
+| 27 | `services/__init__.py` | Package init |
+| 28 | `services/anchoring.py` | Layer 1: PO anchoring logic |
+| 29 | `services/cascade.py` | Layer 2: Line-matching cascade |
+| 30 | `services/balances.py` | Balances ledger service |
+| 31 | `services/scoring.py` | Score calculation + threshold routing |
+| 32 | `services/learning.py` | cross_ref learning/promotion logic |
+
+### Background Workers (`workers/`)
+| # | File | Purpose |
+|---|------|---------|
+| 33 | `workers/__init__.py` | Package init |
+| 34 | `workers/matching.py` | Background matching job (if needed) |
+
+### Database Migrations (`migrations/`)
+| # | File | Purpose |
+|---|------|---------|
+| 35 | `migrations/env.py` | Alembic environment config |
+| 36 | `migrations/script.py.mako` | Alembic migration template |
+| 37 | `migrations/versions/` | Initial migration scripts (created by alembic) |
+
+### Tests (`tests/`)
+| # | File | Purpose |
+|---|------|---------|
+| 38 | `tests/__init__.py` | Package init |
+| 39 | `tests/conftest.py` | pytest fixtures |
+| 40 | `tests/unit/__init__.py` | Unit test package init |
+| 41 | `tests/unit/test_anchoring.py` | Anchoring service unit tests |
+| 42 | `tests/unit/test_cascade.py` | Cascade service unit tests |
+| 43 | `tests/unit/test_balances.py` | Balances service unit tests |
+| 44 | `tests/unit/test_scoring.py` | Scoring service unit tests |
+| 45 | `tests/integration/__init__.py` | Integration test package init |
+| 46 | `tests/integration/test_matching_flow.py` | Full matching flow integration test |
+
+### Documentation
+| # | File | Purpose |
+|---|------|---------|
+| 47 | `README.md` | Project setup and run instructions |
+| 48 | `.planning/phases/2-technical-stack/-SUMMARY-01.md` | Condensed technical stack summary |
+
+### Notes
+- Files are scaffolded in this phase; implementation details are filled in by subsequent phases.
+- Alembic migrations are auto-generated via `alembic revision --autogenerate` once models are defined.
+- API endpoints are defined as stubs in this phase; business logic is implemented in Phases 3–4.

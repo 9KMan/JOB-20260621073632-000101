@@ -160,3 +160,18 @@ Thresholds are configurable globally and overridable per supplier.
 This phase produces:
 1. `PLAN-01.md` — this document
 2. `-SUMMARY-01.md` — condensed executive summary
+
+---
+
+## 9. Files to Create
+
+The following files are produced by this phase:
+
+| # | File | Purpose |
+|---|------|---------|
+| 1 | `.planning/phases/1-project-overview/PLAN-01.md` | This document — full project overview |
+| 2 | `.planning/phases/1-project-overview/-SUMMARY-01.md` | Condensed executive summary (1–2 pages) |
+
+### Notes
+- No implementation files are created in this phase; Phase 1 is planning-only.
+- All subsequent phases reference these documents as the source of truth for project identity, problem definition, and scope.
