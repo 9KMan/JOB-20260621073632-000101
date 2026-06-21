@@ -1,209 +1,182 @@
 // core/config.py
-"""Configuration management using pydantic-settings.
+"""Application configuration management.
 
-All configuration is loaded from environment variables.
-No hardcoded secrets or configuration values.
+This module uses pydantic-settings for environment-based configuration.
+All settings are loaded from environment variables or .env file.
 """
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Optional
 
 from pydantic import Field, field_validator
-from pydantic_settings import (
-    BaseSettings,
-    SettingsConfigDict,
-    PydanticBaseSettingsSource,
-    EnvSettingsSource,
-)
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables.
+class DatabaseSettings(BaseSettings):
+    """Database connection settings."""
 
-    Attributes:
-        app_name: Application name for documentation.
-        debug: Enable debug mode (verbose logging, stack traces).
-        api_v1_prefix: API version 1 URL prefix.
-        cors_origins: List of allowed CORS origins.
+    model_config = SettingsConfigDict(env_prefix="DATABASE_")
 
-        # Database configuration
-        database_url: PostgreSQL async connection string.
-        database_pool_size: Number of connections in the pool.
-        database_max_overflow: Max overflow connections.
-        database_pool_timeout: Pool checkout timeout in seconds.
-        database_echo: Echo SQL queries (debug only).
+    host: str = Field(default="localhost", description="PostgreSQL host")
+    port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
+    name: str = Field(default="apautomation", description="Database name")
+    user: str = Field(default="postgres", description="Database user")
+    password: str = Field(default="postgres", description="Database password")
+    pool_size: int = Field(default=20, ge=1, le=100, description="Connection pool size")
+    max_overflow: int = Field(default=10, ge=0, le=50, description="Max overflow connections")
+    pool_timeout: int = Field(default=30, ge=1, description="Pool timeout in seconds")
+    pool_recycle: int = Field(default=3600, ge=0, description="Pool recycle time in seconds")
 
-        # JWT/Authentication
-        jwt_secret_key: HS256 signing secret key.
-        jwt_algorithm: JWT signing algorithm.
-        jwt_access_token_expire_minutes: Access token expiry.
+    @property
+    def async_url(self) -> str:
+        """Generate async PostgreSQL connection URL."""
+        return (
+            f"postgresql+asyncpg://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.name}"
+        )
 
-        # Matching engine thresholds
-        threshold_high: Auto-approve threshold (0.0-1.0).
-        threshold_mid: 1-click review threshold (0.0-1.0).
-        threshold_low: Exception threshold (0.0-1.0).
+    @property
+    def sync_url(self) -> str:
+        """Generate sync PostgreSQL connection URL for migrations."""
+        return (
+            f"postgresql://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.name}"
+        )
 
-        # Tolerance settings for matching
-        tolerance_price: Price match tolerance percentage.
-        tolerance_qty: Quantity match tolerance percentage.
 
-        # Logging
-        log_level: Application log level.
-    """
+class JWTSettings(BaseSettings):
+    """JWT authentication settings."""
+
+    model_config = SettingsConfigDict(env_prefix="JWT_")
+
+    secret_key: str = Field(
+        default="dev-secret-key-change-in-production",
+        description="HS256 signing secret key",
+    )
+    algorithm: str = Field(default="HS256", description="JWT algorithm")
+    access_token_expire_minutes: int = Field(
+        default=30, ge=1, le=1440, description="Access token expiry in minutes"
+    )
+
+
+class ThresholdSettings(BaseSettings):
+    """Matching threshold settings."""
+
+    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
+
+    high: int = Field(
+        default=95, ge=0, le=100,
+        description="Auto-approve threshold (percentage)"
+    )
+    mid: int = Field(
+        default=75, ge=0, le=100,
+        description="One-click review threshold (percentage)"
+    )
+    low: int = Field(
+        default=50, ge=0, le=100,
+        description="Exception threshold (percentage)"
+    )
+
+    @field_validator("high", "mid", "low")
+    @classmethod
+    def validate_thresholds(cls, v: int) -> int:
+        """Validate threshold is within valid range."""
+        if not 0 <= v <= 100:
+            raise ValueError("Threshold must be between 0 and 100")
+        return v
+
+
+class ToleranceSettings(BaseSettings):
+    """Matching tolerance settings."""
+
+    model_config = SettingsConfigDict(env_prefix="TOLERANCE_")
+
+    price: float = Field(
+        default=5.0, ge=0, le=100,
+        description="Price match tolerance percentage"
+    )
+    qty: float = Field(
+        default=10.0, ge=0, le=100,
+        description="Quantity match tolerance percentage"
+    )
+
+
+class AppSettings(BaseSettings):
+    """Main application settings."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",
     )
 
-    # Application settings
     app_name: str = Field(
-        default="AP Automation Engine",
-        description="Application name for documentation",
+        default="AP Automation Core Engine",
+        description="Application name"
     )
-    debug: bool = Field(
-        default=False,
-        description="Enable debug mode for verbose logging",
+    app_version: str = Field(
+        default="0.1.0",
+        description="Application version"
     )
-    api_v1_prefix: str = Field(
-        default="/api/v1",
-        description="API version 1 URL prefix",
-    )
-    cors_origins: str = Field(
-        default="*",
-        description="Comma-separated list of allowed CORS origins",
-    )
-
-    # Database configuration
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        description="PostgreSQL async connection string",
-    )
-    database_pool_size: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="Number of connections in the pool",
-    )
-    database_max_overflow: int = Field(
-        default=10,
-        ge=0,
-        le=50,
-        description="Max overflow connections",
-    )
-    database_pool_timeout: int = Field(
-        default=30,
-        ge=1,
-        description="Pool checkout timeout in seconds",
-    )
-    database_echo: bool = Field(
-        default=False,
-        description="Echo SQL queries (debug only)",
-    )
-
-    # JWT/Authentication
-    jwt_secret_key: str = Field(
-        default="changeme-in-production-use-strong-secret",
-        description="HS256 signing secret key",
-    )
-    jwt_algorithm: str = Field(
-        default="HS256",
-        description="JWT signing algorithm",
-    )
-    jwt_access_token_expire_minutes: int = Field(
-        default=30,
-        ge=1,
-        le=1440,
-        description="Access token expiry in minutes",
-    )
-
-    # Matching engine thresholds
-    threshold_high: float = Field(
-        default=0.95,
-        ge=0.0,
-        le=1.0,
-        description="Auto-approve threshold (0.0-1.0)",
-    )
-    threshold_mid: float = Field(
-        default=0.70,
-        ge=0.0,
-        le=1.0,
-        description="1-click review threshold (0.0-1.0)",
-    )
-    threshold_low: float = Field(
-        default=0.40,
-        ge=0.0,
-        le=1.0,
-        description="Exception threshold (0.0-1.0)",
-    )
-
-    # Tolerance settings
-    tolerance_price: float = Field(
-        default=5.0,
-        ge=0.0,
-        le=100.0,
-        description="Price match tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        ge=0.0,
-        le=100.0,
-        description="Quantity match tolerance percentage",
-    )
-
-    # Logging
+    debug: bool = Field(default=False, description="Debug mode")
     log_level: str = Field(
         default="INFO",
-        description="Application log level",
+        description="Logging level",
+        validation_alias="LOG_LEVEL"
+    )
+    api_prefix: str = Field(default="/api/v1", description="API route prefix")
+    docs_url: str = Field(default="/docs", description="OpenAPI documentation URL")
+    redoc_url: str = Field(default="/redoc", description="ReDoc documentation URL")
+
+    # CORS settings
+    cors_origins: list[str] = Field(
+        default=["*"],
+        description="Allowed CORS origins"
+    )
+    cors_allow_credentials: bool = Field(
+        default=True,
+        description="Allow credentials in CORS"
+    )
+    cors_allow_methods: list[str] = Field(
+        default=["*"],
+        description="Allowed HTTP methods"
+    )
+    cors_allow_headers: list[str] = Field(
+        default=["*"],
+        description="Allowed HTTP headers"
     )
 
-    @field_validator("log_level")
+
+class Settings(BaseSettings):
+    """Combined application settings."""
+
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    thresholds: ThresholdSettings = Field(default_factory=ThresholdSettings)
+    tolerance: ToleranceSettings = Field(default_factory=ToleranceSettings)
+    app: AppSettings = Field(default_factory=AppSettings)
+
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Validate log level is a valid Python logging level."""
-        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-        upper_v = v.upper()
-        if upper_v not in valid_levels:
-            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
-        return upper_v
-
-    @field_validator("threshold_high", "threshold_mid", "threshold_low")
-    @classmethod
-    def validate_thresholds(
-        cls, v: float, info: field_validator
-    ) -> float:
-        """Validate threshold values are between 0 and 1."""
-        if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                f"{info.field_name} must be between 0.0 and 1.0, got {v}"
-            )
-        return v
-
-    @property
-    def cors_origins_list(self) -> list[str]:
-        """Parse CORS origins string into a list."""
-        if self.cors_origins == "*":
-            return ["*"]
-        return [origin.strip() for origin in self.cors_origins.split(",")]
-
-    def get_database_url_sync(self) -> str:
-        """Get synchronous database URL for Alembic migrations."""
-        return self.database_url.replace("+asyncpg", "").replace(
-            "postgresql+asyncpg", "postgresql+psycopg2"
+    def from_env(cls) -> "Settings":
+        """Create settings from environment variables."""
+        return cls(
+            database=DatabaseSettings(),
+            jwt=JWTSettings(),
+            thresholds=ThresholdSettings(),
+            tolerance=ToleranceSettings(),
+            app=AppSettings(),
         )
-
-
-settings = Settings()
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance.
+    """Get cached application settings.
 
     Returns:
-        Settings: Cached settings instance.
-
+        Settings: Combined application settings instance.
     """
-    return settings
+    return Settings.from_env()
+
+
+# Global settings instance
+settings = get_settings()

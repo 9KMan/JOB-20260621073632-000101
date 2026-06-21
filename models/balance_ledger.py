@@ -1,121 +1,123 @@
-# models/balance_ledger.py
-"""Balance Ledger model for tracking invoice-to-PO balances."""
+// models/balance_ledger.py
+"""Balance Ledger model definition.
 
-import uuid
+This module defines the BalanceLedger SQLAlchemy model for tracking
+PO line balances after invoices and deliveries.
+"""
+
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import Optional
+from uuid import uuid4
 
 from sqlalchemy import (
+    DateTime,
     ForeignKey,
     Index,
     Numeric,
     String,
+    Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-
-if TYPE_CHECKING:
-    from models.invoice import Invoice
-    from models.purchase_order import POLine
+from models.base import Base
 
 
-class BalanceLedger(TimestampMixin, UUIDMixin, Base):
+class BalanceLedger(Base):
+    """Balance Ledger database model.
+
+    Tracks running balances for PO lines across invoices and deliveries.
+    This is the authoritative source for what's left to invoice.
     """
-    Balance Ledger tracks the running balance between invoices and PO lines.
-    
-    Each record represents a transactional entry showing how much of a PO line
-    has been invoiced, delivered, and the remaining balance.
-    """
-    
+
     __tablename__ = "balance_ledger"
-    
-    invoice_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=False,
+    __table_args__ = (
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_tenant_po_line", "tenant_id", "po_line_id"),
+        Index("ix_balance_ledger_document", "document_type", "document_id"),
     )
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    # PO Line reference
+    po_line_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("po_lines.id", ondelete="CASCADE"),
         nullable=False,
     )
-    
-    # Quantities
-    po_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-        description="Original PO line quantity",
-    )
-    delivered_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-        description="Quantity delivered via delivery notes",
-    )
-    invoiced_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-        description="Quantity on this invoice",
-    )
-    previous_invoiced: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        default=Decimal("0"),
-        nullable=False,
-        description="Previously invoiced quantity against this PO line",
-    )
-    
-    # Amounts
-    po_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        description="Original PO line net amount",
-    )
-    invoiced_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        description="Invoice line net amount",
-    )
-    previous_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0"),
-        nullable=False,
-        description="Previously invoiced amount",
-    )
-    
-    # Balance calculation
+
+    # Document reference
+    document_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_number: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Balance tracking
+    # Positive = money owed to vendor, Negative = overpayment
     quantity_balance: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
+        Numeric(15, 3),
         nullable=False,
-        description="Remaining quantity balance (delivered - invoiced)",
+        default=Decimal("0"),
     )
     amount_balance: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-        description="Remaining amount balance",
+        default=Decimal("0"),
     )
-    
-    # Status
-    balance_status: Mapped[str] = mapped_column(
-        String(20),
-        default="balanced",
+
+    # Original amounts
+    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+
+    # Running totals
+    total_delivered: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
         nullable=False,
-        description="Balance status: balanced, over, under",
+        default=Decimal("0"),
     )
-    
+    total_invoiced: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+        default=Decimal("0"),
+    )
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(default=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
     # Relationships
-    invoice: Mapped["Invoice"] = relationship(
-        "Invoice",
-        back_populates="balance_ledger_entries",
-    )
-    po_line: Mapped["POLine"] = relationship(
-        "POLine",
-        back_populates="balance_ledger_entries",
-    )
-    
-    __table_args__ = (
-        Index("ix_balance_ledger_invoice_id", "invoice_id"),
-        Index("ix_balance_ledger_po_line_id", "po_line_id"),
-        Index("ix_balance_ledger_status", "balance_status"),
-        Index("ix_balance_ledger_invoice_po", "invoice_id", "po_line_id", unique=True),
-    )
+    po_line: Mapped["POLine"] = relationship("POLine")
+
+    def __repr__(self) -> str:
+        return f"<BalanceLedger PO Line {self.po_line_id}: Qty {self.quantity_balance}>"
+
+    @property
+    def can_invoice(self) -> bool:
+        """Check if there is quantity available to invoice."""
+        return self.quantity_balance > Decimal("0")
+
+    @property
+    def is_over_delivered(self) -> bool:
+        """Check if more has been delivered than ordered."""
+        return self.total_delivered > self.original_quantity
+
+    @property
+    def is_over_invoiced(self) -> bool:
+        """Check if more has been invoiced than delivered."""
+        return self.total_invoiced > self.total_delivered
+
+
+# Import at bottom to avoid circular imports
+from models.purchase_order import POLine
