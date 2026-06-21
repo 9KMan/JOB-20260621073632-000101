@@ -1,40 +1,58 @@
-// models/__init__.py
-"""SQLAlchemy models for AP Automation Engine."""
+# models/__init__.py
+"""Models package - SQLAlchemy ORM models."""
+
 from models.base import Base
-from models.enums import (
-    InvoiceStatus,
-    PurchaseOrderStatus,
-    DeliveryNoteStatus,
-    MatchDecision,
-    MatchStatus,
-    ExceptionType,
-    ExceptionStatus,
-    LedgerEntryType,
-)
-from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
-from models.cross_ref import CrossReference
+from models.cross_ref import CrossRef
+from models.delivery_note import DeliveryNote
+from models.enums import (
+    DecisionStatus,
+    DocumentStatus,
+    ExceptionReason,
+    InvoiceStatus,
+    LineStatus,
+    MatchDecision,
+    MatchScoreLevel,
+    PurchaseOrderStatus,
+)
+from models.invoice import Invoice
+from models.purchase_order import PurchaseOrder
 
 __all__ = [
+    # Base
     "Base",
     # Enums
+    "DocumentStatus",
     "InvoiceStatus",
     "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
+    "LineStatus",
     "MatchDecision",
-    "MatchStatus",
-    "ExceptionType",
-    "ExceptionStatus",
-    "LedgerEntryType",
+    "MatchScoreLevel",
+    "DecisionStatus",
+    "ExceptionReason",
     # Models
     "Invoice",
-    "InvoiceLine",
     "PurchaseOrder",
-    "PurchaseOrderLine",
     "DeliveryNote",
-    "DeliveryNoteLine",
     "BalanceLedger",
-    "CrossReference",
+    "CrossRef",
 ]
+
+
+def register_models() -> None:
+    """Import all models to ensure they are registered with Base."""
+    from models import (
+        balance_ledger,
+        cross_ref,
+        delivery_note,
+        invoice,
+        purchase_order,
+    )
+    # Models are imported to trigger SQLAlchemy model registration
+    _ = (
+        balance_ledger,
+        cross_ref,
+        delivery_note,
+        invoice,
+        purchase_order,
+    )

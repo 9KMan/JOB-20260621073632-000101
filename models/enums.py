@@ -1,101 +1,165 @@
-// models/enums.py
-"""Enumeration types for the AP Automation Engine."""
-import enum
+# models/enums.py
+"""Enum definitions for the AP Automation system."""
+
+import uuid
+from enum import Enum
+from typing import Any
 
 
-class InvoiceStatus(str, enum.Enum):
-    """Status values for invoices."""
+class StrEnum(str, Enum):
+    """Base enum that inherits from str for JSON serialization."""
+
+    def __json__(self) -> str:
+        """Return string value for JSON serialization."""
+        return str(self.value)
+
+
+class DocumentStatus(StrEnum):
+    """Status for documents (PO, Invoice, DN)."""
 
     DRAFT = "draft"
     PENDING = "pending"
-    MATCHING = "matching"
-    MATCHED = "matched"
-    AUTO_APPROVED = "auto_approved"
-    PENDING_REVIEW = "pending_review"
-    EXCEPTION = "exception"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    PAID = "paid"
-    CANCELLED = "cancelled"
-
-
-class PurchaseOrderStatus(str, enum.Enum):
-    """Status values for purchase orders."""
-
-    DRAFT = "draft"
     SUBMITTED = "submitted"
     APPROVED = "approved"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-
-class DeliveryNoteStatus(str, enum.Enum):
-    """Status values for delivery notes."""
-
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    COMPLETE = "complete"
-    CANCELLED = "cancelled"
-
-
-class MatchDecision(str, enum.Enum):
-    """Match decision outcomes."""
-
-    AUTO_APPROVE = "auto_approve"
-    MANUAL_REVIEW = "manual_review"
+    MATCHED = "matched"
     EXCEPTION = "exception"
-    NO_MATCH = "no_match"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
 
-class MatchStatus(str, enum.Enum):
-    """Status of match records."""
+class InvoiceStatus(DocumentStatus):
+    """Extended status for invoices, inherits from DocumentStatus."""
+
+    RECEIVED = "received"
+    VALIDATED = "validated"
+    MATCHING = "matching"
+
+
+class PurchaseOrderStatus(DocumentStatus):
+    """Extended status for purchase orders."""
+
+    OPEN = "open"
+    PARTIALLY_RECEIVED = "partially_received"
+    CLOSED = "closed"
+
+
+class LineStatus(StrEnum):
+    """Status for individual invoice/DN lines."""
+
+    OPEN = "open"
+    PARTIALLY_MATCHED = "partially_matched"
+    FULLY_MATCHED = "fully_matched"
+    OVER_DELIVERED = "over_delivered"
+    EXCEPTION = "exception"
+    CANCELLED = "cancelled"
+
+
+class MatchDecision(StrEnum):
+    """
+    Matching decision outcomes.
+    
+    - AUTO_APPROVED: Score >= threshold_high, auto-matched and approved
+    - REVIEW: Score between threshold_mid and threshold_high, needs 1-click review
+    - EXCEPTION: Score between threshold_low and threshold_mid, needs exception handling
+    - REJECTED: Score < threshold_low, auto-rejected
+    """
+
+    AUTO_APPROVED = "auto_approved"
+    REVIEW = "review"
+    EXCEPTION = "exception"
+    REJECTED = "rejected"
+    PENDING = "pending"
+
+
+class MatchScoreLevel(StrEnum):
+    """Score level categories for matching results."""
+
+    HIGH = "high"  # 95-100
+    MEDIUM = "medium"  # 70-94
+    LOW = "low"  # 40-69
+    VERY_LOW = "very_low"  # 0-39
+
+
+class DecisionStatus(StrEnum):
+    """Status for matching decisions."""
 
     PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    DISMISSED = "dismissed"
+    OVERRIDDEN = "overridden"
 
 
-class ExceptionType(str, enum.Enum):
-    """Types of matching exceptions."""
+class ExceptionReason(StrEnum):
+    """Reasons for matching exceptions."""
 
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
     MISSING_PO = "missing_po"
-    MULTIPLE_MATCHES = "multiple_matches"
+    MULTIPLE_PO_MATCHES = "multiple_po_matches"
     DUPLICATE_INVOICE = "duplicate_invoice"
-    PARTIAL_MATCH = "partial_match"
+    PO_CLOSED = "po_closed"
+    LINE_EXCEEDED = "line_exceeded"
+    TAX_MISMATCH = "tax_mismatch"
+    CURRENCY_MISMATCH = "currency_mismatch"
     DATE_VARIANCE = "date_variance"
     VENDOR_MISMATCH = "vendor_mismatch"
     OTHER = "other"
 
 
-class ExceptionStatus(str, enum.Enum):
-    """Status of exceptions."""
+class LearningAction(StrEnum):
+    """Actions taken by the learning loop."""
 
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
-
-
-class LedgerEntryType(str, enum.Enum):
-    """Types of balance ledger entries."""
-
-    PO_INITIAL = "po_initial"
-    DN_RECEIPT = "dn_receipt"
-    INVOICE_MATCH = "invoice_match"
-    ADJUSTMENT = "adjustment"
-    REVERSAL = "reversal"
-    CLOSEOUT = "closeout"
+    LEARNED = "learned"
+    PROMOTED = "promoted"
+    DEMOTED = "demoted"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
 
 
-class MatchConfidenceLevel(str, enum.Enum):
-    """Confidence levels for match scores."""
+def get_match_decision(
+    score: float,
+    threshold_high: int = 95,
+    threshold_mid: int = 70,
+    threshold_low: int = 40,
+) -> MatchDecision:
+    """
+    Determine match decision based on score and thresholds.
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
+    Args:
+        score: Match score (0-100)
+        threshold_high: Auto-approve threshold
+        threshold_mid: Review threshold
+        threshold_low: Exception threshold
+
+    Returns:
+        MatchDecision enum value
+    """
+    if score >= threshold_high:
+        return MatchDecision.AUTO_APPROVED
+    elif score >= threshold_mid:
+        return MatchDecision.REVIEW
+    elif score >= threshold_low:
+        return MatchDecision.EXCEPTION
+    else:
+        return MatchDecision.REJECTED
+
+
+def get_score_level(score: float) -> MatchScoreLevel:
+    """
+    Categorize a score into a level.
+
+    Args:
+        score: Match score (0-100)
+
+    Returns:
+        MatchScoreLevel enum value
+    """
+    if score >= 95:
+        return MatchScoreLevel.HIGH
+    elif score >= 70:
+        return MatchScoreLevel.MEDIUM
+    elif score >= 40:
+        return MatchScoreLevel.LOW
+    else:
+        return MatchScoreLevel.VERY_LOW

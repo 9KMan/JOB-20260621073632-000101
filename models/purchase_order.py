@@ -1,9 +1,10 @@
-// models/purchase_order.py
-"""PurchaseOrder and PurchaseOrderLine SQLAlchemy models."""
+# models/purchase_order.py
+"""Purchase Order model definition."""
+
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Date,
@@ -11,9 +12,9 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
+    ForeignKey,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -21,105 +22,308 @@ from models.enums import PurchaseOrderStatus
 
 if TYPE_CHECKING:
     from models.balance_ledger import BalanceLedger
-    from models.invoice import Invoice
     from models.delivery_note import DeliveryNote
+    from models.invoice import Invoice
 
 
 class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
-    """Purchase order header model."""
+    """
+    Purchase Order model representing supplier POs.
+
+    Attributes:
+        id: UUID primary key
+        po_number: Unique PO number
+        vendor_id: Supplier/vendor identifier
+        vendor_name: Supplier name
+        vendor_address: Supplier address
+        order_date: PO creation date
+        delivery_date: Expected delivery date
+        gross_amount: Total PO amount including tax
+        net_amount: PO amount excluding tax
+        tax_amount: Tax amount
+        currency: ISO 4217 currency code
+        status: Current PO status
+        received_amount: Total received amount
+        notes: Additional notes
+        metadata: Additional flexible fields
+        lines: Child PO lines
+        matched_invoices: Related matched invoices
+    """
 
     __tablename__ = "purchase_orders"
-    __table_args__ = (
-        Index("ix_purchase_orders_po_number", "po_number", unique=True),
-        Index("ix_purchase_orders_vendor_number", "vendor_number"),
-        Index("ix_purchase_orders_status", "status"),
-        Index("ix_purchase_orders_created_at", "created_at"),
+
+    # Core PO fields
+    po_number: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    vendor_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    vendor_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    vendor_address: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    vendor_tax_id: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
     )
 
-    # Vendor Information
-    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
-    vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    vendor_tax_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Dates
+    order_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+    )
+    delivery_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
 
-    # PO Details
-    po_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    po_date: Mapped[date] = mapped_column(Date, nullable=False)
-    delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    po_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    currency_code: Mapped[str] = mapped_column(String(3), default="USD")
+    # Amounts
+    gross_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    net_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    received_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
+    # Currency
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="USD",
+    )
 
     # Status
     status: Mapped[PurchaseOrderStatus] = mapped_column(
-        String(20),
-        default=PurchaseOrderStatus.DRAFT,
+        String(50),
         nullable=False,
+        default=PurchaseOrderStatus.OPEN,
+        index=True,
     )
 
-    # Metadata
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    payment_terms: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    shipping_terms: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    requested_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Additional fields
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    metadata: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    # Tenant
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
-    lines: Mapped[List["PurchaseOrderLine"]] = relationship(
+    lines: Mapped[list["PurchaseOrderLine"]] = relationship(
         "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    invoices: Mapped[List["Invoice"]] = relationship(
+    matched_invoices: Mapped[list["Invoice"]] = relationship(
         "Invoice",
-        back_populates="po",
-        lazy="selectin",
+        back_populates="matched_po",
+        foreign_keys="Invoice.matched_po_id",
     )
-    delivery_notes: Mapped[List["DeliveryNote"]] = relationship(
-        "DeliveryNote",
+    balance_entries: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
         back_populates="purchase_order",
-        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_purchase_orders_vendor_date", "vendor_id", "order_date"),
+        Index("ix_purchase_orders_status", "status"),
+        Index("ix_purchase_orders_tenant", "tenant_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number} from {self.vendor_name}>"
+        return f"<PurchaseOrder {self.po_number} - {self.vendor_name} - {self.gross_amount} {self.currency}>"
+
+    @property
+    def remaining_amount(self) -> Decimal:
+        """Calculate remaining unreceived amount."""
+        return self.gross_amount - self.received_amount
+
+    @property
+    def received_percentage(self) -> float:
+        """Calculate received percentage."""
+        if self.gross_amount == 0:
+            return 0.0
+        return float((self.received_amount / self.gross_amount) * 100)
+
+    @property
+    def is_fully_received(self) -> bool:
+        """Check if PO is fully received."""
+        return self.received_amount >= self.gross_amount
+
+    @property
+    def is_overdue(self) -> bool:
+        """Check if PO delivery is overdue."""
+        if self.delivery_date is None:
+            return False
+        return date.today() > self.delivery_date and not self.is_fully_received
 
 
 class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Purchase order line item model."""
+    """
+    Individual line items on a Purchase Order.
+
+    Attributes:
+        id: UUID primary key
+        po_id: Parent PO reference
+        line_number: Line item number
+        description: Line item description
+        quantity: Ordered quantity
+        unit_of_measure: UOM
+        unit_price: Price per unit
+        net_amount: Line net amount
+        tax_amount: Line tax amount
+        received_quantity: Quantity already received
+        delivered_quantity: Quantity delivered
+        invoiced_quantity: Quantity invoiced
+        status: Line status
+    """
 
     __tablename__ = "purchase_order_lines"
-    __table_args__ = (
-        Index("ix_purchase_order_lines_po_id", "po_id"),
-        Index("ix_purchase_order_lines_line_number", "line_number"),
-    )
 
     po_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
-    # Line Details
-    line_number: Mapped[str] = mapped_column(String(50), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    line_number: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+    sku: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    description: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+
+    # Quantity
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+    )
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="EA",
+    )
+
+    # Pricing
+    unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    net_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
+    # Tracking quantities
     received_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4), nullable=False, default=0
+        Numeric(15, 3),
+        nullable=False,
+        default=Decimal("0.00"),
     )
-    unit_of_measure: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    tax_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    delivered_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    invoiced_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
 
-    # Unique constraint for line number per PO
-    __table_args__ = (
-        *PurchaseOrderLine.__table_args__,
-        UniqueConstraint("po_id", "line_number", name="uq_po_line_number"),
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="open",
+    )
+
+    # Tenant
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
     )
 
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder", back_populates="lines"
+        "PurchaseOrder",
+        back_populates="lines",
+    )
+    balance_entries: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
+        back_populates="po_line",
+    )
+
+    __table_args__ = (
+        Index("ix_po_lines_po_line", "po_id", "line_number"),
+        Index("ix_po_lines_sku", "sku"),
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}: {self.description}>"
+        return f"<PurchaseOrderLine {self.line_number}: {self.description} x {self.quantity}>"
+
+    @property
+    def remaining_quantity(self) -> Decimal:
+        """Calculate remaining unreceived quantity."""
+        return self.quantity - self.received_quantity
+
+    @property
+    def remaining_to_deliver(self) -> Decimal:
+        """Calculate remaining to deliver."""
+        return self.quantity - self.delivered_quantity
+
+    @property
+    def remaining_to_invoice(self) -> Decimal:
+        """Calculate remaining to invoice."""
+        return self.quantity - self.invoiced_quantity
+
+    @property
+    def received_percentage(self) -> float:
+        """Calculate received percentage for this line."""
+        if self.quantity == 0:
+            return 100.0
+        return float((self.received_quantity / self.quantity) * 100)
