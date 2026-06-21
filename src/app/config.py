@@ -1,12 +1,8 @@
 # src/app/config.py
-"""
-Application configuration using Pydantic Settings.
-All configuration is loaded from environment variables.
-"""
+import os
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,75 +17,41 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = Field(default="FinaRo AP Automation", alias="APP_NAME")
-    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
-    debug: bool = Field(default=False, alias="DEBUG")
+    app_name: str = "FinaRo"
+    app_version: str = "1.0.0"
+    debug: bool = False
+    api_v1_prefix: str = "/api/v1"
     
     # Security
-    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
-    algorithm: str = Field(default="HS256", alias="ALGORITHM")
-    access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    secret_key: str = "change-me-in-production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
     
     # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro_ap",
-        alias="DATABASE_URL"
-    )
-    database_url_sync: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/finaro_ap",
-        alias="DATABASE_URL_SYNC"
-    )
+    database_url: str = "postgresql://finaro:finaro@localhost:5432/finaro"
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
     
     # CORS
-    cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8080"],
-        alias="CORS_ORIGINS"
-    )
+    allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
-    # Matching Engine Configuration
-    matching_weight_line_level: float = Field(
-        default=0.70,
-        alias="MATCHING_WEIGHT_LINE_LEVEL",
-        ge=0,
-        le=1
-    )
-    matching_weight_amount: float = Field(
-        default=0.20,
-        alias="MATCHING_WEIGHT_AMOUNT",
-        ge=0,
-        le=1
-    )
-    matching_weight_date: float = Field(
-        default=0.10,
-        alias="MATCHING_WEIGHT_DATE",
-        ge=0,
-        le=1
-    )
-    auto_approve_threshold: float = Field(
-        default=0.95,
-        alias="AUTO_APPROVE_THRESHOLD",
-        ge=0,
-        le=1
-    )
-    human_review_threshold: float = Field(
-        default=0.70,
-        alias="HUMAN_REVIEW_THRESHOLD",
-        ge=0,
-        le=1
-    )
-
-    @property
-    def total_matching_weight(self) -> float:
-        """Validate that matching weights sum to 1.0"""
-        total = (
-            self.matching_weight_line_level 
-            + self.matching_weight_amount 
-            + self.matching_weight_date
-        )
-        return round(total, 2)
+    # Matching Weights
+    matching_line_weight: float = 0.70
+    matching_amount_weight: float = 0.20
+    matching_date_weight: float = 0.10
+    
+    # Auto-approval threshold (0.0 to 1.0)
+    auto_approve_threshold: float = 0.85
+    
+    # Business Rules
+    date_tolerance_days: int = 5
+    amount_tolerance_percent: float = 5.0
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+settings = get_settings()

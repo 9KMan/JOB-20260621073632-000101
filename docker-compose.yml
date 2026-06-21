@@ -1,79 +1,47 @@
-# docker-compose.yml
-version: "3.9"
+version: '3.8'
 
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-automation-api
+  app:
+    build: .
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apdb
-      - PGBOUNCER_HOST=pgbouncer
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=70
-      - THRESHOLD_LOW=50
-      - TOLERANCE_PRICE=5
-      - TOLERANCE_QTY=10
-      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://finaro:finaro@db:5432/finaro
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=true
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-      pgbouncer:
-        condition: service_started
     volumes:
       - ./src:/app/src
-      - ./tests:/app/tests
     command: >
-      sh -c "
-        alembic upgrade head &&
-        uvicorn src.ap_automation.main:app --host 0.0.0.0 --port 8000 --reload
-      "
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      sh -c "alembic upgrade head && uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appass
-      - POSTGRES_DB=apdb
+      - POSTGRES_USER=finaro
+      - POSTGRES_PASSWORD=finaro
+      - POSTGRES_DB=finaro
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apuser -d apdb"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
+  pgadmin:
+    image: dpage/pgadmin4:latest
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=apdb
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
     ports:
-      - "6432:5432"
+      - "5050:80"
     depends_on:
-      postgres:
-        condition: service_healthy
+      - db
 
 volumes:
   postgres_data:

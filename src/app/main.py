@@ -1,96 +1,86 @@
 # src/app/main.py
-"""
-FinaRo AP Automation Core Engine - FastAPI Application Entry Point
-"""
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from datetime import datetime
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.app.config import get_settings
-from src.app.database import init_db, close_db
-from src.app.api.v1 import api_router
-
-settings = get_settings()
+from src.app.config import settings
+from src.app.database import engine, Base
+from src.api import auth, purchase_orders, invoices, delivery_notes, matches, balances
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan events."""
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
     # Startup
-    await init_db()
+    Base.metadata.create_all(bind=engine)
     yield
     # Shutdown
-    await close_db()
+    engine.dispose()
 
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="""
-    FinaRo AP Automation Core Engine
-    
-    A 3-Way Matching Engine for Invoice × Delivery Note × Purchase Order reconciliation.
-    
-    ## Features
-    - **Layer 1 - PO Anchoring**: Establish deterministic anchors using Purchase Orders
-    - **Layer 2 - Cascade Matching**: Match documents with weighted scoring
-    - **Layer 3 - Balance Resolution**: Track partial matches and balances
-    - **Decision Routing**: CONFIRMED → AUTO-APPROVE, PENDING → HUMAN_REVIEW, REJECTED → DISPUTE
-    
-    ## Authentication
-    JWT-based authentication with HS256 algorithm.
-    """,
+    description="AP Automation Core Engine — 3-Way Matching (Invoice × Delivery Note × PO)",
+    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json",
-    lifespan=lifespan,
 )
 
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Global exception handler
+# Global Exception Handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception):
     """Handle uncaught exceptions."""
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "detail": "An internal server error occurred",
-            "type": type(exc).__name__,
+            "detail": "Internal server error",
+            "timestamp": datetime.utcnow().isoformat(),
+            "path": str(request.url),
         },
     )
 
 
-# Include API routes
-app.include_router(api_router, prefix="/api/v1")
+# Request Logging Middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests."""
+    start_time = datetime.utcnow()
+    response = await call_next(request)
+    process_time = (datetime.utcnow() - start_time).total_seconds()
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
 
 
+# Health Check
 @app.get("/health")
-async def health_check() -> dict:
+async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "service": settings.app_name,
+        "app": settings.app_name,
         "version": settings.app_version,
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
-@app.get("/")
-async def root() -> dict:
-    """Root endpoint."""
-    return {
-        "message": "Welcome to FinaRo AP Automation Core Engine",
-        "docs": "/docs",
-        "health": "/health",
-    }
+# API Routes
+app.include_router(auth.router, prefix=f"{settings.api_v1_prefix}/auth", tags=["Authentication"])
+app.include_router(purchase_orders.router, prefix=f"{settings.api_v1_prefix}/purchase-orders", tags=["Purchase Orders"])
+app.include_router(invoices.router, prefix=f"{settings.api_v1_prefix}/invoices", tags=["Invoices"])
+app.include_router(delivery_notes.router, prefix=f"{settings.api_v1_prefix}/delivery-notes", tags=["Delivery Notes"])
+app.include_router(matches.router, prefix=f"{settings.api_v1_prefix}/matches", tags=["Matching"])
+app.include_router(balances.router, prefix=f"{settings.api_v1_prefix}/balances", tags=["Balances"])

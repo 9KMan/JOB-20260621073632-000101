@@ -1,1 +1,1 @@
-# FinaRo AP Automation - FastAPI Application
+# src/app/__init__.py

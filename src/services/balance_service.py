@@ -1,147 +1,174 @@
-// src/services/balance_service.py
+# src/services/balance_service.py
+import uuid
+from datetime import date
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import List, Optional
+
 from sqlalchemy.orm import Session
-from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from src.models.invoice import Invoice, InvoiceLine
-from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
+
+from src.app.config import settings
+from src.models.balance import Balance, BalanceType
+from src.models.purchase_order import PurchaseOrder
+from src.models.invoice import Invoice
+from src.models.delivery_note import DeliveryNote
 
 
 class BalanceService:
-    """
-    Layer 3: Balance Resolution
-    Tracks partial matches and balances across all document types
-    Handles: partial shipments, split invoices, multi-delivery scenarios
-    """
+    """Service for balance tracking operations."""
     
     def __init__(self, db: Session):
         self.db = db
     
-    def get_po_balance(self, po_id: str) -> Dict:
-        """Calculate remaining balance for a PO"""
-        po = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
-        if not po:
+    def get_balance_by_id(self, balance_id: uuid.UUID) -> Optional[Balance]:
+        """Get balance by ID."""
+        return self.db.query(Balance).filter(Balance.id == balance_id).first()
+    
+    def get_balances_by_po(self, po_id: uuid.UUID) -> List[Balance]:
+        """Get all balances for a purchase order."""
+        return self.db.query(Balance).filter(
+            Balance.purchase_order_id == po_id
+        ).all()
+    
+    def get_balances_by_reference(self, reference_type: str, reference_id: uuid.UUID) -> List[Balance]:
+        """Get balances by reference document."""
+        return self.db.query(Balance).filter(
+            Balance.reference_type == reference_type,
+            Balance.reference_id == reference_id
+        ).all()
+    
+    def get_unsettled_balances(self, purchase_order_id: Optional[uuid.UUID] = None) -> List[Balance]:
+        """Get all unsettled balances, optionally filtered by PO."""
+        query = self.db.query(Balance).filter(Balance.is_settled == False)
+        if purchase_order_id:
+            query = query.filter(Balance.purchase_order_id == purchase_order_id)
+        return query.all()
+    
+    def create_invoice_to_po_balance(
+        self,
+        invoice: Invoice,
+        purchase_order: PurchaseOrder,
+        matched_amount: Decimal = Decimal("0.00")
+    ) -> Balance:
+        """Create a balance record for invoice-to-PO relationship."""
+        remaining = invoice.total_amount - matched_amount
+        balance = Balance(
+            balance_type=BalanceType.INVOICE_TO_PO.value,
+            reference_type="INVOICE",
+            reference_id=invoice.id,
+            original_amount=invoice.total_amount,
+            matched_amount=matched_amount,
+            remaining_amount=remaining,
+            purchase_order_id=purchase_order.id,
+        )
+        self.db.add(balance)
+        self.db.commit()
+        self.db.refresh(balance)
+        return balance
+    
+    def create_delivery_to_po_balance(
+        self,
+        delivery_note: DeliveryNote,
+        purchase_order: PurchaseOrder,
+        matched_amount: Decimal = Decimal("0.00")
+    ) -> Balance:
+        """Create a balance record for delivery-to-PO relationship."""
+        remaining = delivery_note.total_amount - matched_amount
+        balance = Balance(
+            balance_type=BalanceType.DELIVERY_TO_PO.value,
+            reference_type="DELIVERY",
+            reference_id=delivery_note.id,
+            original_amount=delivery_note.total_amount,
+            matched_amount=matched_amount,
+            remaining_amount=remaining,
+            purchase_order_id=purchase_order.id,
+        )
+        self.db.add(balance)
+        self.db.commit()
+        self.db.refresh(balance)
+        return balance
+    
+    def create_invoice_to_delivery_balance(
+        self,
+        invoice: Invoice,
+        delivery_note: DeliveryNote,
+        matched_amount: Decimal = Decimal("0.00")
+    ) -> Balance:
+        """Create a balance record for invoice-to-delivery relationship."""
+        remaining = invoice.total_amount - matched_amount
+        balance = Balance(
+            balance_type=BalanceType.INVOICE_TO_DELIVERY.value,
+            reference_type="INVOICE",
+            reference_id=invoice.id,
+            original_amount=invoice.total_amount,
+            matched_amount=matched_amount,
+            remaining_amount=remaining,
+            purchase_order_id=delivery_note.purchase_order_id,
+        )
+        self.db.add(balance)
+        self.db.commit()
+        self.db.refresh(balance)
+        return balance
+    
+    def update_balance(
+        self,
+        balance_id: uuid.UUID,
+        matched_amount: Optional[Decimal] = None,
+        remaining_amount: Optional[Decimal] = None,
+        is_settled: Optional[bool] = None,
+    ) -> Optional[Balance]:
+        """Update a balance record."""
+        balance = self.get_balance_by_id(balance_id)
+        if not balance:
             return None
         
-        total_ordered = po.total_amount
-        total_invoiced = sum(
-            inv.total_amount for inv in po.invoices
-            if inv.status.value not in ['rejected', 'cancelled']
-        )
-        total_delivered_value = sum(
-            dn.total_amount for dn in po.delivery_notes
-            if dn.status.value not in ['cancelled']
-        )
+        if matched_amount is not None:
+            balance.matched_amount = matched_amount
+        if remaining_amount is not None:
+            balance.remaining_amount = remaining_amount
+        if is_settled is not None:
+            balance.is_settled = is_settled
+            if is_settled:
+                balance.settlement_date = date.today()
         
-        return {
-            "po_id": str(po.id),
-            "po_number": po.po_number,
-            "total_ordered": total_ordered,
-            "total_invoiced": total_invoiced,
-            "total_delivered_value": total_delivered_value,
-            "invoice_balance": total_ordered - total_invoiced,
-            "delivery_balance": total_ordered - total_delivered_value,
-            "invoice_pending": total_invoiced < total_ordered,
-            "delivery_pending": total_delivered_value < total_ordered
-        }
+        self.db.commit()
+        self.db.refresh(balance)
+        return balance
     
-    def get_line_balances(self, po_id: str) -> List[Dict]:
-        """Get line-level balances for a PO"""
-        po = self.db.query(PurchaseOrder).options(
-            PurchaseOrder.lines
-        ).filter(PurchaseOrder.id == po_id).first()
+    def settle_balance(self, balance_id: uuid.UUID) -> Optional[Balance]:
+        """Settle a balance."""
+        return self.update_balance(balance_id, is_settled=True)
+    
+    def recalculate_po_balance(self, po_id: uuid.UUID) -> dict:
+        """Recalculate and aggregate balances for a PO."""
+        balances = self.get_balances_by_po(po_id)
         
+        po = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
         if not po:
-            return []
+            return {"error": "Purchase order not found"}
         
-        balances = []
-        for po_line in po.lines:
-            total_ordered = po_line.quantity
-            total_delivered = Decimal("0")
-            total_invoiced = Decimal("0")
-            
-            for inv in po.invoices:
-                for inv_line in inv.lines:
-                    if inv_line.product_code == po_line.product_code:
-                        total_invoiced += inv_line.quantity
-            
-            for dn in po.delivery_notes:
-                for dn_line in dn.lines:
-                    if dn_line.product_code == po_line.product_code:
-                        total_delivered += dn_line.quantity
-            
-            balances.append({
-                "line_id": str(po_line.id),
-                "product_code": po_line.product_code,
-                "description": po_line.description,
-                "quantity_ordered": total_ordered,
-                "quantity_delivered": total_delivered,
-                "quantity_invoiced": total_invoiced,
-                "delivery_balance": total_ordered - total_delivered,
-                "invoice_balance": total_ordered - total_invoiced,
-                "fully_delivered": total_delivered >= total_ordered,
-                "fully_invoiced": total_invoiced >= total_ordered
-            })
+        invoice_to_po = [b for b in balances if b.balance_type == BalanceType.INVOICE_TO_PO.value]
+        delivery_to_po = [b for b in balances if b.balance_type == BalanceType.DELIVERY_TO_PO.value]
         
-        return balances
-    
-    def get_supplier_summary(self, supplier_code: str) -> Dict:
-        """Get summary of all activity for a supplier"""
-        pos = self.db.query(PurchaseOrder).filter(
-            PurchaseOrder.supplier_code == supplier_code
-        ).all()
-        
-        total_ordered = sum(po.total_amount for po in pos)
-        total_invoiced = sum(
-            sum(inv.total_amount for inv in po.invoices)
-            for po in pos
-        )
-        total_delivered = sum(
-            sum(dn.total_amount for dn in po.delivery_notes)
-            for po in pos
-        )
+        total_invoice_matched = sum((b.matched_amount for b in invoice_to_po), Decimal("0.00"))
+        total_delivery_matched = sum((b.matched_amount for b in delivery_to_po), Decimal("0.00"))
+        total_invoice_remaining = sum((b.remaining_amount for b in invoice_to_po), Decimal("0.00"))
+        total_delivery_remaining = sum((b.remaining_amount for b in delivery_to_po), Decimal("0.00"))
         
         return {
-            "supplier_code": supplier_code,
-            "supplier_name": pos[0].supplier_name if pos else None,
-            "total_pos": len(pos),
-            "total_ordered": total_ordered,
-            "total_invoiced": total_invoiced,
-            "total_delivered": total_delivered,
-            "pending_invoices": total_ordered - total_invoiced,
-            "pending_deliveries": total_ordered - total_delivered
+            "purchase_order_id": str(po_id),
+            "po_total": po.total_amount,
+            "total_invoice_matched": total_invoice_matched,
+            "total_delivery_matched": total_delivery_matched,
+            "total_invoice_remaining": total_invoice_remaining,
+            "total_delivery_remaining": total_delivery_remaining,
+            "is_fully_matched": total_invoice_remaining == Decimal("0.00") and total_delivery_remaining == Decimal("0.00"),
         }
     
-    def validate_partial_match(
-        self,
-        po_id: str,
-        invoice_amount: Decimal,
-        dn_amount: Optional[Decimal] = None
-    ) -> Dict:
-        """Validate if a partial match is acceptable"""
-        balance = self.get_po_balance(po_id)
-        
+    def delete_balance(self, balance_id: uuid.UUID) -> bool:
+        """Delete a balance record."""
+        balance = self.get_balance_by_id(balance_id)
         if not balance:
-            return {"valid": False, "reason": "PO not found"}
-        
-        invoice_valid = invoice_amount <= balance["invoice_balance"]
-        dn_valid = True
-        if dn_amount:
-            dn_valid = dn_amount <= balance["delivery_balance"]
-        
-        return {
-            "valid": invoice_valid and dn_valid,
-            "invoice_valid": invoice_valid,
-            "dn_valid": dn_valid,
-            "reason": self._get_validation_reason(invoice_valid, dn_valid),
-            "available_balance": balance["invoice_balance"],
-            "available_delivery": balance["delivery_balance"]
-        }
-    
-    def _get_validation_reason(self, invoice_valid: bool, dn_valid: bool) -> str:
-        if invoice_valid and dn_valid:
-            return "Match is within acceptable balance"
-        elif not invoice_valid:
-            return "Invoice amount exceeds available balance"
-        else:
-            return "Delivery amount exceeds available delivery"
+            return False
+        self.db.delete(balance)
+        self.db.commit()
+        return True

@@ -1,87 +1,53 @@
-// src/schemas/__init__.py
-"""Pydantic schemas package."""
-from src.schemas.base import BaseSchema, PaginatedResponse, ErrorResponse
-from src.schemas.user import (
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    UserLogin,
-    Token,
-    TokenData,
-)
+# src/schemas/__init__.py
+from src.schemas.common import PageParams, PaginatedResponse
+from src.schemas.auth import Token, TokenPayload, UserCreate, UserResponse, UserLogin
 from src.schemas.purchase_order import (
-    PurchaseOrderCreate,
-    PurchaseOrderUpdate,
-    PurchaseOrderResponse,
-    PurchaseOrderLineCreate,
-    PurchaseOrderLineUpdate,
-    PurchaseOrderLineResponse,
+    PurchaseOrderCreate, PurchaseOrderUpdate, PurchaseOrderResponse,
+    PurchaseOrderLineItemCreate, PurchaseOrderLineItemResponse
 )
 from src.schemas.invoice import (
-    InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
-    InvoiceLineCreate,
-    InvoiceLineUpdate,
-    InvoiceLineResponse,
+    InvoiceCreate, InvoiceUpdate, InvoiceResponse,
+    InvoiceLineItemCreate, InvoiceLineItemResponse
 )
 from src.schemas.delivery_note import (
-    DeliveryNoteCreate,
-    DeliveryNoteUpdate,
-    DeliveryNoteResponse,
-    DeliveryNoteLineCreate,
-    DeliveryNoteLineUpdate,
-    DeliveryNoteLineResponse,
+    DeliveryNoteCreate, DeliveryNoteUpdate, DeliveryNoteResponse,
+    DeliveryNoteLineItemCreate, DeliveryNoteLineItemResponse
 )
-from src.schemas.match_result import (
-    MatchResultCreate,
-    MatchResultUpdate,
-    MatchResultResponse,
-    MatchResultLineCreate,
-    MatchResultLineResponse,
-    MatchRequest,
-    MatchResponse,
-    MatchDecision,
+from src.schemas.match import (
+    MatchCreate, MatchUpdate, MatchResponse, MatchReviewRequest
 )
-from src.schemas.balance_ledger import (
-    BalanceLedgerResponse,
+from src.schemas.balance import (
+    BalanceCreate, BalanceUpdate, BalanceResponse
 )
 
 __all__ = [
-    "BaseSchema",
+    "PageParams",
     "PaginatedResponse",
-    "ErrorResponse",
+    "Token",
+    "TokenPayload",
     "UserCreate",
-    "UserUpdate",
     "UserResponse",
     "UserLogin",
-    "Token",
-    "TokenData",
     "PurchaseOrderCreate",
     "PurchaseOrderUpdate",
     "PurchaseOrderResponse",
-    "PurchaseOrderLineCreate",
-    "PurchaseOrderLineUpdate",
-    "PurchaseOrderLineResponse",
+    "PurchaseOrderLineItemCreate",
+    "PurchaseOrderLineItemResponse",
     "InvoiceCreate",
     "InvoiceUpdate",
     "InvoiceResponse",
-    "InvoiceLineCreate",
-    "InvoiceLineUpdate",
-    "InvoiceLineResponse",
+    "InvoiceLineItemCreate",
+    "InvoiceLineItemResponse",
     "DeliveryNoteCreate",
     "DeliveryNoteUpdate",
     "DeliveryNoteResponse",
-    "DeliveryNoteLineCreate",
-    "DeliveryNoteLineUpdate",
-    "DeliveryNoteLineResponse",
-    "MatchResultCreate",
-    "MatchResultUpdate",
-    "MatchResultResponse",
-    "MatchResultLineCreate",
-    "MatchResultLineResponse",
-    "MatchRequest",
+    "DeliveryNoteLineItemCreate",
+    "DeliveryNoteLineItemResponse",
+    "MatchCreate",
+    "MatchUpdate",
     "MatchResponse",
-    "MatchDecision",
-    "BalanceLedgerResponse",
+    "MatchReviewRequest",
+    "BalanceCreate",
+    "BalanceUpdate",
+    "BalanceResponse",
 ]

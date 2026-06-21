@@ -1,117 +1,73 @@
-// src/models/purchase_order.py
-"""Purchase Order models."""
-from decimal import Decimal
-from typing import List, Optional
+# src/models/purchase_order.py
+import uuid
+import decimal
+from datetime import date, datetime
+from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import String, Numeric, Date, Integer, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, BaseModel
+from src.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from src.models.invoice import Invoice
+    from src.models.delivery_note import DeliveryNote
+    from src.models.balance import Balance
 
 
-class PurchaseOrder(Base, BaseModel):
+class PurchaseOrder(Base, UUIDMixin, TimestampMixin):
     """Purchase Order model."""
+    
     __tablename__ = "purchase_orders"
-
-    po_number = Column(String(50), unique=True, nullable=False, index=True)
-    supplier_id = Column(String(36), nullable=False, index=True)
-    supplier_name = Column(String(255), nullable=False)
-    supplier_code = Column(String(50), nullable=True)
     
-    # Dates
-    po_date = Column(Date, nullable=False)
-    expected_delivery_date = Column(Date, nullable=True)
+    po_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    supplier_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
     
-    # Status
-    status = Column(String(50), default="open", nullable=False)  # open, partial, closed, cancelled
-    currency = Column(String(3), default="USD", nullable=False)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     
-    # Totals
-    subtotal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    tax_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    total_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    total_received = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    total_invoiced = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    subtotal: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    tax_amount: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), default=decimal.Decimal("0.00"))
+    total_amount: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     
-    # Notes
-    notes = Column(Text, nullable=True)
-    delivery_address = Column(Text, nullable=True)
-    terms = Column(String(255), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False)
     
-    # Metadata
-    created_by = Column(String(36), nullable=True)
-    approved_by = Column(String(36), nullable=True)
-    approved_at = Column(DateTime, nullable=True)
-
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
     # Relationships
-    lines: List["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        back_populates="purchase_order",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-    match_results: List["MatchResult"] = relationship(
-        "MatchResult",
-        foreign_keys="MatchResult.po_id",
-        back_populates="purchase_order",
-        lazy="selectin",
-    )
-    balance_entries: List["BalanceLedger"] = relationship(
-        "BalanceLedger",
-        foreign_keys="BalanceLedger.po_id",
-        back_populates="purchase_order",
-        lazy="selectin",
-    )
-
+    line_items = relationship("PurchaseOrderLineItem", back_populates="purchase_order", cascade="all, delete-orphan")
+    invoices = relationship("Invoice", back_populates="purchase_order")
+    delivery_notes = relationship("DeliveryNote", back_populates="purchase_order")
+    balances = relationship("Balance", back_populates="purchase_order", foreign_keys="Balance.purchase_order_id")
+    
     def __repr__(self) -> str:
         return f"<PurchaseOrder {self.po_number}>"
 
-    @property
-    def is_open(self) -> bool:
-        """Check if PO is still open."""
-        return self.status in ("open", "partial")
 
-    @property
-    def remaining_balance(self) -> Decimal:
-        """Calculate remaining balance."""
-        return self.total_amount - self.total_received - self.total_invoiced
-
-
-class PurchaseOrderLine(Base, BaseModel):
-    """Purchase Order Line model."""
-    __tablename__ = "purchase_order_lines"
-
-    purchase_order_id = Column(
-        String(36),
+class PurchaseOrderLineItem(Base, UUIDMixin, TimestampMixin):
+    """Purchase Order Line Item model."""
+    
+    __tablename__ = "purchase_order_line_items"
+    
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        index=True
     )
-    line_number = Column(Integer, nullable=False)
-    item_code = Column(String(50), nullable=True, index=True)
-    item_description = Column(String(500), nullable=False)
-    quantity = Column(Numeric(15, 4), nullable=False)
-    unit_of_measure = Column(String(20), default="EA", nullable=False)
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    tax_rate = Column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
-    tax_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    line_total = Column(Numeric(15, 2), nullable=False)
-    quantity_received = Column(Numeric(15, 4), default=Decimal("0"), nullable=False)
-    quantity_invoiced = Column(Numeric(15, 4), default=Decimal("0"), nullable=False)
     
-    # Status
-    status = Column(String(50), default="open", nullable=False)
-
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    unit_price: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    line_total: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    
     # Relationships
-    purchase_order: "PurchaseOrder" = relationship(
-        "PurchaseOrder",
-        back_populates="lines",
-    )
-
+    purchase_order = relationship("PurchaseOrder", back_populates="line_items")
+    
     def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}>"
-
-    @property
-    def remaining_quantity(self) -> Decimal:
-        """Calculate remaining quantity."""
-        return self.quantity - self.quantity_received - self.quantity_invoiced
+        return f"<PurchaseOrderLineItem {self.line_number}: {self.item_code}>"

@@ -1,47 +1,39 @@
-// src/models/base.py
-"""Base models and mixins."""
+# src/models/base.py
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Column, DateTime, String
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import DateTime, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """Base class for all database models."""
+    pass
 
 
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps."""
-    created_at = Column(
-        DateTime,
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         default=datetime.utcnow,
         nullable=False,
     )
-    updated_at = Column(
-        DateTime,
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
         nullable=False,
     )
 
 
-class BaseModel(TimestampMixin):
-    """Base model with UUID primary key."""
-    __abstract__ = True
-
-    id = Column(
-        String(36),
+class UUIDMixin:
+    """Mixin for UUID primary key."""
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=uuid.uuid4,
         nullable=False,
     )
-
-    def to_dict(self) -> dict:
-        """Convert model to dictionary."""
-        result = {}
-        for column in self.__table__.columns:
-            value = getattr(self, column.name)
-            if isinstance(value, datetime):
-                value = value.isoformat()
-            result[column.name] = value
-        return result

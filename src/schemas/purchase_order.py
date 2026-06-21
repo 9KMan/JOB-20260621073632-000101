@@ -1,106 +1,72 @@
-// src/schemas/purchase_order.py
-// src/schemas/purchase_order.py
-"""Purchase Order schemas."""
+# src/schemas/purchase_order.py
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional, List
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from src.schemas.base import BaseSchema
-
-
-class PurchaseOrderLineBase(BaseSchema):
-    """Base purchase order line schema."""
-    line_number: int
-    item_code: Optional[str] = None
-    item_description: str
-    quantity: Decimal
-    unit_of_measure: str = "EA"
-    unit_price: Decimal
-    tax_rate: Decimal = Decimal("0.00")
-    tax_amount: Decimal = Decimal("0.00")
-    line_total: Decimal
-    quantity_received: Decimal = Decimal("0")
-    quantity_invoiced: Decimal = Decimal("0")
-    status: str = "open"
+from src.schemas.common import TimestampMixinSchema, UUIDMixinSchema
 
 
-class PurchaseOrderLineCreate(PurchaseOrderLineBase):
-    """Purchase order line creation schema."""
+# Line Items
+class PurchaseOrderLineItemBase(BaseModel):
+    """Base schema for PO line items."""
+    line_number: int = Field(ge=1)
+    item_code: str = Field(max_length=100)
+    description: str = Field(max_length=500)
+    quantity: Decimal = Field(ge=0)
+    unit_price: Decimal = Field(ge=0)
+    line_total: Decimal = Field(ge=0)
+
+
+class PurchaseOrderLineItemCreate(PurchaseOrderLineItemBase):
+    """Schema for creating PO line items."""
     pass
 
 
-class PurchaseOrderLineUpdate(BaseSchema):
-    """Purchase order line update schema."""
-    item_code: Optional[str] = None
-    item_description: Optional[str] = None
-    quantity: Optional[Decimal] = None
-    unit_of_measure: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
-    quantity_received: Optional[Decimal] = None
-    quantity_invoiced: Optional[Decimal] = None
-    status: Optional[str] = None
-
-
-class PurchaseOrderLineResponse(PurchaseOrderLineBase):
-    """Purchase order line response schema."""
-    id: str
+class PurchaseOrderLineItemResponse(PurchaseOrderLineItemBase, UUIDMixinSchema):
+    """Schema for PO line item response."""
     purchase_order_id: str
     created_at: datetime
     updated_at: datetime
+    
+    model_config = {"from_attributes": True}
 
 
-class PurchaseOrderBase(BaseSchema):
-    """Base purchase order schema."""
-    po_number: str
-    supplier_id: str
-    supplier_name: str
-    supplier_code: Optional[str] = None
-    po_date: date
+# Purchase Order
+class PurchaseOrderBase(BaseModel):
+    """Base schema for Purchase Orders."""
+    po_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    order_date: date
     expected_delivery_date: Optional[date] = None
-    status: str = "open"
-    currency: str = "USD"
+    subtotal: Decimal = Field(ge=0)
+    tax_amount: Decimal = Field(ge=0, default=Decimal("0.00"))
+    total_amount: Decimal = Field(ge=0)
+    currency: str = Field(default="USD", max_length=3)
+    status: str = Field(default="OPEN", max_length=20)
     notes: Optional[str] = None
-    delivery_address: Optional[str] = None
-    terms: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Purchase order creation schema."""
-    subtotal: Decimal = Decimal("0.00")
-    tax_amount: Decimal = Decimal("0.00")
-    total_amount: Decimal
-    lines: List[PurchaseOrderLineCreate] = Field(default_factory=list)
+    """Schema for creating Purchase Orders."""
+    line_items: List[PurchaseOrderLineItemCreate] = []
 
 
-class PurchaseOrderUpdate(BaseSchema):
-    """Purchase order update schema."""
+class PurchaseOrderUpdate(BaseModel):
+    """Schema for updating Purchase Orders."""
     supplier_name: Optional[str] = None
-    supplier_code: Optional[str] = None
     expected_delivery_date: Optional[date] = None
+    subtotal: Optional[Decimal] = None
+    tax_amount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
     status: Optional[str] = None
     notes: Optional[str] = None
-    delivery_address: Optional[str] = None
-    terms: Optional[str] = None
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
 
 
-class PurchaseOrderResponse(PurchaseOrderBase):
-    """Purchase order response schema."""
-    id: str
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
-    total_received: Decimal
-    total_invoiced: Decimal
-    created_by: Optional[str] = None
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-    lines: List[PurchaseOrderLineResponse] = Field(default_factory=list)
-    is_open: bool = Field(default=True, exclude=True)
-    remaining_balance: Decimal = Field(default=Decimal("0.00"), exclude=True)
+class PurchaseOrderResponse(PurchaseOrderBase, UUIDMixinSchema, TimestampMixinSchema):
+    """Schema for Purchase Order response."""
+    line_items: List[PurchaseOrderLineItemResponse] = []
+    
+    model_config = {"from_attributes": True}

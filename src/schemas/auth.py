@@ -1,61 +1,46 @@
-// src/schemas/auth.py
-"""Authentication schemas."""
+# src/schemas/auth.py
 from datetime import datetime
 from typing import Optional
-from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class Token(BaseModel):
-    """JWT Token response."""
+    """Token response schema."""
     access_token: str
     token_type: str = "bearer"
+    expires_in: int
 
 
 class TokenPayload(BaseModel):
-    """JWT Token payload."""
-    sub: str
+    """Token payload schema."""
+    sub: str  # User ID
     exp: datetime
-    iat: Optional[datetime] = None
+    iat: datetime
 
 
-class UserBase(BaseModel):
-    """Base user schema."""
+class UserCreate(BaseModel):
+    """User creation schema."""
     email: EmailStr
+    password: str = Field(min_length=8)
     full_name: Optional[str] = None
 
 
-class UserCreate(UserBase):
-    """Schema for creating a user."""
-    password: str = Field(..., min_length=8)
+class UserLogin(BaseModel):
+    """User login schema."""
+    email: EmailStr
+    password: str
 
 
-class UserUpdate(BaseModel):
-    """Schema for updating a user."""
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
-    password: Optional[str] = Field(None, min_length=8)
-    is_active: Optional[bool] = None
-
-
-class UserResponse(UserBase):
-    """Schema for user response."""
-    model_config = ConfigDict(from_attributes=True)
-    
-    id: UUID
+class UserResponse(BaseModel):
+    """User response schema."""
+    id: str
+    email: str
+    full_name: Optional[str]
     is_active: bool
     is_superuser: bool
+    last_login: Optional[datetime]
     created_at: datetime
     updated_at: datetime
-
-
-class UserInDB(UserResponse):
-    """User with hashed password."""
-    hashed_password: str
-
-
-class LoginRequest(BaseModel):
-    """Login request schema."""
-    username: EmailStr
-    password: str
+    
+    model_config = {"from_attributes": True}
