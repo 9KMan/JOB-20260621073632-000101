@@ -1,19 +1,18 @@
 // src/models/base.py
-"""Base model with common fields for all entities."""
-
+"""Base model with common fields."""
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base
+from src.database import Base
 
 
 class BaseModel(Base):
-    """Abstract base model with common fields."""
+    """Base model with UUID primary key and timestamps."""
 
     __abstract__ = True
 
@@ -35,13 +34,9 @@ class BaseModel(Base):
         nullable=False,
     )
 
-
-class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
-
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-    )
-    is_deleted: Mapped[bool] = mapped_column(default=False, index=True)
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            column.name: getattr(self, column.name)
+            for column in self.__table__.columns
+        }

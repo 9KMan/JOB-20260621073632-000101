@@ -1,89 +1,80 @@
 // src/models/balance.py
-// src/models/balance.py
-"""Balance Ledger model for tracking partial matches and balances."""
-
+"""Balance tracking models for partial matches."""
+import decimal
 import uuid
-from datetime import date
-from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import (
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+)
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from models.base import BaseModel
+from src.models.base import BaseModel
 
 
 class BalanceType(str, Enum):
-    """Types of balances in the ledger."""
-    
-    INVOICE = "INVOICE"
-    DELIVERY = "DELIVERY"
-    PURCHASE_ORDER = "PURCHASE_ORDER"
+    """Balance type enum."""
+    INVOICE = "invoice"
+    DELIVERY = "delivery"
+    PURCHASE_ORDER = "purchase_order"
 
 
-class BalanceStatus(str, Enum):
-    """Status of a balance entry."""
-    
-    OPEN = "OPEN"
-    PARTIALLY_MATCHED = "PARTIALLY_MATCHED"
-    CLOSED = "CLOSED"
+class BalanceDirection(str, Enum):
+    """Balance direction enum."""
+    INVOICE_MINUS_PO = "invoice_minus_po"
+    PO_MINUS_INVOICE = "po_minus_invoice"
+    PO_MINUS_DELIVERY = "po_minus_delivery"
+    DELIVERY_MINUS_PO = "delivery_minus_po"
 
 
-class BalanceLedger(Base, BaseModel):
-    """
-    Balance Ledger for tracking partial matches and balances across all three document types.
-    
-    This enables the system to handle:
-    - Partial shipments
-    - Split invoices
-    - Multi-delivery scenarios
-    """
+class Balance(BaseModel):
+    """Balance tracking for partial matches and variances."""
 
-    __tablename__ = "balance_ledger"
+    __tablename__ = "balances"
 
-    # Balance type and status
-    balance_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(20), default=BalanceStatus.OPEN.value, index=True)
-    
-    # Document reference
-    document_type: Mapped[str] = mapped_column(String(20), nullable=False)  # PO, Invoice, DN
-    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    document_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    line_reference: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    
-    # Balance amounts
-    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    matched_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
-    balance_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    
-    # Quantity tracking
-    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    matched_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=Decimal("0"))
-    balance_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    
-    # Reference dates
-    document_date: Mapped[date] = mapped_column(Date, nullable=False)
-    target_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    
-    # Link to parent balance if split
-    parent_balance_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("balance_ledger.id", ondelete="SET NULL"),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
-    
-    # Match history
-    match_ids: Mapped[Optional[list]] = mapped_column(
-        # Using JSON to store multiple match references
+    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=True,
+        index=True,
     )
-    
-    # Notes
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    balance_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    direction: Mapped[str] = mapped_column(String(30), nullable=False)
+    product_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    po_quantity: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 3), default=0, nullable=False)
+    matched_quantity: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 3), default=0, nullable=False)
+    remaining_quantity: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 3), default=0, nullable=False)
+    po_amount: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), default=0, nullable=False)
+    matched_amount: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), default=0, nullable=False)
+    remaining_amount: Mapped[decimal.Decimal] = mapped_column(Numeric(15, 2), default=0, nullable=False)
+    is_resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    resolved_at: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    def __repr__(self) -> str:
-        return f"<BalanceLedger {self.document_number} - {self.balance_type} - {self.balance_amount}>"
+    # Relationships
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="balances",
+    )
+
+    __table_args__ = (
+        Index("ix_balances_po_unresolved", "purchase_order_id", "is_resolved"),
+        Index("ix_balances_product", "product_code", "is_resolved"),
+    )

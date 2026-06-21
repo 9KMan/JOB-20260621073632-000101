@@ -1,65 +1,78 @@
 // src/schemas/balance.py
-"""Balance ledger schemas."""
+"""Balance schemas for tracking partial matches."""
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
-from src.schemas.base import PaginatedResponse
-
-
-class BalanceEntryResponse(BaseModel):
-    """Schema for Balance Entry response."""
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-    id: UUID
-    ledger_id: UUID
-    match_id: Optional[UUID] = None
-    entry_type: str
-    amount: Decimal
-    balance_before: Decimal
-    balance_after: Decimal
-    notes: Optional[str] = None
-    created_at: datetime
+from src.schemas.common import BaseSchema, PaginatedResponse
 
 
-class BalanceLedgerResponse(BaseModel):
-    """Schema for Balance Ledger response."""
+class BalanceBase(BaseSchema):
+    """Base schema for Balances."""
 
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-    id: UUID
-    document_type: str
-    document_id: UUID
-    supplier_id: UUID
-    original_amount: Decimal
-    matched_amount: Decimal
-    open_amount: Decimal
-    currency: str
-    status: str
-    reference_document_type: Optional[str] = None
-    reference_document_id: Optional[UUID] = None
-    notes: Optional[str] = None
-    entries: list[BalanceEntryResponse] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    purchase_order_id: UUID
+    invoice_id: Optional[UUID] = None
+    delivery_note_id: Optional[UUID] = None
+    balance_type: str = Field(..., max_length=20)
+    direction: str = Field(..., max_length=30)
+    product_code: Optional[str] = Field(None, max_length=100)
+    po_quantity: Decimal = Field(default=Decimal("0"), ge=0)
+    matched_quantity: Decimal = Field(default=Decimal("0"), ge=0)
+    remaining_quantity: Decimal = Field(default=Decimal("0"), ge=0)
+    po_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    matched_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    remaining_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    is_resolved: bool = Field(default=False)
+    resolved_at: Optional[UUID] = None
+    notes: Optional[str] = Field(None, max_length=500)
 
 
-class BalanceLedgerListResponse(PaginatedResponse[BalanceLedgerResponse]):
-    """Paginated list of Balance Ledgers."""
+class BalanceCreate(BalanceBase):
+    """Schema for creating Balances."""
 
     pass
 
 
-class BalanceSummaryResponse(BaseModel):
-    """Summary of balances by status."""
+class BalanceUpdate(BaseSchema):
+    """Schema for updating Balances."""
 
-    total_open: Decimal
-    total_partial: Decimal
-    total_resolved: Decimal
-    total_open_count: int
-    total_partial_count: int
-    total_resolved_count: int
+    matched_quantity: Optional[Decimal] = Field(None, ge=0)
+    remaining_quantity: Optional[Decimal] = Field(None, ge=0)
+    matched_amount: Optional[Decimal] = Field(None, ge=0)
+    remaining_amount: Optional[Decimal] = Field(None, ge=0)
+    is_resolved: Optional[bool] = None
+    resolved_at: Optional[UUID] = None
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class BalanceResponse(BalanceBase):
+    """Schema for Balance responses."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class BalanceListResponse(PaginatedResponse[BalanceResponse]):
+    """Schema for paginated Balance list response."""
+
+    pass
+
+
+class BalanceSummary(BaseSchema):
+    """Schema for Balance summary (minimal data)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    purchase_order_id: UUID
+    balance_type: str
+    direction: str
+    remaining_quantity: Decimal
+    remaining_amount: Decimal
+    is_resolved: bool
