@@ -1,8 +1,11 @@
-# models/balance_ledger.py
-"""Balance Ledger SQLAlchemy model for tracking PO/DN/Invoice balances."""
+// models/balance_ledger.py
+"""BalanceLedger SQLAlchemy model.
+
+Tracks balances and quantities for PO lines across invoices and delivery notes.
+"""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -11,70 +14,102 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
-    func,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.base import Base, TimestampMixin, UUIDMixin
 
 
-class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class BalanceLedger(Base, UUIDMixin, TimestampMixin):
+    """Balance Ledger model.
+
+    Tracks quantities and amounts for each PO line across invoices and delivery notes.
+    Used to calculate pending balances and detect over/under delivery.
     """
-    Balance Ledger model.
-    
-    Tracks running balances for PO lines across invoices and delivery notes.
-    This is the source of truth for what remains to be invoiced against a PO.
-    """
-    
+
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        Index("ix_balance_ledger_po_line_id", "po_line_id"),
-        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        Index("ix_balance_ledger_po_line_id", "purchase_order_line_id"),
+        Index("ix_balance_ledger_invoice_id", "invoice_id"),
         Index("ix_balance_ledger_transaction_type", "transaction_type"),
-        Index("ix_balance_ledger_created_at", "created_at"),
+        UniqueConstraint(
+            "purchase_order_line_id",
+            "invoice_id",
+            "transaction_type",
+            "reference_id",
+            name="uq_balance_ledger_po_line_invoice_type_ref",
+        ),
+        {"schema": None},
     )
-    
+
     # References
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
+    purchase_order_line_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
     )
-    
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=True,
     )
-    
+    delivery_note_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
     # Transaction Details
-    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    transaction_reference: Mapped[str] = mapped_column(String(100), nullable=False)
-    
+    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    reference_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    reference_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
     # Quantities
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     quantity_before: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    quantity_change: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     quantity_after: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    
+
     # Amounts
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     amount_before: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    amount_change: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     amount_after: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    
-    # Metadata
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    
-    # Processed By
-    processed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    
+
+    # Status
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+
+    # Timestamps
+    transaction_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
+    purchase_order_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
-        back_populates="balance_ledger_entries",
+        back_populates="balance_ledger",
     )
-    invoice_line: Mapped["InvoiceLine | None"] = relationship(
-        "InvoiceLine",
-        back_populates="balance_ledger_entries",
+    invoice: Mapped["Invoice | None"] = relationship(
+        "Invoice",
+        back_populates="balance_ledger",
     )
+
+    def __repr__(self) -> str:
+        return f"<BalanceLedger {self.transaction_type} for PO Line {self.purchase_order_line_id}>"
+
+    @property
+    def is_active(self) -> bool:
+        """Check if this ledger entry is active (not reversed)."""
+        return self.status == "active" and self.reversed_at is None
+
+    def reverse(self) -> None:
+        """Reverse this ledger entry."""
+        self.status = "reversed"
+        self.reversed_at = datetime.now(timezone.utc)

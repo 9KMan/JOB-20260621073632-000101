@@ -1,16 +1,74 @@
-# docker-compose.yml
+// docker-compose.yml
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap-postgres
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-automation-api
+    ports:
+      - "${API_PORT:-8000}:8000"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}
+      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-90}
+      - THRESHOLD_MID=${THRESHOLD_MID:-70}
+      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
+      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
+      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
+      - TOLERANCE_DATE=${TOLERANCE_DATE:-7}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks:
+      - ap-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.22.0
+    container_name: ap-automation-pgbouncer
     ports:
       - "5432:5432"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=10
+      - RESERVE_POOL_TIMEOUT=5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "echo -e '\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' | nc -w 1 -U /etc/pgbouncer/userlist.txt || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ap-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ap-automation-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-apuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
+      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,43 +76,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    networks:
+      - ap-network
+    restart: unless-stopped
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-pgbouncer
-    environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: "100"
-      DEFAULT_POOL_SIZE: "10"
+  # Optional: Development only - pgAdmin for database inspection
+  pgadmin:
+    image: dpage/pgadmin4:8.3
+    container_name: ap-automation-pgadmin
     ports:
-      - "6432:5432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-api
+      - "${PGADMIN_PORT:-5050}:80"
     environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 5432
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
-      JWT_ALGORITHM: HS256
-      THRESHOLD_HIGH: ${THRESHOLD_HIGH:-95}
-      THRESHOLD_MID: ${THRESHOLD_MID:-70}
-      THRESHOLD_LOW: ${THRESHOLD_LOW:-40}
-      TOLERANCE_PRICE: ${TOLERANCE_PRICE:-5}
-      TOLERANCE_QTY: ${TOLERANCE_QTY:-10}
-    ports:
-      - "8000:8000"
+      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    profiles:
+      - dev
     depends_on:
-      pgbouncer:
-        condition: service_started
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - postgres
+    networks:
+      - ap-network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+    driver: local
+
+networks:
+  ap-network:
+    driver: bridge
