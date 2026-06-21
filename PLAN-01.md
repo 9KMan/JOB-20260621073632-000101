@@ -1,6 +1,4 @@
-// PLAN-01.md
 # Phase 2 — Technical Stack
-
 ## AP Automation Core Engine — FinaRo
 
 ---
@@ -16,13 +14,11 @@
 ## 2. Language & Framework
 
 ### Language
-
 | Choice | Version | Rationale |
 |---|---|---|
 | **Python** | 3.11+ | Per spec; strong ecosystem for data-heavy logic |
 
 ### Web Framework
-
 | Choice | Rationale |
 |---|---|
 | **FastAPI** | Per spec; async-capable, auto-generated OpenAPI, Pydantic-first validation |
@@ -40,7 +36,6 @@
 | PK strategy | **UUIDs** (not auto-increment) | Per spec |
 
 ### Key Database Patterns
-
 - `created_at` / `updated_at` timestamps on all tables
 - Soft-delete pattern where appropriate
 - Indexes on foreign keys and high-cardinality columns
@@ -73,8 +68,8 @@
 | Domain | Operations |
 |---|---|
 | Invoices | ingest, list, get, update status |
-| Purchase Orders | ingest, list, get |
-| Delivery Notes | ingest, list, get |
+| Purchase Orders | ingest (from ERP), list, get |
+| Delivery Notes | ingest (ERP/OCR), list, get |
 | Matching Engine | trigger match, get decision |
 | Exceptions | list, resolve, dismiss |
 | Balances Ledger | get per PO line |

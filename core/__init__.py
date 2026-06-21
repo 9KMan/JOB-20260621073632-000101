@@ -1,38 +1,18 @@
 # core/__init__.py
 """Core module for AP Automation Engine.
 
-This module contains configuration, database, and security utilities.
+This module contains the foundational components:
+- Configuration management via pydantic-settings
+- Database session management
+- Security utilities (JWT, password hashing)
 """
 
-from core.config import get_settings, Settings
-from core.database import (
-    get_db,
-    AsyncSessionLocal,
-    init_db,
-    close_db,
-    EngineManager,
-)
-from core.security import (
-    create_access_token,
-    verify_password,
-    get_password_hash,
-    TokenData,
-    CurrentUser,
-)
+from core.config import settings
+from core.database import get_db_session, AsyncSessionLocal, engine
 
 __all__ = [
-    "get_settings",
-    "Settings",
-    "get_db",
+    "settings",
+    "get_db_session",
     "AsyncSessionLocal",
-    "init_db",
-    "close_db",
-    "EngineManager",
-    "create_access_token",
-    "verify_password",
-    "get_password_hash",
-    "TokenData",
-    "CurrentUser",
+    "engine",
 ]
-
-__version__ = "0.1.0"

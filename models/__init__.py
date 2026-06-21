@@ -1,40 +1,44 @@
 # models/__init__.py
-"""SQLAlchemy database models.
+"""Data models package.
 
-Exports all models for easy import throughout the application.
+This package contains SQLAlchemy ORM models for the AP Automation Engine.
+All models inherit from a common Base class and include UUID primary keys,
+timestamps, and proper indexing.
 """
 
-from models.base import Base, TimestampMixin, UUIDMixin
+from models.base import Base, TimestampMixin
 from models.enums import (
     InvoiceStatus,
     PurchaseOrderStatus,
     DeliveryNoteStatus,
-    MatchStatus,
-    MatchDecision,
-    LineStatus,
+    MatchingDecision,
+    MatchConfidence,
+    LineMatchStatus,
     ExceptionType,
     ExceptionResolution,
+    BalanceType,
 )
 from models.invoice import Invoice, InvoiceLine
 from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
-from models.balance_ledger import BalanceLedger, LedgerEntryType
-from models.cross_ref import CrossRef, MatchConfidence
+from models.balance_ledger import BalanceLedger
+from models.cross_ref import CrossRef
+
 
 __all__ = [
-    # Base classes
+    # Base and mixins
     "Base",
     "TimestampMixin",
-    "UUIDMixin",
     # Enums
     "InvoiceStatus",
     "PurchaseOrderStatus",
     "DeliveryNoteStatus",
-    "MatchStatus",
-    "MatchDecision",
-    "LineStatus",
+    "MatchingDecision",
+    "MatchConfidence",
+    "LineMatchStatus",
     "ExceptionType",
     "ExceptionResolution",
+    "BalanceType",
     # Models
     "Invoice",
     "InvoiceLine",
@@ -43,7 +47,5 @@ __all__ = [
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
-    "LedgerEntryType",
     "CrossRef",
-    "MatchConfidence",
 ]

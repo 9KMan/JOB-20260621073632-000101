@@ -1,19 +1,12 @@
 # api/__init__.py
-"""API module for AP Automation Engine.
+"""API module for the AP Automation Engine.
 
-Provides REST API endpoints and Pydantic schemas.
+This module contains:
+- Shared Pydantic schemas
+- Versioned API routers
+- API utilities and helpers
 """
 
-from api.schemas import (
-    HealthResponse,
-    ErrorResponse,
-    PaginationParams,
-    PaginatedResponse,
-)
+from api.v1.router import api_router
 
-__all__ = [
-    "HealthResponse",
-    "ErrorResponse",
-    "PaginationParams",
-    "PaginatedResponse",
-]
+__all__ = ["api_router"]
