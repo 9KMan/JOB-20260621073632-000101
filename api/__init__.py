@@ -1,14 +1,9 @@
-# api/__init__.py
-"""API package for AP Automation Engine."""
+// api/__init__.py
+"""API package for AP Automation Engine.
 
-from api.schemas import (
-    PaginatedResponse,
-    ErrorResponse,
-    SuccessResponse,
-)
+This package contains the FastAPI application and all API routes.
+"""
 
-__all__ = [
-    "PaginatedResponse",
-    "ErrorResponse",
-    "SuccessResponse",
-]
+from api.main import app
+
+__all__ = ["app"]

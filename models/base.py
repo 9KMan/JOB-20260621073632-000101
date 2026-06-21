@@ -1,81 +1,105 @@
-# models/base.py
-"""SQLAlchemy declarative base."""
+// models/base.py
+"""SQLAlchemy declarative base and mixin classes."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, event
+from sqlalchemy import DateTime, Index, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-def generate_uuid() -> str:
-    """Generate a new UUID string."""
-    return str(uuid.uuid4())
-
-
-def utc_now() -> datetime:
-    """Get current UTC datetime."""
-    return datetime.now(timezone.utc)
-
-
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
+    """Base class for all SQLAlchemy models.
 
-    type_annotation_map = {
-        datetime: DateTime(timezone=True),
-    }
+    Provides common columns and functionality for all models.
+    """
+
+    pass
 
 
 class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
+    """Mixin providing created_at and updated_at timestamps."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
         nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        doc="Timestamp when the record was created",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
-        onupdate=utc_now,
         nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=datetime.utcnow,
+        doc="Timestamp when the record was last updated",
     )
 
 
 class UUIDMixin:
-    """Mixin for UUID primary key."""
+    """Mixin providing UUID primary key."""
 
-    id: Mapped[str] = mapped_column(
+    id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
-        default=generate_uuid,
-        nullable=False,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+        doc="Unique identifier (UUID)",
     )
 
 
 class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
+    """Mixin providing soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default=None,
         nullable=True,
+        default=None,
+        doc="Timestamp when the record was soft-deleted",
     )
     is_deleted: Mapped[bool] = mapped_column(
         default=False,
-        nullable=False,
+        server_default=text("FALSE"),
+        doc="Flag indicating if the record is soft-deleted",
     )
 
 
-@event.listens_for(Base, "before_insert", propagate=True)
-def set_created_at(mapper: Any, connection: Any, target: Any) -> None:
-    """Set created_at timestamp before insert."""
-    if hasattr(target, "created_at") and target.created_at is None:
-        target.created_at = utc_now()
+def create_uuid() -> uuid.UUID:
+    """Generate a new UUID4.
+
+    Returns:
+        A new UUID4 instance.
+    """
+    return uuid.uuid4()
 
 
-@event.listens_for(Base, "before_update", propagate=True)
-def set_updated_at(mapper: Any, connection: Any, target: Any) -> None:
-    """Set updated_at timestamp before update."""
-    if hasattr(target, "updated_at"):
-        target.updated_at = utc_now()
+# Common indexes for foreign keys and high-cardinality columns
+def fk_index(table_name: str, column_name: str) -> Index:
+    """Create an index for a foreign key column.
+
+    Args:
+        table_name: Name of the table.
+        column_name: Name of the foreign key column.
+
+    Returns:
+        Index object for the foreign key.
+    """
+    return Index(
+        f"ix_{table_name}_{column_name}",
+        column_name,
+        postgresql_using="btree",
+    )
+
+
+def create_timestamp_indexes(table_name: str) -> list[Index]:
+    """Create standard timestamp indexes.
+
+    Args:
+        table_name: Name of the table.
+
+    Returns:
+        List of Index objects for timestamps.
+    """
+    return [
+        Index(f"ix_{table_name}_created_at", "created_at"),
+        Index(f"ix_{table_name}_updated_at", "updated_at"),
+    ]
