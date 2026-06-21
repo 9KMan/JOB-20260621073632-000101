@@ -1,89 +1,126 @@
 # models/enums.py
-"""SQLAlchemy enum types for status fields and decision types.
-
-These enums map to PostgreSQL enum types.
-"""
+"""Enumeration types for the AP Automation system."""
 
 import enum
 
 
 class InvoiceStatus(str, enum.Enum):
-    """Invoice status enumeration."""
+    """Status values for invoices."""
 
     DRAFT = "draft"
-    PENDING = "pending"
     SUBMITTED = "submitted"
+    MATCHING_IN_PROGRESS = "matching_in_progress"
     MATCHED = "matched"
-    APPROVED = "approved"
     EXCEPTION = "exception"
+    APPROVED = "approved"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
 class PurchaseOrderStatus(str, enum.Enum):
-    """Purchase order status enumeration."""
+    """Status values for purchase orders."""
 
     DRAFT = "draft"
-    PENDING = "pending"
-    APPROVED = "approved"
+    ISSUED = "issued"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
-    COMPLETED = "completed"
+    EXPIRED = "expired"
 
 
 class DeliveryNoteStatus(str, enum.Enum):
-    """Delivery note status enumeration."""
+    """Status values for delivery notes."""
 
     DRAFT = "draft"
-    RECEIVED = "received"
-    PARTIAL = "partial"
-    COMPLETED = "completed"
+    CONFIRMED = "confirmed"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    FULLY_INVOICED = "fully_invoiced"
     CANCELLED = "cancelled"
-    EXCEPTION = "exception"
+
+
+class MatchStatus(str, enum.Enum):
+    """Status values for invoice-PO matching."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class MatchDecision(str, enum.Enum):
-    """Matching engine decision types."""
+    """Decision outcomes from the matching engine."""
 
     AUTO_APPROVED = "auto_approved"
-    AUTO_REJECTED = "auto_rejected"
+    ONE_CLICK_APPROVE = "one_click_approve"
+    ONE_CLICK_REJECT = "one_click_reject"
     MANUAL_REVIEW = "manual_review"
     EXCEPTION = "exception"
-    PENDING = "pending"
-    DISPUTED = "disputed"
+    NO_MATCH = "no_match"
 
 
-class MatchConfidence(str, enum.Enum):
-    """Match confidence levels."""
+class LineStatus(str, enum.Enum):
+    """Status values for invoice/PO/delivery note lines."""
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
+    OPEN = "open"
+    PARTIALLY_MATCHED = "partially_matched"
+    FULLY_MATCHED = "fully_matched"
+    CANCELLED = "cancelled"
 
 
 class ExceptionType(str, enum.Enum):
-    """Types of matching exceptions."""
+    """Types of exceptions detected during matching."""
 
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    DATE_VARIANCE = "date_variance"
+    DUPLICATE_INVOICE = "duplicate_invoice"
     MISSING_PO = "missing_po"
     MISSING_DELIVERY = "missing_delivery"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    PARTIAL_MATCH = "partial_match"
-    OVERDELIVERY = "overdelivery"
-    UNDERDELIVERY = "underdelivery"
-    DATE_VARIANCE = "date_variance"
-    VENDOR_MISMATCH = "vendor_mismatch"
+    PARTIAL_DELIVERY = "partial_delivery"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    PO_EXPIRED = "po_expired"
+    PO_CLOSED = "po_closed"
+    INVALID_VENDOR = "invalid_vendor"
+    TAX_MISMATCH = "tax_mismatch"
+    CURRENCY_MISMATCH = "currency_mismatch"
+
+
+class ExceptionSeverity(str, enum.Enum):
+    """Severity levels for exceptions."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class ExceptionResolution(str, enum.Enum):
-    """Exception resolution statuses."""
+    """Possible resolutions for exceptions."""
 
-    PENDING = "pending"
-    APPROVED_WITH_EXCEPTION = "approved_with_exception"
+    APPROVED_AS_IS = "approved_as_is"
+    ADJUSTED_AND_APPROVED = "adjusted_and_approved"
     REJECTED = "rejected"
-    DISMISSED = "dismissed"
     ESCALATED = "escalated"
-    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class CrossRefType(str, enum.Enum):
+    """Types of cross-reference learning entries."""
+
+    VENDOR_PRODUCT = "vendor_product"
+    VENDOR_ACCOUNT = "vendor_account"
+    VENDOR_TERM = "vendor_term"
+    VENDOR_PRICE = "vendor_price"
+
+
+class LearningStatus(str, enum.Enum):
+    """Status of learning/promotion in cross-reference table."""
+
+    ACTIVE = "active"
+    PROMOTED = "promoted"
+    REJECTED = "rejected"
+    EXPIRED = "expired"

@@ -1,119 +1,178 @@
 # models/balance_ledger.py
-"""BalanceLedger SQLAlchemy model.
+"""Balance Ledger SQLAlchemy model.
 
-Tracks balances and history for PO lines across invoices and deliveries.
+Tracks the open balances for PO lines and invoice lines.
 """
 
-from datetime import datetime
+import uuid
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import (
-    DateTime,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    func,
-)
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    from models.invoice import Invoice
-    from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+    from models.invoice import InvoiceLine
+    from models.purchase_order import PurchaseOrderLine
 
 
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """Balance ledger model for tracking PO line balances.
+class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Balance Ledger model.
 
-    Maintains running balances for:
-    - Quantity ordered vs delivered
-    - Quantity delivered vs invoiced
-    - Amount invoiced vs paid
-
-    Attributes:
-        transaction_type: Type of transaction (invoice, delivery, payment)
-        quantity_change: Change in quantity
-        amount_change: Change in amount
-        running_quantity: Current running quantity balance
-        running_amount: Current running amount balance
+    Tracks the open/paid balance for each PO line and invoice line.
+    This is the source of truth for AP balance reporting.
     """
 
     __tablename__ = "balance_ledger"
+    __table_args__ = (
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        Index("ix_balance_ledger_document_type", "document_type"),
+        Index("ix_balance_ledger_document_number", "document_number"),
+        Index("ix_balance_ledger_vendor_number", "vendor_number"),
+        Index("ix_balance_ledger_due_date", "due_date"),
+        Index("ix_balance_ledger_status", "status"),
+        {"schema": None},
+    )
 
-    # Transaction references
-    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    transaction_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-
-    # PO reference (main anchor)
-    purchase_order_id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+    # Document references
+    document_type: Mapped[str] = mapped_column(
+        String(20),
         nullable=False,
         index=True,
     )
-    po_line_id: Mapped[UUID] = mapped_column(
+    document_number: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    document_line_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Parent references
+    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    # Invoice reference
-    invoice_id: Mapped[UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
+    # Vendor info
+    vendor_number: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    vendor_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    # Financial amounts
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    open_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    paid_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
+    # Quantity tracking
+    original_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    open_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    paid_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+    )
+
+    # Dates
+    document_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    due_date: Mapped[date | None] = mapped_column(
+        Date,
         nullable=True,
         index=True,
     )
 
-    # Financial quantities
-    quantity_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    quantity_delivered: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    quantity_invoiced: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    quantity_paid: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-
-    # Amounts
-    amount_ordered: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
-    amount_delivered: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
-    amount_invoiced: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
-    amount_paid: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
-
-    # Balance snapshots
-    balance_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    balance_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
-
-    # Metadata
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    effective_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+    # Status
+    status: Mapped[str] = mapped_column(
+        String(20),
         nullable=False,
-        server_default=func.now(),
+        default="open",
+        index=True,
+    )
+
+    # Payment tracking
+    paid_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    payment_reference: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
     )
 
     # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        back_populates="balance_ledger_entries",
-    )
-    purchase_order_line: Mapped["PurchaseOrderLine | None"] = relationship(
+    po_line: Mapped["PurchaseOrderLine | None"] = relationship(
         "PurchaseOrderLine",
-        back_populates=None,
+        back_populates="balance_ledger",
+        lazy="selectin",
     )
-    invoice: Mapped["Invoice | None"] = relationship(
-        "Invoice",
-        back_populates="balance_ledger_entries",
-    )
-
-    __table_args__ = (
-        Index("ix_balance_ledger_po_date", "purchase_order_id", "effective_date"),
-        Index("ix_balance_ledger_invoice", "invoice_id"),
-        Index("ix_balance_ledger_ref", "reference_number"),
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine",
+        back_populates="balance_ledger",
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:
-        return f"<BalanceLedger {self.transaction_type}: {self.balance_quantity} qty, {self.balance_amount} amount>"
+        return f"<BalanceLedger {self.document_type}:{self.document_number}>"
+
+    @property
+    def is_fully_paid(self) -> bool:
+        """Check if balance is fully paid."""
+        return self.open_amount <= 0
+
+    @property
+    def is_overdue(self) -> bool:
+        """Check if payment is overdue."""
+        if self.due_date is None or self.status != "open":
+            return False
+        return date.today() > self.due_date
+
+    @property
+    def days_overdue(self) -> int | None:
+        """Calculate days overdue."""
+        if not self.is_overdue or self.due_date is None:
+            return None
+        return (date.today() - self.due_date).days

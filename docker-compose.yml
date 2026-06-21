@@ -1,74 +1,104 @@
 # docker-compose.yml
-version: '3.9'
+version: "3.9"
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: ap-automation-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/finaro
-      - DATABASE_URL_SYNC=postgresql://postgres:postgres@db:5432/finaro
-      - SECRET_KEY=${SECRET_KEY}
-      - ALGORITHM=HS256
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@pgbouncer:5432/apautomation
+      - DATABASE_HOST=pgbouncer
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=apautomation
+      - DATABASE_USER=apuser
+      - DATABASE_PASSWORD=appass
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5433
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
+      - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - ENVIRONMENT=development
+      - THRESHOLD_HIGH=0.95
+      - THRESHOLD_MID=0.75
+      - THRESHOLD_LOW=0.50
+      - TOLERANCE_PRICE=0.02
+      - TOLERANCE_QTY=0.05
       - LOG_LEVEL=INFO
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
-    volumes:
-      - ./src:/app/src
-    command: >
-      sh -c "alembic upgrade head && uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ap-network
 
-  db:
-    image: postgres:16-alpine
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap-pgbouncer
+    ports:
+      - "5433:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=finaro
+      - DATABASE_HOST=postgres
+      - DATABASE_NAME=apautomation
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - RESERVE_POOL_SIZE=5
+      - RESERVE_POOL_TIMEOUT=5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgbouncer -V"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap-postgres
     ports:
       - "5432:5432"
+    environment:
+      - POSTGRES_DB=apautomation
+      - POSTGRES_USER=apuser
+      - POSTGRES_PASSWORD=appass
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ap-network
 
-  test:
+  alembic-migrate:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: ap-alembic-migrate
+    command: ["alembic", "upgrade", "head"]
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@test_db:5432/finaro_test
-      - DATABASE_URL_SYNC=postgresql://postgres:postgres@test_db:5432/finaro_test
-      - SECRET_KEY=test-secret-key-for-testing-only
-      - ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - ENVIRONMENT=testing
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@pgbouncer:5432/apautomation
     depends_on:
-      test_db:
+      pgbouncer:
         condition: service_healthy
-    command: pytest -v
-
-  test_db:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=finaro_test
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    networks:
+      - ap-network
 
 volumes:
   postgres_data:
+
+networks:
+  ap-network:
+    driver: bridge

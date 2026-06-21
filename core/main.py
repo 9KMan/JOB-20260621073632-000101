@@ -1,70 +1,84 @@
-// core/main.py
+# core/main.py
 """FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core.config import settings
-from core.database import init_db, close_db
 from api.v1.router import api_router
+from core.config import settings
+from core.database import db_manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for startup/shutdown events."""
+    """Application lifespan handler for startup and shutdown events."""
     # Startup
-    await init_db()
+    db_manager.init()
     yield
     # Shutdown
-    await close_db()
+    await db_manager.close()
 
 
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    description="AP Automation Core Engine API for invoice matching and approval workflows",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
-    lifespan=lifespan,
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.get("/health", tags=["health"])
-async def health_check() -> JSONResponse:
-    """Health check endpoint for container orchestration."""
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "healthy",
-            "service": settings.app_name,
-            "version": settings.app_version,
-        },
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        description="AP Automation Core Engine - Invoice Matching and Exception Handling",
+        docs_url=settings.DOCS_URL,
+        redoc_url=settings.REDOC_URL,
+        openapi_url=settings.OPENAPI_URL,
+        lifespan=lifespan,
     )
 
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_methods=settings.CORS_ALLOW_METHODS,
+        allow_headers=settings.CORS_ALLOW_HEADERS,
+    )
 
-@app.get("/", tags=["root"])
-async def root() -> dict[str, str]:
-    """Root endpoint returning API information."""
-    return {
-        "service": settings.app_name,
-        "version": settings.app_version,
-        "docs": "/docs",
-    }
+    # Include API router
+    app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    # Health check endpoint
+    @app.get("/health", tags=["Health"])
+    async def health_check() -> dict[str, str]:
+        """Health check endpoint for container orchestration."""
+        return {"status": "healthy", "version": settings.APP_VERSION}
+
+    # Global exception handler
+    @app.exception_handler(Exception)
+    async def global_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        """Handle uncaught exceptions globally."""
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "type": type(exc).__name__,
+            },
+        )
+
+    return app
 
 
-# Include API routes
-app.include_router(api_router, prefix="/api/v1")
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "core.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.DEBUG,
+    )
