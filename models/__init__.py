@@ -1,44 +1,43 @@
-# models/__init__.py
-"""Data models package for AP Automation Core Engine.
+// models/__init__.py
+"""Database models package.
 
-This package contains all SQLAlchemy ORM models representing the
-database schema for invoices, purchase orders, delivery notes,
-balance ledger, and learning/cross-reference tables.
+This module exports all SQLAlchemy models for the AP Automation system.
+Import models from this package to avoid circular imports.
 """
 
-from models.base import Base
-from models.invoice import Invoice
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
+from models.base import Base
 from models.cross_ref import CrossRef
+from models.delivery_note import DeliveryNote
 from models.enums import (
-    InvoiceStatus,
-    PurchaseOrderStatus,
-    DeliveryNoteStatus,
-    MatchStatus,
-    MatchDecision,
-    ExceptionType,
+    DecisionType,
+    DocumentStatus,
+    ExceptionReason,
     ExceptionStatus,
+    MatchStatus,
 )
+from models.invoice import Invoice, InvoiceLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 
 __all__ = [
     # Base
     "Base",
+    # Enums
+    "DocumentStatus",
+    "MatchStatus",
+    "DecisionType",
+    "ExceptionReason",
+    "ExceptionStatus",
     # Models
     "Invoice",
+    "InvoiceLine",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
     "CrossRef",
-    # Enums
-    "InvoiceStatus",
-    "PurchaseOrderStatus",
-    "DeliveryNoteStatus",
-    "MatchStatus",
-    "MatchDecision",
-    "ExceptionType",
-    "ExceptionStatus",
 ]
+
+# Import line models for convenience
+from models.delivery_note import DeliveryNoteLine

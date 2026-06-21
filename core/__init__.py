@@ -1,21 +1,24 @@
-# core/__init__.py
-"""Core package for AP Automation Core Engine.
+// core/__init__.py
+"""Core package initialization.
 
-This package contains the foundational components:
-- config: Environment settings via pydantic-settings
-- database: Async SQLAlchemy session management
-- security: JWT and bcrypt utilities
-- main: FastAPI application factory
+This module exports commonly used classes and functions from the core package.
 """
 
-__version__ = "0.1.0"
-
-from core.config import settings
-from core.database import get_db_session, AsyncSessionLocal, engine
+from core.config import Settings, get_settings
+from core.database import (
+    Base,
+    DatabaseSession,
+    async_engine,
+    async_session_maker,
+    get_db,
+)
 
 __all__ = [
-    "settings",
-    "get_db_session",
-    "AsyncSessionLocal",
-    "engine",
+    "Settings",
+    "get_settings",
+    "Base",
+    "DatabaseSession",
+    "async_engine",
+    "async_session_maker",
+    "get_db",
 ]

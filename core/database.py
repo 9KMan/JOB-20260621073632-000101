@@ -1,116 +1,121 @@
-# core/database.py
-"""Async SQLAlchemy database session management."""
+// core/database.py
+"""Async SQLAlchemy database session management.
 
+This module provides async database session handling using SQLAlchemy 2.0's
+async capabilities. It includes connection pooling, session factory setup,
+and dependency injection for FastAPI routes.
+"""
+
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from sqlalchemy import event, text
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from typing_extensions import TypeAlias
 
-from core.config import settings
+from core.config import get_settings
 
-# Create async engine with connection pooling
-engine: AsyncEngine = create_async_engine(
-    settings.database.database_url,
-    echo=settings.database.database_echo,
-    pool_size=settings.database.database_pool_size,
-    max_overflow=settings.database.database_max_overflow,
-    pool_timeout=settings.database.database_pool_timeout,
-    pool_pre_ping=True,
-    poolclass=NullPool if settings.app.debug else None,
-)
+logger = logging.getLogger(__name__)
 
-# Async session factory
-AsyncSessionLocal = async_sessionmaker(
-    engine,
+# Naming convention for database constraints
+NAMING_CONVENTION: dict[str, str] = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+    "雪花": "snowflake_%(table_name)s_%(column_0_label)s",
+}
+
+# Create metadata with naming convention
+metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base class.
+
+    All database models should inherit from this class.
+    It provides common functionality like timestamp handling
+    and table naming conventions.
+    """
+
+    metadata = metadata
+
+
+# Type aliases for better code readability
+AsyncSessionLocal: TypeAlias = async_sessionmaker[AsyncSession]
+DatabaseSession: TypeAlias = AsyncSession
+
+
+def create_async_engine_from_settings() -> AsyncEngine:
+    """Create async engine with settings from config.
+
+    Returns:
+        Configured AsyncEngine instance
+    """
+    settings = get_settings()
+
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DEBUG,
+        pool_size=20,
+        max_overflow=10,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        connect_args={
+            "server_settings": {
+                "application_name": "ap_automation",
+                "timezone": "UTC",
+            },
+        },
+    )
+
+    logger.info(
+        "Database engine created",
+        extra={
+            "host": settings.DATABASE_URL.split("@")[1].split("/")[0]
+            if "@" in settings.DATABASE_URL
+            else "unknown"
+        },
+    )
+
+    return engine
+
+
+# Global async engine instance
+async_engine: AsyncEngine = create_async_engine_from_settings()
+
+# Session factory with autocommit=False for explicit transaction control
+async_session_maker: AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
     autoflush=False,
+    future=True,
 )
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for FastAPI to get database session.
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for FastAPI routes to get database session.
+
+    This function is designed to be used as a FastAPI dependency.
+    It ensures proper session lifecycle management including
+    cleanup on request completion.
+
+    Args:
+        yield: AsyncSession instance for the request
 
     Yields:
-        AsyncSession: Database session that auto-closes on exit
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+        AsyncSession: Database session for the current request
 
-
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database sessions outside of FastAPI.
-
-    Useful for background workers and CLI commands.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
-async def init_db() -> None:
-    """Initialize database - create extensions, tables, etc.
-
-    Called during application startup.
-    """
-    async with engine.begin() as conn:
-        # Enable UUID extension
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\""))
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"pg_trgm\""))
-
-
-async def close_db() -> None:
-    """Close database connections.
-
-    Called during application shutdown.
-    """
-    await engine.dispose()
-
-
-async def health_check() -> bool:
-    """Check database connectivity.
-
-    Returns:
-        True if database is reachable, False otherwise
-    """
-    try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-            return True
-    except Exception:
-        return False
-
-
-# Type alias for dependency injection
-DbSession = Annotated[AsyncSession, None]
-
-__all__ = [
-    "engine",
-    "AsyncSessionLocal",
-    "get_db_session",
-    "get_db_context",
-    "init_db",
-    "close_db",
-    "health_check",
-    "DbSession",
-]
+    Example:
+        
