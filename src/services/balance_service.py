@@ -1,309 +1,147 @@
 // src/services/balance_service.py
-"""
-Balance Resolution Service
-
-Handles balance tracking for partial matches, split invoices, and multi-delivery scenarios.
-"""
-
-import logging
-from typing import List, Optional, Dict
 from decimal import Decimal
-from uuid import UUID
-from datetime import datetime
-
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-
-from src.models.models import (
-    PurchaseOrder, PurchaseOrderLine,
-    Invoice, InvoiceLine,
-    DeliveryNote, DeliveryNoteLine,
-    BalanceLedger
-)
-
-logger = logging.getLogger(__name__)
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from src.models.invoice import Invoice, InvoiceLine
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
 
 
 class BalanceService:
-    """Service for balance resolution operations."""
-
+    """
+    Layer 3: Balance Resolution
+    Tracks partial matches and balances across all document types
+    Handles: partial shipments, split invoices, multi-delivery scenarios
+    """
+    
     def __init__(self, db: Session):
         self.db = db
-
-    def get_po_line_balance(
-        self,
-        po_line_id: UUID
-    ) -> Dict[str, Decimal]:
-        """Get balance for a specific PO line."""
-        po_line = self.db.query(PurchaseOrderLine).filter(
-            PurchaseOrderLine.id == po_line_id
-        ).first()
-        
-        if not po_line:
-            return {"ordered": Decimal("0"), "invoiced": Decimal("0"), "delivered": Decimal("0")}
-        
-        ordered = Decimal(str(po_line.quantity))
-        
-        # Calculate invoiced quantity
-        invoiced = Decimal("0")
-        invoice_lines = self.db.query(InvoiceLine).filter(
-            InvoiceLine.po_line_id == po_line_id
-        ).all()
-        for line in invoice_lines:
-            invoiced += Decimal(str(line.quantity))
-        
-        # Calculate delivered quantity
-        delivered = Decimal("0")
-        dn_lines = self.db.query(DeliveryNoteLine).filter(
-            DeliveryNoteLine.po_line_id == po_line_id
-        ).all()
-        for line in dn_lines:
-            delivered += Decimal(str(line.quantity))
-        
-        return {
-            "ordered": ordered,
-            "invoiced": invoiced,
-            "delivered": delivered,
-            "open_to_invoice": max(Decimal("0"), ordered - invoiced),
-            "open_to_deliver": max(Decimal("0"), ordered - delivered)
-        }
-
-    def get_po_balance_summary(self, po_id: UUID) -> Dict:
-        """Get balance summary for entire PO."""
+    
+    def get_po_balance(self, po_id: str) -> Dict:
+        """Calculate remaining balance for a PO"""
         po = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
-        
         if not po:
-            return {"error": "PO not found"}
+            return None
         
-        line_balances = []
-        for line in po.lines:
-            line_balances.append({
-                "line_id": str(line.id),
-                "line_number": line.line_number,
-                "description": line.description,
-                **self.get_po_line_balance(line.id)
-            })
-        
-        # Calculate totals
-        total_ordered = sum(lb["ordered"] for lb in line_balances)
-        total_invoiced = sum(lb["invoiced"] for lb in line_balances)
-        total_delivered = sum(lb["delivered"] for lb in line_balances)
+        total_ordered = po.total_amount
+        total_invoiced = sum(
+            inv.total_amount for inv in po.invoices
+            if inv.status.value not in ['rejected', 'cancelled']
+        )
+        total_delivered_value = sum(
+            dn.total_amount for dn in po.delivery_notes
+            if dn.status.value not in ['cancelled']
+        )
         
         return {
             "po_id": str(po.id),
             "po_number": po.po_number,
-            "total_amount": po.total_amount,
-            "lines": line_balances,
-            "summary": {
-                "total_ordered": total_ordered,
-                "total_invoiced": total_invoiced,
-                "total_delivered": total_delivered,
-                "invoiced_percentage": float(total_invoiced / total_ordered * 100) if total_ordered > 0 else 0,
-                "delivered_percentage": float(total_delivered / total_ordered * 100) if total_ordered > 0 else 0
-            }
+            "total_ordered": total_ordered,
+            "total_invoiced": total_invoiced,
+            "total_delivered_value": total_delivered_value,
+            "invoice_balance": total_ordered - total_invoiced,
+            "delivery_balance": total_ordered - total_delivered_value,
+            "invoice_pending": total_invoiced < total_ordered,
+            "delivery_pending": total_delivered_value < total_ordered
         }
-
-    def create_partial_invoice_balance(
-        self,
-        invoice_id: UUID,
-        po_id: UUID,
-        line_amounts: Dict[UUID, Decimal]
-    ) -> List[BalanceLedger]:
-        """Create balance entries for partial invoice."""
+    
+    def get_line_balances(self, po_id: str) -> List[Dict]:
+        """Get line-level balances for a PO"""
+        po = self.db.query(PurchaseOrder).options(
+            PurchaseOrder.lines
+        ).filter(PurchaseOrder.id == po_id).first()
+        
+        if not po:
+            return []
+        
         balances = []
-        
-        for po_line_id, amount in line_amounts.items():
-            balance = BalanceLedger(
-                document_type="INVOICE",
-                document_id=invoice_id,
-                document_line_id=po_line_id,
-                balance_type="INVOICED",
-                amount=amount,
-                related_document_type="PO",
-                related_document_id=po_id,
-                notes=f"Partial invoice allocation"
-            )
-            balances.append(balance)
-            self.db.add(balance)
-        
-        self.db.commit()
-        logger.info(f"Created partial invoice balance for invoice {invoice_id}")
-        return balances
-
-    def create_partial_delivery_balance(
-        self,
-        dn_id: UUID,
-        po_id: UUID,
-        line_amounts: Dict[UUID, Decimal]
-    ) -> List[BalanceLedger]:
-        """Create balance entries for partial delivery."""
-        balances = []
-        
-        for po_line_id, amount in line_amounts.items():
-            balance = BalanceLedger(
-                document_type="DN",
-                document_id=dn_id,
-                document_line_id=po_line_id,
-                balance_type="DELIVERED",
-                amount=amount,
-                related_document_type="PO",
-                related_document_id=po_id,
-                notes=f"Partial delivery allocation"
-            )
-            balances.append(balance)
-            self.db.add(balance)
-        
-        self.db.commit()
-        logger.info(f"Created partial delivery balance for DN {dn_id}")
-        return balances
-
-    def record_payment(self, invoice_id: UUID, amount: Decimal, notes: Optional[str] = None) -> Invoice:
-        """Record payment for an invoice."""
-        invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
-        
-        if not invoice:
-            raise ValueError(f"Invoice {invoice_id} not found")
-        
-        new_paid = invoice.amount_paid + amount
-        invoice.amount_paid = min(new_paid, invoice.total_amount)
-        
-        # Update status if fully paid
-        if invoice.amount_paid >= invoice.total_amount:
-            invoice.status = "PAID"
-        
-        # Create balance ledger entry
-        balance = BalanceLedger(
-            document_type="INVOICE",
-            document_id=invoice_id,
-            balance_type="PAID",
-            amount=amount,
-            related_document_type="INVOICE",
-            related_document_id=invoice_id,
-            notes=notes or f"Payment recorded"
-        )
-        self.db.add(balance)
-        self.db.commit()
-        self.db.refresh(invoice)
-        
-        logger.info(f"Recorded payment of {amount} for invoice {invoice.invoice_number}")
-        return invoice
-
-    def get_vendor_balance_summary(self, vendor_id: UUID) -> Dict:
-        """Get balance summary for all PO balances related to a vendor."""
-        # Get all open POs for vendor
-        pos = self.db.query(PurchaseOrder).filter(
-            and_(
-                PurchaseOrder.vendor_id == vendor_id,
-                PurchaseOrder.status == "OPEN",
-                PurchaseOrder.is_deleted == False
-            )
-        ).all()
-        
-        summary = {
-            "vendor_id": str(vendor_id),
-            "total_open_po": len(pos),
-            "total_open_amount": Decimal("0"),
-            "total_invoiced_amount": Decimal("0"),
-            "total_delivered_amount": Decimal("0"),
-            "total_paid_amount": Decimal("0"),
-            "purchase_orders": []
-        }
-        
-        for po in pos:
-            po_balance = self.get_po_balance_summary(po.id)
-            summary["total_open_amount"] += Decimal(str(po.total_amount))
-            summary["purchase_orders"].append(po_balance)
+        for po_line in po.lines:
+            total_ordered = po_line.quantity
+            total_delivered = Decimal("0")
+            total_invoiced = Decimal("0")
             
-            # Calculate amounts from balance
             for inv in po.invoices:
-                if not inv.is_deleted:
-                    summary["total_invoiced_amount"] += Decimal(str(inv.total_amount))
-                    summary["total_paid_amount"] += Decimal(str(inv.amount_paid))
+                for inv_line in inv.lines:
+                    if inv_line.product_code == po_line.product_code:
+                        total_invoiced += inv_line.quantity
             
             for dn in po.delivery_notes:
-                if not dn.is_deleted:
-                    summary["total_delivered_amount"] += Decimal(str(dn.total_amount))
+                for dn_line in dn.lines:
+                    if dn_line.product_code == po_line.product_code:
+                        total_delivered += dn_line.quantity
+            
+            balances.append({
+                "line_id": str(po_line.id),
+                "product_code": po_line.product_code,
+                "description": po_line.description,
+                "quantity_ordered": total_ordered,
+                "quantity_delivered": total_delivered,
+                "quantity_invoiced": total_invoiced,
+                "delivery_balance": total_ordered - total_delivered,
+                "invoice_balance": total_ordered - total_invoiced,
+                "fully_delivered": total_delivered >= total_ordered,
+                "fully_invoiced": total_invoiced >= total_ordered
+            })
         
-        summary["outstanding_balance"] = (
-            summary["total_invoiced_amount"] - summary["total_paid_amount"]
+        return balances
+    
+    def get_supplier_summary(self, supplier_code: str) -> Dict:
+        """Get summary of all activity for a supplier"""
+        pos = self.db.query(PurchaseOrder).filter(
+            PurchaseOrder.supplier_code == supplier_code
+        ).all()
+        
+        total_ordered = sum(po.total_amount for po in pos)
+        total_invoiced = sum(
+            sum(inv.total_amount for inv in po.invoices)
+            for po in pos
+        )
+        total_delivered = sum(
+            sum(dn.total_amount for dn in po.delivery_notes)
+            for po in pos
         )
         
-        return summary
-
-    def get_balance_ledger_entries(
-        self,
-        document_type: Optional[str] = None,
-        document_id: Optional[UUID] = None,
-        balance_type: Optional[str] = None,
-        limit: int = 100
-    ) -> List[BalanceLedger]:
-        """Get balance ledger entries with optional filters."""
-        query = self.db.query(BalanceLedger)
-        
-        if document_type:
-            query = query.filter(BalanceLedger.document_type == document_type)
-        if document_id:
-            query = query.filter(BalanceLedger.document_id == document_id)
-        if balance_type:
-            query = query.filter(BalanceLedger.balance_type == balance_type)
-        
-        return query.order_by(BalanceLedger.created_at.desc()).limit(limit).all()
-
-    def reconcile_balance_discrepancies(
-        self,
-        po_id: UUID
-    ) -> Dict[str, List]:
-        """Identify and return balance discrepancies for a PO."""
-        po_balance = self.get_po_balance_summary(po_id)
-        discrepancies = {
-            "over_invoiced": [],
-            "under_invoiced": [],
-            "over_delivered": [],
-            "under_delivered": [],
-            "payment_discrepancies": []
+        return {
+            "supplier_code": supplier_code,
+            "supplier_name": pos[0].supplier_name if pos else None,
+            "total_pos": len(pos),
+            "total_ordered": total_ordered,
+            "total_invoiced": total_invoiced,
+            "total_delivered": total_delivered,
+            "pending_invoices": total_ordered - total_invoiced,
+            "pending_deliveries": total_ordered - total_delivered
         }
+    
+    def validate_partial_match(
+        self,
+        po_id: str,
+        invoice_amount: Decimal,
+        dn_amount: Optional[Decimal] = None
+    ) -> Dict:
+        """Validate if a partial match is acceptable"""
+        balance = self.get_po_balance(po_id)
         
-        for line in po_balance.get("lines", []):
-            line_id = UUID(line["line_id"])
-            
-            # Check invoicing discrepancies
-            if line["invoiced"] > line["ordered"]:
-                discrepancies["over_invoiced"].append({
-                    "line_id": str(line_id),
-                    "line_number": line["line_number"],
-                    "description": line["description"],
-                    "ordered": str(line["ordered"]),
-                    "invoiced": str(line["invoiced"]),
-                    "difference": str(line["invoiced"] - line["ordered"])
-                })
-            elif line["invoiced"] < line["ordered"] * Decimal("0.9"):  # 10% threshold
-                discrepancies["under_invoiced"].append({
-                    "line_id": str(line_id),
-                    "line_number": line["line_number"],
-                    "description": line["description"],
-                    "ordered": str(line["ordered"]),
-                    "invoiced": str(line["invoiced"]),
-                    "difference": str(line["ordered"] - line["invoiced"])
-                })
-            
-            # Check delivery discrepancies
-            if line["delivered"] > line["ordered"]:
-                discrepancies["over_delivered"].append({
-                    "line_id": str(line_id),
-                    "line_number": line["line_number"],
-                    "description": line["description"],
-                    "ordered": str(line["ordered"]),
-                    "delivered": str(line["delivered"]),
-                    "difference": str(line["delivered"] - line["ordered"])
-                })
-            elif line["delivered"] < line["ordered"] * Decimal("0.9"):
-                discrepancies["under_delivered"].append({
-                    "line_id": str(line_id),
-                    "line_number": line["line_number"],
-                    "description": line["description"],
-                    "ordered": str(line["ordered"]),
-                    "delivered": str(line["delivered"]),
-                    "difference": str(line["ordered"] - line["delivered"])
-                })
+        if not balance:
+            return {"valid": False, "reason": "PO not found"}
         
-        return discrepancies
+        invoice_valid = invoice_amount <= balance["invoice_balance"]
+        dn_valid = True
+        if dn_amount:
+            dn_valid = dn_amount <= balance["delivery_balance"]
+        
+        return {
+            "valid": invoice_valid and dn_valid,
+            "invoice_valid": invoice_valid,
+            "dn_valid": dn_valid,
+            "reason": self._get_validation_reason(invoice_valid, dn_valid),
+            "available_balance": balance["invoice_balance"],
+            "available_delivery": balance["delivery_balance"]
+        }
+    
+    def _get_validation_reason(self, invoice_valid: bool, dn_valid: bool) -> str:
+        if invoice_valid and dn_valid:
+            return "Match is within acceptable balance"
+        elif not invoice_valid:
+            return "Invoice amount exceeds available balance"
+        else:
+            return "Delivery amount exceeds available delivery"

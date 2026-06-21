@@ -1,193 +1,142 @@
 // src/api/routes/delivery_notes.py
-from typing import Annotated
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List
+from decimal import Decimal
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-
 from src.database import get_db
-from src.models.user import User
 from src.models.delivery_note import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
-from src.api.routes.auth import get_current_user
 from src.api.schemas.delivery_note import (
     DeliveryNoteCreate,
     DeliveryNoteUpdate,
-    DeliveryNoteResponse,
-    DeliveryNoteListResponse
+    DeliveryNoteResponse
 )
 
-router = APIRouter(prefix="/delivery-notes", tags=["Delivery Notes"])
+router = APIRouter()
 
 
 @router.post("/", response_model=DeliveryNoteResponse, status_code=status.HTTP_201_CREATED)
-def create_delivery_note(
+async def create_delivery_note(
     dn_data: DeliveryNoteCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
-    """Create a new delivery note."""
-    existing_dn = db.query(DeliveryNote).filter(
+    existing = db.query(DeliveryNote).filter(
         DeliveryNote.dn_number == dn_data.dn_number
     ).first()
     
-    if existing_dn:
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Delivery note with number {dn_data.dn_number} already exists"
+            detail=f"Delivery Note with number {dn_data.dn_number} already exists"
         )
     
-    # Calculate totals
-    line_items = []
-    subtotal = 0
-    tax_total = 0
+    subtotal = sum(line.unit_price * line.quantity for line in dn_data.lines) if dn_data.lines else Decimal("0.00")
+    tax_amount = subtotal * Decimal("0.10")
+    total_amount = subtotal + tax_amount
     
-    for line_data in dn_data.line_items:
-        line_total = line_data.quantity * line_data.unit_price
-        tax_amount = line_total * line_data.tax_rate
-        subtotal += line_total
-        tax_total += tax_amount
-        
-        line_items.append(DeliveryNoteLine(
+    db_dn = DeliveryNote(
+        dn_number=dn_data.dn_number,
+        supplier_code=dn_data.supplier_code,
+        supplier_name=dn_data.supplier_name,
+        delivery_date=dn_data.delivery_date,
+        purchase_order_id=dn_data.purchase_order_id,
+        received_by=dn_data.received_by,
+        currency=dn_data.currency,
+        notes=dn_data.notes,
+        subtotal=subtotal,
+        tax_amount=tax_amount,
+        total_amount=total_amount,
+        status=DeliveryNoteStatus.SUBMITTED
+    )
+    db.add(db_dn)
+    db.flush()
+    
+    for line_data in dn_data.lines:
+        line_total = Decimal("0.00")
+        db_line = DeliveryNoteLine(
+            delivery_note_id=db_dn.id,
             line_number=line_data.line_number,
-            item_code=line_data.item_code,
+            product_code=line_data.product_code,
             description=line_data.description,
             quantity=line_data.quantity,
             unit_of_measure=line_data.unit_of_measure,
-            unit_price=line_data.unit_price,
-            line_total=line_total,
-            tax_rate=line_data.tax_rate,
-            tax_amount=tax_amount,
-            matched_po_line_id=line_data.matched_po_line_id,
-            created_by=current_user.id
-        ))
-    
-    delivery_note = DeliveryNote(
-        dn_number=dn_data.dn_number,
-        supplier_id=dn_data.supplier_id,
-        supplier_name=dn_data.supplier_name,
-        supplier_code=dn_data.supplier_code,
-        delivery_date=dn_data.delivery_date,
-        received_date=dn_data.received_date,
-        subtotal=subtotal,
-        tax_amount=tax_total,
-        total_amount=subtotal + tax_total,
-        currency=dn_data.currency,
-        notes=dn_data.notes,
-        carrier_info=dn_data.carrier_info,
-        status=DeliveryNoteStatus.RECEIVED,
-        created_by=current_user.id
-    )
-    
-    for line in line_items:
-        delivery_note.line_items.append(line)
-    
-    db.add(delivery_note)
-    db.commit()
-    db.refresh(delivery_note)
-    
-    return delivery_note
-
-
-@router.get("/", response_model=DeliveryNoteListResponse)
-def list_delivery_notes(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    supplier_id: UUID | None = None,
-    status_filter: DeliveryNoteStatus | None = None,
-    search: str | None = None
-):
-    """List all delivery notes with pagination."""
-    query = db.query(DeliveryNote).options(joinedload(DeliveryNote.line_items))
-    
-    if supplier_id:
-        query = query.filter(DeliveryNote.supplier_id == supplier_id)
-    
-    if status_filter:
-        query = query.filter(DeliveryNote.status == status_filter)
-    
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            DeliveryNote.dn_number.ilike(search_term) |
-            DeliveryNote.supplier_name.ilike(search_term)
+            line_total=line_total
         )
+        db.add(db_line)
     
-    total = query.count()
-    items = query.order_by(DeliveryNote.created_at.desc())\
-        .offset((page - 1) * page_size)\
-        .limit(page_size)\
-        .all()
+    db.commit()
+    db.refresh(db_dn)
+    return db_dn
+
+
+@router.get("/", response_model=List[DeliveryNoteResponse])
+async def list_delivery_notes(
+    skip: int = 0,
+    limit: int = 100,
+    supplier_code: str = None,
+    status: DeliveryNoteStatus = None,
+    purchase_order_id: str = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(DeliveryNote).options(joinedload(DeliveryNote.lines))
     
-    return DeliveryNoteListResponse(
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+    if supplier_code:
+        query = query.filter(DeliveryNote.supplier_code == supplier_code)
+    if status:
+        query = query.filter(DeliveryNote.status == status)
+    if purchase_order_id:
+        query = query.filter(DeliveryNote.purchase_order_id == purchase_order_id)
+    
+    dns = query.offset(skip).limit(limit).all()
+    return dns
 
 
 @router.get("/{dn_id}", response_model=DeliveryNoteResponse)
-def get_delivery_note(
-    dn_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get a delivery note by ID."""
-    delivery_note = db.query(DeliveryNote).options(
-        joinedload(DeliveryNote.line_items)
+async def get_delivery_note(dn_id: str, db: Session = Depends(get_db)):
+    dn = db.query(DeliveryNote).options(
+        joinedload(DeliveryNote.lines)
     ).filter(DeliveryNote.id == dn_id).first()
     
-    if not delivery_note:
+    if not dn:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Delivery note not found"
+            detail=f"Delivery Note {dn_id} not found"
         )
-    
-    return delivery_note
+    return dn
 
 
 @router.patch("/{dn_id}", response_model=DeliveryNoteResponse)
-def update_delivery_note(
-    dn_id: UUID,
-    dn_data: DeliveryNoteUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+async def update_delivery_note(
+    dn_id: str,
+    dn_update: DeliveryNoteUpdate,
+    db: Session = Depends(get_db)
 ):
-    """Update a delivery note."""
-    delivery_note = db.query(DeliveryNote).filter(DeliveryNote.id == dn_id).first()
+    dn = db.query(DeliveryNote).filter(DeliveryNote.id == dn_id).first()
     
-    if not delivery_note:
+    if not dn:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Delivery note not found"
+            detail=f"Delivery Note {dn_id} not found"
         )
     
-    update_data = dn_data.model_dump(exclude_unset=True)
+    update_data = dn_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(delivery_note, field, value)
+        setattr(dn, field, value)
     
-    delivery_note.updated_by = current_user.id
     db.commit()
-    db.refresh(delivery_note)
-    
-    return delivery_note
+    db.refresh(dn)
+    return dn
 
 
 @router.delete("/{dn_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_delivery_note(
-    dn_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Delete a delivery note."""
-    delivery_note = db.query(DeliveryNote).filter(DeliveryNote.id == dn_id).first()
+async def delete_delivery_note(dn_id: str, db: Session = Depends(get_db)):
+    dn = db.query(DeliveryNote).filter(DeliveryNote.id == dn_id).first()
     
-    if not delivery_note:
+    if not dn:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Delivery note not found"
+            detail=f"Delivery Note {dn_id} not found"
         )
     
-    db.delete(delivery_note)
+    db.delete(dn)
     db.commit()
+    return None

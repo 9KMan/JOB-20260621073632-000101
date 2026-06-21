@@ -1,87 +1,65 @@
 // src/api/schemas/invoice.py
-from pydantic import BaseModel, Field
-from uuid import UUID
+from pydantic import BaseModel
 from typing import Optional, List
-from datetime import date, datetime
+from uuid import UUID
 from decimal import Decimal
+from datetime import date
 from src.models.invoice import InvoiceStatus
 
 
 class InvoiceLineBase(BaseModel):
-    """Base invoice line schema."""
     line_number: int
-    item_code: Optional[str] = None
-    description: str = Field(..., max_length=500)
-    quantity: Decimal = Field(..., gt=0)
+    product_code: Optional[str] = None
+    description: str
+    quantity: Decimal
     unit_of_measure: str = "EA"
-    unit_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    unit_price: Decimal
 
 
 class InvoiceLineCreate(InvoiceLineBase):
-    """Invoice line creation schema."""
-    matched_po_line_id: Optional[UUID] = None
+    pass
 
 
 class InvoiceLineResponse(InvoiceLineBase):
-    """Invoice line response schema."""
     id: UUID
     line_total: Decimal
-    tax_amount: Decimal
-    matched_po_line_id: Optional[UUID] = None
-    matched_dn_line_id: Optional[UUID] = None
     
     class Config:
         from_attributes = True
 
 
 class InvoiceBase(BaseModel):
-    """Base invoice schema."""
-    invoice_number: str = Field(..., max_length=100)
-    supplier_id: UUID
-    supplier_name: str = Field(..., max_length=255)
-    supplier_code: Optional[str] = None
+    invoice_number: str
+    supplier_code: str
+    supplier_name: str
     invoice_date: date
     due_date: Optional[date] = None
-    currency: str = Field(default="USD", max_length=3)
+    purchase_order_id: Optional[UUID] = None
+    currency: str = "USD"
     notes: Optional[str] = None
-    payment_terms: Optional[str] = None
 
 
 class InvoiceCreate(InvoiceBase):
-    """Invoice creation schema."""
-    line_items: List[InvoiceLineCreate] = Field(default_factory=list)
+    lines: List[InvoiceLineCreate]
 
 
 class InvoiceUpdate(BaseModel):
-    """Invoice update schema."""
-    supplier_name: Optional[str] = None
     supplier_code: Optional[str] = None
-    due_date: Optional[date] = None
+    supplier_name: Optional[str] = None
     status: Optional[InvoiceStatus] = None
+    due_date: Optional[date] = None
     notes: Optional[str] = None
-    payment_terms: Optional[str] = None
 
 
 class InvoiceResponse(InvoiceBase):
-    """Invoice response schema."""
     id: UUID
+    status: InvoiceStatus
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    status: InvoiceStatus
-    matched_po_id: Optional[UUID] = None
-    created_at: datetime
-    updated_at: datetime
-    line_items: List[InvoiceLineResponse] = []
+    created_at: date
+    updated_at: date
+    lines: List[InvoiceLineResponse] = []
     
     class Config:
         from_attributes = True
-
-
-class InvoiceListResponse(BaseModel):
-    """Invoice list response schema."""
-    items: List[InvoiceResponse]
-    total: int
-    page: int
-    page_size: int
