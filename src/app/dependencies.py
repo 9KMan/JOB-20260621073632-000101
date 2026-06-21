@@ -1,57 +1,78 @@
 // src/app/dependencies.py
-"""FastAPI dependencies."""
-from typing import Annotated
+"""FastAPI dependency injection utilities."""
+from typing import AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.config import get_settings
-from src.app.database import get_db
-from src.app.services.auth_service import AuthService
-from src.app.services.auth_service import User
+from config import get_cached_settings
+from models.base import get_db_session
+from models.user import User
+from services.auth_service import AuthService
 
-settings = get_settings()
+settings = get_cached_settings()
 security = HTTPBearer()
 
 
-def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
-    """Get auth service instance."""
-    return AuthService(db)
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Get database session dependency."""
+    async for session in get_db_session():
+        yield session
 
 
-def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    auth_service: AuthService = Depends(get_auth_service),
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    session: AsyncSession = Depends(get_db),
 ) -> User:
     """Get current authenticated user from JWT token."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    token = credentials.credentials
+    
+    auth_service = AuthService(session)
+    
     try:
-        token = credentials.credentials
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        user_id: str = payload.get("sub")
+        payload = auth_service.decode_token(token)
+        user_id = payload.get("sub")
+        
         if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        user = await auth_service.get_user_by_id(user_id)
+        
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive",
+            )
+        
+        return user
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    user = auth_service.get_user_by_id(user_id)
-    if user is None:
-        raise credentials_exception
-    return user
 
-
-def get_current_active_user(
+async def get_current_active_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """Get current active user."""
     if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
     return current_user

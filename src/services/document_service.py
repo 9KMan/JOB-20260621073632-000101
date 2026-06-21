@@ -1,458 +1,334 @@
 // src/services/document_service.py
-"""Document service for CRUD operations on invoices, POs, and delivery notes."""
-from datetime import date, datetime
+"""Document service for managing PO, Invoice, and Delivery Note operations."""
+import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
-from uuid import UUID
 
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from src.models.document import (
-    Document,
-    DocumentLine,
-    DocumentStatus,
-    DocumentType,
-    Invoice,
-    PurchaseOrder,
-    DeliveryNote,
-    PurchaseOrderLine,
-    DeliveryNoteLine,
-    Supplier,
-)
-from src.models.matching import MatchResult
+from models.document import Document, DocumentLineItem, DocumentType, DocumentStatus
+from models.user import User
 
 
 class DocumentService:
     """Service for document operations."""
 
-    def __init__(self, db: Session):
-        """Initialize document service."""
-        self.db = db
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
-    # ==================== Invoice Operations ====================
-
-    def create_invoice(
+    async def create_document(
         self,
-        invoice_number: str,
-        supplier_id: UUID,
-        subtotal: Decimal,
-        issue_date: date,
-        po_number: Optional[str] = None,
-        tax_amount: Decimal = Decimal("0.00"),
-        due_date: Optional[date] = None,
-        currency: str = "USD",
-        notes: Optional[str] = None,
-        created_by: Optional[UUID] = None,
-        lines: Optional[List[dict]] = None,
-    ) -> Invoice:
-        """Create a new invoice."""
-        total_amount = subtotal + tax_amount
-
-        invoice = Invoice(
-            invoice_number=invoice_number,
-            supplier_id=supplier_id,
-            po_number=po_number,
-            subtotal=subtotal,
-            tax_amount=tax_amount,
-            total_amount=total_amount,
-            balance_amount=total_amount,
-            currency=currency,
-            issue_date=issue_date,
-            due_date=due_date,
-            notes=notes,
-            created_by=created_by,
-            status=DocumentStatus.PENDING.value,
-            received_date=datetime.utcnow(),
-        )
-
-        self.db.add(invoice)
-        self.db.flush()
-
-        # Create line items if provided
-        if lines:
-            for line_data in lines:
-                line = DocumentLine(
-                    document_id=invoice.id,
-                    document_type=DocumentType.INVOICE.value,
-                    line_number=line_data.get("line_number", "1"),
-                    product_code=line_data.get("product_code", ""),
-                    product_name=line_data.get("product_name", ""),
-                    description=line_data.get("description"),
-                    quantity=line_data.get("quantity", 1),
-                    unit_of_measure=line_data.get("unit_of_measure", "EA"),
-                    unit_price=line_data.get("unit_price", Decimal("0")),
-                    subtotal=line_data.get("subtotal", Decimal("0")),
-                    tax_rate=line_data.get("tax_rate", Decimal("0")),
-                    tax_amount=line_data.get("tax_amount", Decimal("0")),
-                    total_amount=line_data.get("total_amount", Decimal("0")),
-                    balance_quantity=line_data.get("quantity", 1),
-                )
-                self.db.add(line)
-
-        self.db.commit()
-        self.db.refresh(invoice)
-        return invoice
-
-    def get_invoice_by_id(self, invoice_id: UUID) -> Optional[Invoice]:
-        """Get invoice by ID."""
-        return (
-            self.db.query(Invoice)
-            .options(joinedload(Invoice.document))
-            .filter(Invoice.id == invoice_id)
-            .first()
-        )
-
-    def get_invoice_by_number(self, invoice_number: str) -> Optional[Invoice]:
-        """Get invoice by invoice number."""
-        return self.db.query(Invoice).filter(Invoice.invoice_number == invoice_number).first()
-
-    def get_invoices(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        supplier_id: Optional[UUID] = None,
-        status: Optional[str] = None,
-        po_number: Optional[str] = None,
-        from_date: Optional[date] = None,
-        to_date: Optional[date] = None,
-    ) -> Tuple[List[Invoice], int]:
-        """Get paginated list of invoices."""
-        query = self.db.query(Invoice)
-
-        if supplier_id:
-            query = query.filter(Invoice.supplier_id == supplier_id)
-        if status:
-            query = query.filter(Invoice.status == status)
-        if po_number:
-            query = query.filter(Invoice.po_number == po_number)
-        if from_date:
-            query = query.filter(Invoice.issue_date >= from_date)
-        if to_date:
-            query = query.filter(Invoice.issue_date <= to_date)
-
-        total = query.count()
-        invoices = query.order_by(Invoice.issue_date.desc()).offset(skip).limit(limit).all()
-
-        return invoices, total
-
-    def update_invoice(self, invoice: Invoice, **kwargs) -> Invoice:
-        """Update invoice fields."""
-        for key, value in kwargs.items():
-            if hasattr(invoice, key) and value is not None:
-                setattr(invoice, key, value)
-
-        # Recalculate total if subtotal or tax changed
-        if "subtotal" in kwargs or "tax_amount" in kwargs:
-            invoice.total_amount = invoice.subtotal + invoice.tax_amount
-
-        self.db.commit()
-        self.db.refresh(invoice)
-        return invoice
-
-    def delete_invoice(self, invoice: Invoice) -> None:
-        """Soft delete invoice."""
-        invoice.is_active = False
-        self.db.commit()
-
-    # ==================== Purchase Order Operations ====================
-
-    def create_purchase_order(
-        self,
-        po_number: str,
-        supplier_id: UUID,
-        subtotal: Decimal,
-        order_date: date,
-        tax_amount: Decimal = Decimal("0.00"),
-        expected_delivery_date: Optional[date] = None,
-        currency: str = "USD",
-        terms: Optional[str] = None,
-        notes: Optional[str] = None,
-        created_by: Optional[UUID] = None,
-        lines: Optional[List[dict]] = None,
-    ) -> PurchaseOrder:
-        """Create a new purchase order."""
-        total_amount = subtotal + tax_amount
-
-        # Get supplier info
-        supplier = self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
-
-        po = PurchaseOrder(
-            po_number=po_number,
-            supplier_id=supplier_id,
-            supplier_code=supplier.supplier_code if supplier else "",
-            supplier_name=supplier.supplier_name if supplier else "",
-            subtotal=subtotal,
-            tax_amount=tax_amount,
-            total_amount=total_amount,
-            balance_amount=total_amount,
-            currency=currency,
-            order_date=order_date,
-            expected_delivery_date=expected_delivery_date,
-            terms=terms,
-            notes=notes,
-            created_by=created_by,
-            status=DocumentStatus.DRAFT.value,
-        )
-
-        self.db.add(po)
-        self.db.flush()
-
-        # Create line items if provided
-        if lines:
-            for line_data in lines:
-                line = PurchaseOrderLine(
-                    purchase_order_id=po.id,
-                    line_number=line_data.get("line_number", "1"),
-                    product_code=line_data.get("product_code", ""),
-                    product_name=line_data.get("product_name", ""),
-                    description=line_data.get("description"),
-                    quantity=line_data.get("quantity", 1),
-                    unit_of_measure=line_data.get("unit_of_measure", "EA"),
-                    unit_price=line_data.get("unit_price", Decimal("0")),
-                    subtotal=line_data.get("subtotal", Decimal("0")),
-                    tax_rate=line_data.get("tax_rate", Decimal("0")),
-                    tax_amount=line_data.get("tax_amount", Decimal("0")),
-                    total_amount=line_data.get("total_amount", Decimal("0")),
-                )
-                self.db.add(line)
-
-        self.db.commit()
-        self.db.refresh(po)
-        return po
-
-    def get_purchase_order_by_id(self, po_id: UUID) -> Optional[PurchaseOrder]:
-        """Get purchase order by ID."""
-        return (
-            self.db.query(PurchaseOrder)
-            .options(joinedload(PurchaseOrder.lines))
-            .filter(PurchaseOrder.id == po_id)
-            .first()
-        )
-
-    def get_purchase_order_by_number(self, po_number: str) -> Optional[PurchaseOrder]:
-        """Get purchase order by PO number."""
-        return (
-            self.db.query(PurchaseOrder)
-            .options(joinedload(PurchaseOrder.lines))
-            .filter(PurchaseOrder.po_number == po_number)
-            .first()
-        )
-
-    def get_purchase_orders(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        supplier_id: Optional[UUID] = None,
-        status: Optional[str] = None,
-        from_date: Optional[date] = None,
-        to_date: Optional[date] = None,
-    ) -> Tuple[List[PurchaseOrder], int]:
-        """Get paginated list of purchase orders."""
-        query = self.db.query(PurchaseOrder)
-
-        if supplier_id:
-            query = query.filter(PurchaseOrder.supplier_id == supplier_id)
-        if status:
-            query = query.filter(PurchaseOrder.status == status)
-        if from_date:
-            query = query.filter(PurchaseOrder.order_date >= from_date)
-        if to_date:
-            query = query.filter(PurchaseOrder.order_date <= to_date)
-
-        total = query.count()
-        purchase_orders = query.order_by(PurchaseOrder.order_date.desc()).offset(skip).limit(limit).all()
-
-        return purchase_orders, total
-
-    def update_purchase_order(self, po: PurchaseOrder, **kwargs) -> PurchaseOrder:
-        """Update purchase order fields."""
-        for key, value in kwargs.items():
-            if hasattr(po, key) and value is not None:
-                setattr(po, key, value)
-
-        # Recalculate total if subtotal or tax changed
-        if "subtotal" in kwargs or "tax_amount" in kwargs:
-            po.total_amount = po.subtotal + po.tax_amount
-
-        self.db.commit()
-        self.db.refresh(po)
-        return po
-
-    # ==================== Delivery Note Operations ====================
-
-    def create_delivery_note(
-        self,
-        dn_number: str,
-        supplier_id: UUID,
-        subtotal: Decimal,
-        issue_date: date,
-        po_number: Optional[str] = None,
-        tax_amount: Decimal = Decimal("0.00"),
-        received_date: Optional[datetime] = None,
-        carrier: Optional[str] = None,
-        tracking_number: Optional[str] = None,
-        currency: str = "USD",
-        notes: Optional[str] = None,
-        created_by: Optional[UUID] = None,
-        lines: Optional[List[dict]] = None,
-    ) -> DeliveryNote:
-        """Create a new delivery note."""
-        total_amount = subtotal + tax_amount
-
-        dn = DeliveryNote(
-            dn_number=dn_number,
-            supplier_id=supplier_id,
-            po_number=po_number,
-            subtotal=subtotal,
-            tax_amount=tax_amount,
-            total_amount=total_amount,
-            balance_amount=total_amount,
-            currency=currency,
-            issue_date=issue_date,
-            received_date=received_date or datetime.utcnow(),
-            carrier=carrier,
-            tracking_number=tracking_number,
-            notes=notes,
-            created_by=created_by,
-            status=DocumentStatus.PENDING.value,
-        )
-
-        self.db.add(dn)
-        self.db.flush()
-
-        # Create line items if provided
-        if lines:
-            for line_data in lines:
-                line = DeliveryNoteLine(
-                    delivery_note_id=dn.id,
-                    line_number=line_data.get("line_number", "1"),
-                    product_code=line_data.get("product_code", ""),
-                    product_name=line_data.get("product_name", ""),
-                    description=line_data.get("description"),
-                    quantity=line_data.get("quantity", 1),
-                    unit_of_measure=line_data.get("unit_of_measure", "EA"),
-                    unit_price=line_data.get("unit_price", Decimal("0")),
-                    subtotal=line_data.get("subtotal", Decimal("0")),
-                )
-                self.db.add(line)
-
-        self.db.commit()
-        self.db.refresh(dn)
-        return dn
-
-    def get_delivery_note_by_id(self, dn_id: UUID) -> Optional[DeliveryNote]:
-        """Get delivery note by ID."""
-        return (
-            self.db.query(DeliveryNote)
-            .options(joinedload(DeliveryNote.lines))
-            .filter(DeliveryNote.id == dn_id)
-            .first()
-        )
-
-    def get_delivery_note_by_number(self, dn_number: str) -> Optional[DeliveryNote]:
-        """Get delivery note by DN number."""
-        return (
-            self.db.query(DeliveryNote)
-            .options(joinedload(DeliveryNote.lines))
-            .filter(DeliveryNote.dn_number == dn_number)
-            .first()
-        )
-
-    def get_delivery_notes(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        supplier_id: Optional[UUID] = None,
-        status: Optional[str] = None,
-        po_number: Optional[str] = None,
-        from_date: Optional[date] = None,
-        to_date: Optional[date] = None,
-    ) -> Tuple[List[DeliveryNote], int]:
-        """Get paginated list of delivery notes."""
-        query = self.db.query(DeliveryNote)
-
-        if supplier_id:
-            query = query.filter(DeliveryNote.supplier_id == supplier_id)
-        if status:
-            query = query.filter(DeliveryNote.status == status)
-        if po_number:
-            query = query.filter(DeliveryNote.po_number == po_number)
-        if from_date:
-            query = query.filter(DeliveryNote.issue_date >= from_date)
-        if to_date:
-            query = query.filter(DeliveryNote.issue_date <= to_date)
-
-        total = query.count()
-        delivery_notes = query.order_by(DeliveryNote.issue_date.desc()).offset(skip).limit(limit).all()
-
-        return delivery_notes, total
-
-    def update_delivery_note(self, dn: DeliveryNote, **kwargs) -> DeliveryNote:
-        """Update delivery note fields."""
-        for key, value in kwargs.items():
-            if hasattr(dn, key) and value is not None:
-                setattr(dn, key, value)
-
-        # Recalculate total if subtotal or tax changed
-        if "subtotal" in kwargs or "tax_amount" in kwargs:
-            dn.total_amount = dn.subtotal + dn.tax_amount
-
-        self.db.commit()
-        self.db.refresh(dn)
-        return dn
-
-    # ==================== Supplier Operations ====================
-
-    def create_supplier(
-        self,
-        supplier_code: str,
+        document_type: DocumentType,
+        document_number: str,
+        supplier_id: str,
         supplier_name: str,
-        email: Optional[str] = None,
-        phone: Optional[str] = None,
-        address: Optional[str] = None,
-        city: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        tax_id: Optional[str] = None,
-        payment_terms: Optional[str] = None,
-    ) -> Supplier:
-        """Create a new supplier."""
-        supplier = Supplier(
-            supplier_code=supplier_code,
+        total_amount: Decimal,
+        document_date: datetime,
+        tax_amount: Optional[Decimal] = None,
+        currency: str = "USD",
+        due_date: Optional[datetime] = None,
+        delivery_date: Optional[datetime] = None,
+        supplier_reference: Optional[str] = None,
+        notes: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        created_by: Optional[User] = None,
+        line_items: Optional[List[dict]] = None,
+    ) -> Document:
+        """Create a new document with optional line items."""
+        tax_amount = tax_amount or Decimal("0.00")
+        
+        document = Document(
+            document_type=document_type,
+            document_number=document_number,
+            supplier_id=supplier_id,
             supplier_name=supplier_name,
-            email=email,
-            phone=phone,
-            address=address,
-            city=city,
-            state=state,
-            country=country,
-            postal_code=postal_code,
-            tax_id=tax_id,
-            payment_terms=payment_terms,
+            total_amount=total_amount,
+            tax_amount=tax_amount,
+            currency=currency,
+            document_date=document_date,
+            due_date=due_date,
+            delivery_date=delivery_date,
+            supplier_reference=supplier_reference,
+            notes=notes,
+            metadata=metadata,
+            created_by=created_by.id if created_by else None,
         )
-        self.db.add(supplier)
-        self.db.commit()
-        self.db.refresh(supplier)
-        return supplier
+        
+        self.session.add(document)
+        await self.session.flush()
+        
+        # Add line items if provided
+        if line_items:
+            for idx, item_data in enumerate(line_items):
+                line_item = DocumentLineItem(
+                    document_id=document.id,
+                    line_number=idx + 1,
+                    product_code=item_data.get("product_code", ""),
+                    product_name=item_data.get("product_name", ""),
+                    description=item_data.get("description"),
+                    quantity=item_data.get("quantity", Decimal("1")),
+                    unit_of_measure=item_data.get("unit_of_measure", "EA"),
+                    unit_price=item_data.get("unit_price", Decimal("0")),
+                    line_total=item_data.get("line_total", Decimal("0")),
+                    tax_rate=item_data.get("tax_rate", Decimal("0")),
+                    expected_quantity=item_data.get("expected_quantity"),
+                    delivered_quantity=item_data.get("delivered_quantity"),
+                    invoiced_quantity=item_data.get("invoiced_quantity"),
+                    metadata=item_data.get("metadata"),
+                )
+                self.session.add(line_item)
+            
+            await self.session.flush()
+        
+        return document
 
-    def get_supplier_by_id(self, supplier_id: UUID) -> Optional[Supplier]:
-        """Get supplier by ID."""
-        return self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    async def get_document_by_id(
+        self, document_id: uuid.UUID, include_line_items: bool = False
+    ) -> Optional[Document]:
+        """Get document by ID with optional line items."""
+        query = select(Document).where(Document.id == document_id)
+        
+        if include_line_items:
+            query = query.options(selectinload(Document.line_items))
+        
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
-    def get_supplier_by_code(self, supplier_code: str) -> Optional[Supplier]:
-        """Get supplier by code."""
-        return self.db.query(Supplier).filter(Supplier.supplier_code == supplier_code).first()
-
-    def get_suppliers(
+    async def get_document_by_number(
         self,
-        skip: int = 0,
-        limit: int = 100,
-        is_active: bool = True,
-    ) -> Tuple[List[Supplier], int]:
-        """Get paginated list of suppliers."""
-        query = self.db.query(Supplier).filter(Supplier.is_active == is_active)
-        total = query.count()
-        suppliers = query.order_by(Supplier.supplier_name).offset(skip).limit(limit).all()
-        return suppliers, total
+        document_number: str,
+        document_type: Optional[DocumentType] = None,
+        supplier_id: Optional[str] = None,
+    ) -> Optional[Document]:
+        """Get document by document number with optional filters."""
+        conditions = [Document.document_number == document_number]
+        
+        if document_type:
+            conditions.append(Document.document_type == document_type)
+        
+        if supplier_id:
+            conditions.append(Document.supplier_id == supplier_id)
+        
+        query = select(Document).where(and_(*conditions))
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_documents(
+        self,
+        document_type: Optional[DocumentType] = None,
+        status: Optional[DocumentStatus] = None,
+        supplier_id: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Tuple[List[Document], int]:
+        """Get paginated list of documents with filters."""
+        conditions = []
+        
+        if document_type:
+            conditions.append(Document.document_type == document_type)
+        
+        if status:
+            conditions.append(Document.status == status)
+        
+        if supplier_id:
+            conditions.append(Document.supplier_id == supplier_id)
+        
+        if date_from:
+            conditions.append(Document.document_date >= date_from)
+        
+        if date_to:
+            conditions.append(Document.document_date <= date_to)
+        
+        # Count query
+        count_query = select(func.count(Document.id))
+        if conditions:
+            count_query = count_query.where(and_(*conditions))
+        
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar()
+        
+        # Data query
+        offset = (page - 1) * page_size
+        data_query = (
+            select(Document)
+            .options(selectinload(Document.line_items))
+            .where(and_(*conditions)) if conditions else select(Document)
+        )
+        data_query = (
+            data_query.order_by(Document.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        
+        result = await self.session.execute(data_query)
+        documents = list(result.scalars().all())
+        
+        return documents, total
+
+    async def update_document_status(
+        self, document_id: uuid.UUID, status: DocumentStatus
+    ) -> Optional[Document]:
+        """Update document status."""
+        document = await self.get_document_by_id(document_id)
+        
+        if not document:
+            return None
+        
+        document.status = status
+        await self.session.flush()
+        
+        return document
+
+    async def update_match_info(
+        self,
+        document_id: uuid.UUID,
+        matched_amount: Decimal,
+        matched_document_id: uuid.UUID,
+        match_score: float,
+    ) -> Optional[Document]:
+        """Update document with matching information."""
+        document = await self.get_document_by_id(document_id)
+        
+        if not document:
+            return None
+        
+        document.matched_amount = matched_amount
+        document.matched_document_id = matched_document_id
+        document.match_score = match_score
+        
+        if matched_amount >= document.total_amount:
+            document.status = DocumentStatus.MATCHED
+        
+        await self.session.flush()
+        
+        return document
+
+    async def get_open_pos_by_supplier(
+        self, supplier_id: str, include_line_items: bool = True
+    ) -> List[Document]:
+        """Get open (unmatched or partially matched) POs by supplier."""
+        conditions = [
+            Document.document_type == DocumentType.PURCHASE_ORDER,
+            Document.supplier_id == supplier_id,
+            Document.status.in_([DocumentStatus.PENDING, DocumentStatus.MATCHED]),
+        ]
+        
+        query = select(Document).where(and_(*conditions))
+        
+        if include_line_items:
+            query = query.options(selectinload(Document.line_items))
+        
+        query = query.order_by(Document.document_date.desc())
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_pending_invoices_by_supplier(
+        self, supplier_id: str, include_line_items: bool = True
+    ) -> List[Document]:
+        """Get pending invoices by supplier."""
+        conditions = [
+            Document.document_type == DocumentType.INVOICE,
+            Document.supplier_id == supplier_id,
+            Document.status == DocumentStatus.PENDING,
+        ]
+        
+        query = select(Document).where(and_(*conditions))
+        
+        if include_line_items:
+            query = query.options(selectinload(Document.line_items))
+        
+        query = query.order_by(Document.document_date.desc())
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_pending_delivery_notes_by_supplier(
+        self, supplier_id: str, include_line_items: bool = True
+    ) -> List[Document]:
+        """Get pending delivery notes by supplier."""
+        conditions = [
+            Document.document_type == DocumentType.DELIVERY_NOTE,
+            Document.supplier_id == supplier_id,
+            Document.status == DocumentStatus.PENDING,
+        ]
+        
+        query = select(Document).where(and_(*conditions))
+        
+        if include_line_items:
+            query = query.options(selectinload(Document.line_items))
+        
+        query = query.order_by(Document.document_date.desc())
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def delete_document(self, document_id: uuid.UUID) -> bool:
+        """Delete a document and its line items."""
+        document = await self.get_document_by_id(document_id)
+        
+        if not document:
+            return False
+        
+        await self.session.delete(document)
+        await self.session.flush()
+        
+        return True
+
+    async def add_line_item(
+        self,
+        document_id: uuid.UUID,
+        line_number: int,
+        product_code: str,
+        product_name: str,
+        quantity: Decimal,
+        unit_price: Decimal,
+        unit_of_measure: str = "EA",
+        description: Optional[str] = None,
+        tax_rate: Optional[Decimal] = None,
+    ) -> Optional[DocumentLineItem]:
+        """Add a line item to a document."""
+        document = await self.get_document_by_id(document_id)
+        
+        if not document:
+            return None
+        
+        line_total = quantity * unit_price
+        if tax_rate:
+            line_total = line_total * (1 + tax_rate / 100)
+        
+        line_item = DocumentLineItem(
+            document_id=document_id,
+            line_number=line_number,
+            product_code=product_code,
+            product_name=product_name,
+            description=description,
+            quantity=quantity,
+            unit_of_measure=unit_of_measure,
+            unit_price=unit_price,
+            line_total=line_total,
+            tax_rate=tax_rate or Decimal("0"),
+        )
+        
+        self.session.add(line_item)
+        await self.session.flush()
+        
+        return line_item
+
+    async def get_line_items(
+        self, document_id: uuid.UUID
+    ) -> List[DocumentLineItem]:
+        """Get all line items for a document."""
+        query = (
+            select(DocumentLineItem)
+            .where(DocumentLineItem.document_id == document_id)
+            .order_by(DocumentLineItem.line_number)
+        )
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

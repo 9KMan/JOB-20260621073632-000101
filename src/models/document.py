@@ -1,46 +1,40 @@
 // src/models/document.py
-"""Document models for Invoice, Purchase Order, and Delivery Note."""
-import enum
+"""Document models for Purchase Orders, Invoices, and Delivery Notes."""
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from enum import Enum
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
-    Column,
     Date,
     DateTime,
-    Enum,
-    Float,
+    Enum as SQLEnum,
     ForeignKey,
     Index,
     Numeric,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from models.base import Base
 
 
-class DocumentType(str, enum.Enum):
+class DocumentType(str, Enum):
     """Document type enumeration."""
-
-    INVOICE = "invoice"
     PURCHASE_ORDER = "purchase_order"
+    INVOICE = "invoice"
     DELIVERY_NOTE = "delivery_note"
 
 
-class DocumentStatus(str, enum.Enum):
+class DocumentStatus(str, Enum):
     """Document status enumeration."""
-
     DRAFT = "draft"
     PENDING = "pending"
     MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    CONFIRMED = "confirmed"
     APPROVED = "approved"
     REJECTED = "rejected"
     DISPUTED = "disputed"
@@ -51,283 +45,272 @@ class Document(Base):
     """Base document model with common fields."""
 
     __tablename__ = "documents"
-    __mapper_args__ = {"polymorphic_on": "doc_type", "polymorphic_identity": "document"}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    doc_type = Column(String(50), nullable=False, index=True)
-    doc_number = Column(String(100), nullable=False, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
-    supplier_code = Column(String(50), nullable=False)
-    supplier_name = Column(String(255), nullable=False)
-    po_number = Column(String(100), ForeignKey("purchase_orders.po_number"), nullable=True, index=True)
-    status = Column(String(50), nullable=False, default=DocumentStatus.PENDING.value, index=True)
-    currency = Column(String(3), nullable=False, default="USD")
-    subtotal = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    matched_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    balance_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    issue_date = Column(Date, nullable=False, index=True)
-    due_date = Column(Date, nullable=True, index=True)
-    received_date = Column(DateTime, nullable=True)
-    notes = Column(Text, nullable=True)
-    metadata = Column(Text, nullable=True)  # JSON string for additional data
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    confirmed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    confirmed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Relationships
-    supplier = relationship("Supplier", back_populates="documents")
-    lines = relationship("DocumentLine", back_populates="document", cascade="all, delete-orphan")
-    match_results = relationship("MatchResult", back_populates="document", cascade="all, delete-orphan")
-    created_by_user = relationship("User", foreign_keys=[created_by], back_populates="created_documents")
-    confirmed_by_user = relationship("User", foreign_keys=[confirmed_by], back_populates="confirmed_documents")
-
-    __table_args__ = (
-        Index("ix_documents_supplier_doc_number", "supplier_id", "doc_number", unique=True),
-        Index("ix_documents_po_number", "po_number"),
-        Index("ix_documents_status_date", "status", "issue_date"),
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    document_type: Mapped[DocumentType] = mapped_column(
+        SQLEnum(DocumentType, name="document_type_enum"),
+        nullable=False,
+        index=True,
+    )
+    document_number: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    supplier_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    supplier_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    supplier_reference: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    
+    # Financial fields
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="USD",
+        nullable=False,
+    )
+    
+    # Dates
+    document_date: Mapped[datetime] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    due_date: Mapped[Optional[datetime]] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    delivery_date: Mapped[Optional[datetime]] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    
+    # Status and matching
+    status: Mapped[DocumentStatus] = mapped_column(
+        SQLEnum(DocumentStatus, name="document_status_enum"),
+        default=DocumentStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    matched_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    match_score: Mapped[Optional[float]] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+    )
+    matched_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    
+    # Metadata
+    metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    
+    # Audit fields
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
-
-class Invoice(Base):
-    """Invoice document model."""
-
-    __tablename__ = "invoices"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    invoice_number = Column(String(100), nullable=False, unique=True, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
-    po_number = Column(String(100), nullable=True, index=True)
-    status = Column(String(50), nullable=False, default=DocumentStatus.PENDING.value)
-    currency = Column(String(3), nullable=False, default="USD")
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False)
-    matched_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    balance_amount = Column(Numeric(15, 2), nullable=False)
-    issue_date = Column(Date, nullable=False)
-    due_date = Column(Date, nullable=True)
-    received_date = Column(DateTime, nullable=True)
-    notes = Column(Text, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Polymorphic relationship
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
-    document = relationship("Document", foreign_keys=[document_id])
-
-    __table_args__ = (
-        Index("ix_invoices_supplier_date", "supplier_id", "issue_date"),
+    # Relationships
+    created_by_user = relationship(
+        "User",
+        back_populates="created_documents",
+        foreign_keys=[created_by],
+    )
+    line_items = relationship(
+        "DocumentLineItem",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+    matched_document = relationship(
+        "Document",
+        remote_side=[id],
+        foreign_keys=[matched_document_id],
     )
 
-
-class PurchaseOrder(Base):
-    """Purchase Order document model."""
-
-    __tablename__ = "purchase_orders"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    po_number = Column(String(100), nullable=False, unique=True, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
-    supplier_code = Column(String(50), nullable=False)
-    supplier_name = Column(String(255), nullable=False)
-    status = Column(String(50), nullable=False, default=DocumentStatus.DRAFT.value)
-    currency = Column(String(3), nullable=False, default="USD")
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False)
-    matched_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    balance_amount = Column(Numeric(15, 2), nullable=False)
-    order_date = Column(Date, nullable=False)
-    expected_delivery_date = Column(Date, nullable=True)
-    actual_delivery_date = Column(Date, nullable=True)
-    notes = Column(Text, nullable=True)
-    terms = Column(Text, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Polymorphic relationship
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
-    document = relationship("Document", foreign_keys=[document_id])
-
-    # Relationships
-    lines = relationship("PurchaseOrderLine", back_populates="purchase_order", cascade="all, delete-orphan")
-    invoices = relationship("Invoice", back_populates="purchase_order", foreign_keys="Invoice.po_number", primaryjoin="PurchaseOrder.po_number==Invoice.po_number")
-    delivery_notes = relationship("DeliveryNote", back_populates="purchase_order")
-
     __table_args__ = (
-        Index("ix_purchase_orders_supplier_status", "supplier_id", "status"),
+        Index("ix_documents_supplier_date", "supplier_id", "document_date"),
+        Index("ix_documents_type_status", "document_type", "status"),
     )
 
+    def __repr__(self) -> str:
+        return f"<Document {self.document_type.value}:{self.document_number}>"
 
-class DeliveryNote(Base):
-    """Delivery Note document model."""
+    def to_dict(self) -> dict:
+        """Convert document to dictionary."""
+        return {
+            "id": str(self.id),
+            "document_type": self.document_type.value,
+            "document_number": self.document_number,
+            "supplier_id": self.supplier_id,
+            "supplier_name": self.supplier_name,
+            "total_amount": str(self.total_amount),
+            "tax_amount": str(self.tax_amount),
+            "currency": self.currency,
+            "document_date": self.document_date.isoformat() if self.document_date else None,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "delivery_date": self.delivery_date.isoformat() if self.delivery_date else None,
+            "status": self.status.value,
+            "matched_amount": str(self.matched_amount),
+            "match_score": self.match_score,
+            "metadata": self.metadata,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
-    __tablename__ = "delivery_notes"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    dn_number = Column(String(100), nullable=False, unique=True, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
-    po_number = Column(String(100), nullable=True, index=True)
-    status = Column(String(50), nullable=False, default=DocumentStatus.PENDING.value)
-    currency = Column(String(3), nullable=False, default="USD")
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False)
-    matched_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    balance_amount = Column(Numeric(15, 2), nullable=False)
-    issue_date = Column(Date, nullable=False)
-    received_date = Column(DateTime, nullable=True)
-    notes = Column(Text, nullable=True)
-    carrier = Column(String(255), nullable=True)
-    tracking_number = Column(String(100), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+class DocumentLineItem(Base):
+    """Line items for documents."""
 
-    # Polymorphic relationship
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
-    document = relationship("Document", foreign_keys=[document_id])
+    __tablename__ = "document_line_items"
 
-    # Relationships
-    purchase_order = relationship("PurchaseOrder", foreign_keys=[po_number], primaryjoin="DeliveryNote.po_number==PurchaseOrder.po_number", back_populates="delivery_notes")
-    lines = relationship("DeliveryNoteLine", back_populates="delivery_note", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index("ix_delivery_notes_supplier_date", "supplier_id", "issue_date"),
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    line_number: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+    product_code: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    product_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(20),
+        default="EA",
+        nullable=False,
+    )
+    unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    line_total: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    expected_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
+    )
+    delivered_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
+    )
+    invoiced_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
+    )
+    metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
-
-# Additional models for detailed line items
-
-class DocumentLine(Base):
-    """Base document line model."""
-
-    __tablename__ = "document_lines"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
-    document_type = Column(String(50), nullable=False)
-    line_number = Column(String(50), nullable=False)
-    product_code = Column(String(100), nullable=False, index=True)
-    product_name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    quantity = Column(Numeric(15, 3), nullable=False)
-    unit_of_measure = Column(String(20), nullable=False, default="EA")
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    tax_rate = Column(Numeric(5, 4), nullable=False, default=Decimal("0.00"))
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False)
-    matched_quantity = Column(Numeric(15, 3), nullable=False, default=Decimal("0.00"))
-    balance_quantity = Column(Numeric(15, 3), nullable=False)
-    notes = Column(Text, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
     # Relationships
-    document = relationship("Document", back_populates="lines")
+    document = relationship("Document", back_populates="line_items")
 
-    __table_args__ = (
-        Index("ix_document_lines_document_line", "document_id", "line_number", unique=True),
-        Index("ix_document_lines_product", "product_code"),
-    )
+    def __repr__(self) -> str:
+        return f"<LineItem {self.line_number}:{self.product_code}>"
 
-
-class PurchaseOrderLine(Base):
-    """Purchase order line item model."""
-
-    __tablename__ = "purchase_order_lines"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    purchase_order_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=False)
-    line_number = Column(String(50), nullable=False)
-    product_code = Column(String(100), nullable=False)
-    product_name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    quantity = Column(Numeric(15, 3), nullable=False)
-    unit_of_measure = Column(String(20), nullable=False, default="EA")
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    tax_rate = Column(Numeric(5, 4), nullable=False, default=Decimal("0.00"))
-    tax_amount = Column(Numeric(15, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(15, 2), nullable=False)
-    delivered_quantity = Column(Numeric(15, 3), nullable=False, default=Decimal("0.00"))
-    invoiced_quantity = Column(Numeric(15, 3), nullable=False, default=Decimal("0.00"))
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Relationships
-    purchase_order = relationship("PurchaseOrder", back_populates="lines")
-
-    __table_args__ = (
-        Index("ix_po_lines_order_line", "purchase_order_id", "line_number", unique=True),
-    )
+    def to_dict(self) -> dict:
+        """Convert line item to dictionary."""
+        return {
+            "id": str(self.id),
+            "document_id": str(self.document_id),
+            "line_number": self.line_number,
+            "product_code": self.product_code,
+            "product_name": self.product_name,
+            "description": self.description,
+            "quantity": str(self.quantity),
+            "unit_of_measure": self.unit_of_measure,
+            "unit_price": str(self.unit_price),
+            "line_total": str(self.line_total),
+            "tax_rate": str(self.tax_rate),
+            "expected_quantity": str(self.expected_quantity) if self.expected_quantity else None,
+            "delivered_quantity": str(self.delivered_quantity) if self.delivered_quantity else None,
+            "invoiced_quantity": str(self.invoiced_quantity) if self.invoiced_quantity else None,
+        }
 
 
-class DeliveryNoteLine(Base):
-    """Delivery note line item model."""
-
-    __tablename__ = "delivery_note_lines"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    delivery_note_id = Column(UUID(as_uuid=True), ForeignKey("delivery_notes.id"), nullable=False)
-    line_number = Column(String(50), nullable=False)
-    product_code = Column(String(100), nullable=False)
-    product_name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    quantity = Column(Numeric(15, 3), nullable=False)
-    unit_of_measure = Column(String(20), nullable=False, default="EA")
-    unit_price = Column(Numeric(15, 4), nullable=False)
-    subtotal = Column(Numeric(15, 2), nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Relationships
-    delivery_note = relationship("DeliveryNote", back_populates="lines")
-
-    __table_args__ = (
-        Index("ix_dn_lines_note_line", "delivery_note_id", "line_number", unique=True),
-    )
-
-
-class Supplier(Base):
-    """Supplier model."""
-
-    __tablename__ = "suppliers"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    supplier_code = Column(String(50), nullable=False, unique=True, index=True)
-    supplier_name = Column(String(255), nullable=False)
-    contact_name = Column(String(255), nullable=True)
-    email = Column(String(255), nullable=True)
-    phone = Column(String(50), nullable=True)
-    address = Column(Text, nullable=True)
-    city = Column(String(100), nullable=True)
-    state = Column(String(100), nullable=True)
-    country = Column(String(100), nullable=True)
-    postal_code = Column(String(20), nullable=True)
-    tax_id = Column(String(50), nullable=True)
-    payment_terms = Column(String(100), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Relationships
-    documents = relationship("Document", back_populates="supplier")
-    invoices = relationship("Invoice", back_populates="supplier")
-    purchase_orders = relationship("PurchaseOrder", back_populates="supplier")
-    delivery_notes = relationship("DeliveryNote", back_populates="supplier")
+# Alias models for backwards compatibility
+PurchaseOrder = Document
+Invoice = Document
+DeliveryNote = Document
