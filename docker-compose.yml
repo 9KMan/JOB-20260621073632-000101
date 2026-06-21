@@ -1,107 +1,187 @@
 // docker-compose.yml
 version: "3.9"
 
+# AP Automation Core Engine - Local Development Stack
+# Includes PostgreSQL, PGBouncer, and API service
+
 services:
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap-engine-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ap_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-apuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-ap_automation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ap-network
+    profiles:
+      - database
+      - full
+
+  # ============================================
+  # PGBouncer Connection Pooler
+  # ============================================
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap-engine-pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-ap_automation}"
+      POOL_MODE: "transaction"
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "20"
+      MIN_POOL_SIZE: "5"
+      RESERVE_POOL_SIZE: "5"
+      RESERVE_POOL_TIMEOUT: "3"
+      LOG_CONECTIONS: "0"
+      LOG_DISCONNECTIONS: "0"
+      LOG_ERRORS: "1"
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgbouncer -V"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ap-network
+    profiles:
+      - database
+      - full
+
+  # ============================================
+  # API Application Service
+  # ============================================
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
+      target: production
+    container_name: ap-engine-api
+    restart: unless-stopped
+    environment:
+      # Database
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@${PGBOUNCER_HOST:-pgbouncer}:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-ap_automation}?prepared_statement_cache_size=500"
+      DATABASE_POOL_SIZE: "10"
+      DATABASE_MAX_OVERFLOW: "20"
+      DATABASE_POOL_TIMEOUT: "30"
+      DATABASE_POOL_RECYCLE: "3600"
+      # JWT / Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-changeme-in-production-use-strong-secret}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      # Thresholds
+      THRESHOLD_HIGH: ${THRESHOLD_HIGH:-95}
+      THRESHOLD_MID: ${THRESHOLD_MID:-75}
+      THRESHOLD_LOW: ${THRESHOLD_LOW:-50}
+      # Tolerances
+      TOLERANCE_PRICE: ${TOLERANCE_PRICE:-5}
+      TOLERANCE_QTY: ${TOLERANCE_QTY:-10}
+      # Application
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-"http://localhost:3000,http://localhost:8080"}
     ports:
       - "${API_PORT:-8000}:8000"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}
-      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-90}
-      - THRESHOLD_MID=${THRESHOLD_MID:-70}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
-      - TOLERANCE_DATE=${TOLERANCE_DATE:-7}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs:rw
     depends_on:
-      pgbouncer:
+      postgres:
         condition: service_healthy
-    networks:
-      - ap-network
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 15s
+    networks:
+      - ap-network
+    profiles:
+      - full
 
-  pgbouncer:
-    image: pgbouncer/pgbouncer:1.22.0
-    container_name: ap-automation-pgbouncer
-    ports:
-      - "5432:5432"
+  # ============================================
+  # Alembic Migration Runner
+  # ============================================
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-engine-migration
+    command: ["alembic", "upgrade", "head"]
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=10
-      - RESERVE_POOL_TIMEOUT=5
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@${PGBOUNCER_HOST:-pgbouncer}:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-ap_automation}"
+      PYTHONPATH: "/app"
+    volumes:
+      - ./migrations:/app/migrations:ro
+      - ./models:/app/models:ro
+      - ./core:/app/core:ro
     depends_on:
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo -e '\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' | nc -w 1 -U /etc/pgbouncer/userlist.txt || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     networks:
       - ap-network
-    restart: unless-stopped
+    profiles:
+      - migration
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: ap-automation-postgres
+  # ============================================
+  # Redis (for future caching/queue)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: ap-engine-redis
+    restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-apuser}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
-      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - redis_data:/data
+    command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
     networks:
       - ap-network
-    restart: unless-stopped
-
-  # Optional: Development only - pgAdmin for database inspection
-  pgadmin:
-    image: dpage/pgadmin4:8.3
-    container_name: ap-automation-pgadmin
-    ports:
-      - "${PGADMIN_PORT:-5050}:80"
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
-      - PGADMIN_DEFAULT_PASSWORD=admin
     profiles:
-      - dev
-    depends_on:
-      - postgres
-    networks:
-      - ap-network
-    restart: unless-stopped
+      - cache
+      - full
 
-volumes:
-  postgres_data:
-    driver: local
-
+# ============================================
+# Networks
+# ============================================
 networks:
   ap-network:
     driver: bridge
+    name: ap_automation_network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+    name: ap_engine_postgres_data
+
+  redis_data:
+    driver: local
+    name: ap_engine_redis_data

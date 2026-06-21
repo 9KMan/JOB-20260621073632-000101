@@ -1,123 +1,115 @@
 // models/enums.py
-"""SQLAlchemy and Pydantic enums for AP Automation Engine.
+"""Enumeration types for AP Automation Engine.
 
-Defines all status enums, decision types, and related constants.
+Defines all status enums and decision types used across models.
 """
 
 import enum
-from typing import Annotated
-
-from pydantic import Field
 
 
-class DocumentStatus(str, enum.Enum):
-    """Status for invoices, POs, and delivery notes."""
-
+class InvoiceStatus(str, enum.Enum):
+    """Invoice processing status."""
+    
     DRAFT = "draft"
     PENDING = "pending"
-    SUBMITTED = "submitted"
     PROCESSING = "processing"
     MATCHED = "matched"
     APPROVED = "approved"
-    REJECTED = "rejected"
     EXCEPTION = "exception"
+    REJECTED = "rejected"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+
+
+class PurchaseOrderStatus(str, enum.Enum):
+    """Purchase order status."""
+    
+    DRAFT = "draft"
+    SENT = "sent"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class MatchStatus(str, enum.Enum):
-    """Status of the matching process."""
+class DeliveryNoteStatus(str, enum.Enum):
+    """Delivery note status."""
+    
+    DRAFT = "draft"
+    ISSUED = "issued"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
 
+
+class MatchStatus(str, enum.Enum):
+    """Matching process status."""
+    
     PENDING = "pending"
-    IN_PROGRESS = "in_progress"
+    PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
-    PARTIAL = "partial"
     CANCELLED = "cancelled"
 
 
 class MatchDecision(str, enum.Enum):
-    """Matching decision outcome."""
-
+    """Matching decision based on score thresholds."""
+    
     AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVE = "one_click_approve"
-    ONE_CLICK_REJECT = "one_click_reject"
+    ONE_CLICK_REVIEW = "one_click_review"
     EXCEPTION = "exception"
-    MANUAL_REVIEW = "manual_review"
     REJECTED = "rejected"
+    MANUAL_REVIEW = "manual_review"
 
 
-class MatchingScore(float, enum.Enum):
-    """Matching score categories."""
-
-    EXACT = 100.0
-    HIGH = 90.0
-    GOOD = 80.0
-    ACCEPTABLE = 70.0
-    LOW = 50.0
-    POOR = 30.0
-    FAILED = 0.0
-
-
-class ExceptionType(str, enum.Enum):
-    """Types of matching exceptions."""
-
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    DATE_VARIANCE = "date_variance"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    SUPPLIER_MISMATCH = "supplier_mismatch"
-    MULTIPLE_PO_MATCH = "multiple_po_match"
-    PARTIAL_MATCH = "partial_match"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    OTHER = "other"
-
-
-class ExceptionReason(str, enum.Enum):
-    """Detailed reasons for exceptions."""
-
-    PO_PRICE_MISMATCH = "po_price_mismatch"
-    INVOICE_PRICE_MISMATCH = "invoice_price_mismatch"
-    QUANTITY_EXCEEDS_PO = "quantity_exceeds_po"
-    QUANTITY_EXCEEDS_DELIVERY = "quantity_exceeds_delivery"
-    DELIVERY_DATE_OUTSIDE_TOLERANCE = "delivery_date_outside_tolerance"
-    INVOICE_DATE_BEFORE_PO = "invoice_date_before_po"
-    UNABLE_TO_ANCHOR_PO = "unable_to_anchor_po"
-    MULTIPLE_POS_POSSIBLE = "multiple_pos_possible"
-    NO_MATCHING_DELIVERY = "no_matching_delivery"
-    INVOICE_ALREADY_EXISTS = "invoice_already_exists"
-    BLOCKED_INVOICE = "blocked_invoice"
-    OTHER_REASON = "other_reason"
+class LineStatus(str, enum.Enum):
+    """Line item status within a document."""
+    
+    OPEN = "open"
+    PARTIAL = "partial"
+    FULL = "full"
+    CLOSED = "closed"
 
 
 class ExceptionStatus(str, enum.Enum):
-    """Status of an exception in the queue."""
-
+    """Exception handling status."""
+    
     OPEN = "open"
-    IN_REVIEW = "in_review"
+    UNDER_REVIEW = "under_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
 
 
-class SupplierConfidence(str, enum.Enum):
-    """Confidence level for supplier matching."""
+class ExceptionType(str, enum.Enum):
+    """Types of matching exceptions."""
+    
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY = "missing_delivery"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DATE_VARIANCE = "date_variance"
+    VENDOR_MISMATCH = "vendor_mismatch"
+    MULTIPLE_POTENTIAL_MATCHES = "multiple_potential_matches"
+    AMOUNT_VARIANCE = "amount_variance"
+    UNMATCHED_LINES = "unmatched_lines"
 
+
+class MatchConfidence(str, enum.Enum):
+    """Confidence level of a match."""
+    
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
-    UNKNOWN = "unknown"
 
 
-# Pydantic enum annotations for API schemas
-DocumentStatusEnum = Annotated[DocumentStatus, Field(description="Document status")]
-MatchStatusEnum = Annotated[MatchStatus, Field(description="Matching status")]
-MatchDecisionEnum = Annotated[MatchDecision, Field(description="Match decision")]
-MatchingScoreEnum = Annotated[MatchingScore, Field(description="Matching score category")]
-ExceptionTypeEnum = Annotated[ExceptionType, Field(description="Exception type")]
-ExceptionReasonEnum = Annotated[ExceptionReason, Field(description="Exception reason")]
-ExceptionStatusEnum = Annotated[ExceptionStatus, Field(description="Exception status")]
-SupplierConfidenceEnum = Annotated[SupplierConfidence, Field(description="Supplier confidence")]
+class LearningStatus(str, enum.Enum):
+    """Learning/cross-reference status."""
+    
+    ACTIVE = "active"
+    LEARNING = "learning"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    ARCHIVED = "archived"
