@@ -1,175 +1,148 @@
 # core/config.py
-"""Application configuration via pydantic-settings.
+"""Configuration management using pydantic-settings.
 
-All configuration is driven by environment variables.
-No secrets are hardcoded.
+All configuration is loaded from environment variables.
 """
 
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
-
-    model_config = SettingsConfigDict(env_prefix="DATABASE_")
-
-    url: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        description="Async PostgreSQL connection URL",
-    )
-    pool_size: int = Field(default=20, ge=1, description="Connection pool size")
-    max_overflow: int = Field(default=10, ge=0, description="Max overflow connections")
-    pool_timeout: int = Field(default=30, ge=1, description="Pool acquire timeout in seconds")
-    pool_recycle: int = Field(default=3600, ge=0, description="Connection recycle in seconds")
-    echo: bool = Field(default=False, description="Echo SQL queries (dev only)")
-
-    sync_url: str | None = Field(
-        default=None,
-        description="Sync PostgreSQL URL for Alembic migrations",
-    )
-
-    @property
-    def async_url(self) -> str:
-        """Return the async database URL."""
-        return self.url
-
-
-class JWTSettings(BaseSettings):
-    """JWT authentication settings."""
-
-    model_config = SettingsConfigDict(env_prefix="JWT_")
-
-    secret_key: str = Field(
-        default="change-me-in-production-use-at-least-32-random-chars",
-        description="HS256 signing secret key",
-        min_length=32,
-    )
-    algorithm: Literal["HS256", "HS384", "HS512"] = Field(
-        default="HS256",
-        description="JWT algorithm",
-    )
-    access_token_expire_minutes: int = Field(
-        default=30,
-        ge=1,
-        description="Access token expiry in minutes",
-    )
-    refresh_token_expire_days: int = Field(
-        default=7,
-        ge=1,
-        description="Refresh token expiry in days",
-    )
-
-
-class ThresholdSettings(BaseSettings):
-    """Matching threshold settings for score-based routing."""
-
-    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
-
-    high: float = Field(
-        default=0.95,
-        ge=0.0,
-        le=1.0,
-        description="Auto-approve threshold (score >= THRESHOLD_HIGH)",
-    )
-    mid: float = Field(
-        default=0.75,
-        ge=0.0,
-        le=1.0,
-        description="1-click review threshold (score >= THRESHOLD_MID)",
-    )
-    low: float = Field(
-        default=0.50,
-        ge=0.0,
-        le=1.0,
-        description="Exception threshold (score >= THRESHOLD_LOW)",
-    )
-
-    def route_decision(self, score: float) -> str:
-        """Route a matching score to a decision tier.
-
-        Args:
-            score: Normalized match score between 0.0 and 1.0.
-
-        Returns:
-            Decision tier: "auto_approved", "review", or "exception".
-        """
-        if score >= self.high:
-            return "auto_approved"
-        elif score >= self.mid:
-            return "review"
-        elif score >= self.low:
-            return "exception"
-        else:
-            return "rejected"
-
-
-class ToleranceSettings(BaseSettings):
-    """Tolerance settings for matching comparisons."""
-
-    model_config = SettingsConfigDict(env_prefix="TOLERANCE_")
-
-    price: float = Field(
-        default=0.02,
-        ge=0.0,
-        le=1.0,
-        description="Price match tolerance as decimal fraction (2% default)",
-    )
-    qty: float = Field(
-        default=0.05,
-        ge=0.0,
-        le=1.0,
-        description="Quantity match tolerance as decimal fraction (5% default)",
-    )
-    description: float = Field(
-        default=0.30,
-        ge=0.0,
-        le=1.0,
-        description="Description similarity threshold (Jaccard / fuzzy)",
-    )
-
-
-class AppSettings(BaseSettings):
-    """Main application settings composing all sub-settings."""
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="allow",
+        extra="ignore",
     )
 
-    app_name: str = Field(default="AP Automation Core Engine", description="Application name")
-    environment: Literal["development", "staging", "production"] = Field(
-        default="development",
-        description="Runtime environment",
-    )
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO",
-        description="Logging level",
-    )
-    debug: bool = Field(default=False, description="Debug mode")
+    # Application
+    APP_NAME: str = "AP Automation Engine"
+    APP_VERSION: str = "0.1.0"
+    DEBUG: bool = Field(default=False)
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    # Sub-settings
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    jwt: JWTSettings = Field(default_factory=JWTSettings)
-    threshold: ThresholdSettings = Field(default_factory=ThresholdSettings)
-    tolerance: ToleranceSettings = Field(default_factory=ToleranceSettings)
+    # Database
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apdb",
+        description="PostgreSQL connection string for async SQLAlchemy",
+    )
+    DATABASE_POOL_SIZE: int = Field(default=20, ge=1, le=100)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    DATABASE_POOL_RECYCLE: int = Field(default=3600, ge=0)
+
+    # PGBouncer (optional)
+    PGBOUNCER_HOST: str | None = None
+    PGBOUNCER_PORT: int = 6432
+
+    # JWT Authentication
+    JWT_SECRET_KEY: str = Field(
+        default="change-me-in-production",
+        description="Secret key for HS256 JWT signing",
+    )
+    JWT_ALGORITHM: str = Field(default="HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
+
+    # Matching Thresholds (0-100 scale)
+    THRESHOLD_HIGH: int = Field(
+        default=95,
+        ge=0,
+        le=100,
+        description="Auto-approve threshold (inclusive)",
+    )
+    THRESHOLD_MID: int = Field(
+        default=70,
+        ge=0,
+        le=100,
+        description="1-click review threshold (inclusive)",
+    )
+    THRESHOLD_LOW: int = Field(
+        default=50,
+        ge=0,
+        le=100,
+        description="Exception threshold (inclusive)",
+    )
+
+    # Tolerance Settings
+    TOLERANCE_PRICE: float = Field(
+        default=5.0,
+        ge=0,
+        le=100,
+        description="Price match tolerance percentage",
+    )
+    TOLERANCE_QTY: float = Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description="Quantity match tolerance percentage",
+    )
+
+    # Learning Loop
+    LEARNING_CONFIRMATION_COUNT: int = Field(
+        default=3,
+        ge=1,
+        description="Number of confirmations to promote to cross_ref",
+    )
+    LEARNING_BOOST_FACTOR: float = Field(
+        default=10.0,
+        ge=0,
+        description="Score boost for learned matches",
+    )
+
+    # API
+    API_V1_PREFIX: str = "/api/v1"
+    OPENAPI_URL: str | None = "/openapi.json"
+    DOCS_URL: str = "/docs"
+    REDOC_URL: str = "/redoc"
+
+    # CORS
+    CORS_ORIGINS: list[str] = Field(default=["*"])
+
+    @field_validator("THRESHOLD_HIGH", "THRESHOLD_MID", "THRESHOLD_LOW")
+    @classmethod
+    def validate_thresholds(cls, v: int, info) -> int:
+        """Ensure thresholds are in valid order."""
+        thresholds = info.data
+        if (
+            "THRESHOLD_HIGH" in info.field_name
+            and "THRESHOLD_MID" in thresholds
+            and v < thresholds["THRESHOLD_MID"]
+        ):
+            raise ValueError(
+                f"THRESHOLD_HIGH ({v}) must be >= THRESHOLD_MID ({thresholds['THRESHOLD_MID']})"
+            )
+        if (
+            "THRESHOLD_MID" in info.field_name
+            and "THRESHOLD_LOW" in thresholds
+            and v < thresholds["THRESHOLD_LOW"]
+        ):
+            raise ValueError(
+                f"THRESHOLD_MID ({v}) must be >= THRESHOLD_LOW ({thresholds['THRESHOLD_LOW']})"
+            )
+        return v
 
     @property
-    def is_production(self) -> bool:
-        """Check if running in production."""
-        return self.environment == "production"
+    def database_pool_url(self) -> str:
+        """Return the database URL with PGBouncer if configured."""
+        if self.PGBOUNCER_HOST:
+            # Replace host in DATABASE_URL with PGBouncer host
+            import re
+
+            pattern = r"postgresql\+asyncpg://([^@]+@[^:]+):(\d+)/(\w+)"
+            match = re.match(pattern, self.DATABASE_URL)
+            if match:
+                user_pass, _, dbname = match.groups()
+                return f"postgresql+asyncpg://{user_pass}@{self.PGBOUNCER_HOST}:{self.PGBOUNCER_PORT}/{dbname}"
+        return self.DATABASE_URL
 
 
 @lru_cache
-def get_settings() -> AppSettings:
-    """Get cached application settings singleton."""
-    return AppSettings()
-
-
-# Convenience import
-settings = get_settings()
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()

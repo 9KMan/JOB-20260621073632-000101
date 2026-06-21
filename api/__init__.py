@@ -1,4 +1,9 @@
 # api/__init__.py
-"""API layer package."""
+"""API module for AP Automation Engine.
 
-__all__ = []
+This module contains FastAPI routes and Pydantic schemas.
+"""
+
+from api.schemas import HealthResponse
+
+__all__ = ["HealthResponse"]

@@ -1,20 +1,24 @@
 # models/__init__.py
-"""Database models package — SQLAlchemy declarative models."""
+"""Database models package.
+
+This package contains SQLAlchemy ORM models for the AP Automation Engine.
+"""
 
 from models.base import Base, TimestampMixin
+from models.enums import (
+    InvoiceStatus,
+    PurchaseOrderStatus,
+    DeliveryNoteStatus,
+    MatchStatus,
+    MatchDecision,
+    ExceptionStatus,
+    ExceptionType,
+)
 from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, POLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
 from models.cross_ref import CrossRef
-from models.enums import (
-    InvoiceStatus,
-    POStatus,
-    DeliveryNoteStatus,
-    MatchDecision,
-    ExceptionType,
-    ExceptionStatus,
-)
 
 __all__ = [
     # Base
@@ -22,16 +26,17 @@ __all__ = [
     "TimestampMixin",
     # Enums
     "InvoiceStatus",
-    "POStatus",
+    "PurchaseOrderStatus",
     "DeliveryNoteStatus",
+    "MatchStatus",
     "MatchDecision",
-    "ExceptionType",
     "ExceptionStatus",
+    "ExceptionType",
     # Models
     "Invoice",
     "InvoiceLine",
     "PurchaseOrder",
-    "POLine",
+    "PurchaseOrderLine",
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
