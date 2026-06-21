@@ -1,154 +1,87 @@
 # core/config.py
-"""Application configuration using pydantic-settings.
-
-Configuration is loaded from environment variables with validation and
-type coercion applied automatically.
-"""
+"""Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
-
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://apuser:apsecret@localhost:5432/apautomation",
-        description="Async PostgreSQL connection URL for SQLAlchemy",
-    )
-    DATABASE_POOL_SIZE: int = Field(default=10, ge=1, le=100)
-    DATABASE_MAX_OVERFLOW: int = Field(default=20, ge=0, le=100)
-    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
-    DATABASE_POOL_RECYCLE: int = Field(default=3600, ge=0)
-    DATABASE_ECHO: bool = Field(default=False, description="SQL echo mode for debugging")
-
-    model_config = SettingsConfigDict(env_prefix="DATABASE_")
-
-
-class JWTSettings(BaseSettings):
-    """JWT authentication settings."""
-
-    JWT_SECRET_KEY: str = Field(
-        default="changeme-in-production",
-        description="Secret key for HS256 JWT signing",
-    )
-    JWT_ALGORITHM: str = Field(default="HS256")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
-
-    @field_validator("JWT_SECRET_KEY")
-    @classmethod
-    def validate_secret_key(cls, v: str) -> str:
-        """Ensure secret key is sufficiently long for security."""
-        if len(v) < 32 and v == "changeme-in-production":
-            return v  # Allow default in development
-        if len(v) < 32:
-            raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
-        return v
-
-    model_config = SettingsConfigDict(env_prefix="JWT_")
-
-
-class ThresholdSettings(BaseSettings):
-    """Matching engine threshold settings."""
-
-    THRESHOLD_HIGH: int = Field(
-        default=95,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold (percentage)",
-    )
-    THRESHOLD_MID: int = Field(
-        default=70,
-        ge=0,
-        le=100,
-        description="One-click review threshold (percentage)",
-    )
-    THRESHOLD_LOW: int = Field(
-        default=50,
-        ge=0,
-        le=100,
-        description="Exception threshold (percentage)",
-    )
-
-    @field_validator("THRESHOLD_HIGH", "THRESHOLD_MID", "THRESHOLD_LOW")
-    @classmethod
-    def validate_thresholds(cls, v: int) -> int:
-        """Ensure thresholds are within valid range."""
-        if v < 0 or v > 100:
-            raise ValueError("Threshold must be between 0 and 100")
-        return v
-
-    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
-
-
-class ToleranceSettings(BaseSettings):
-    """Matching tolerance settings for price and quantity."""
-
-    TOLERANCE_PRICE: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        description="Price match tolerance percentage",
-    )
-    TOLERANCE_QTY: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        description="Quantity match tolerance percentage",
-    )
-
-    model_config = SettingsConfigDict(env_prefix="TOLERANCE_")
-
-
-class AppSettings(BaseSettings):
-    """General application settings."""
-
-    ENVIRONMENT: Literal["development", "staging", "production"] = Field(
-        default="development"
-    )
-    API_PORT: int = Field(default=8000, ge=1, le=65535)
-    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO"
-    )
-    API_V1_PREFIX: str = Field(default="/api/v1")
-    PROJECT_NAME: str = Field(default="AP Automation Engine")
-    PROJECT_VERSION: str = Field(default="0.1.0")
-
-    model_config = SettingsConfigDict(env_prefix="")
-
-
-class Settings(
-    DatabaseSettings,
-    JWTSettings,
-    ThresholdSettings,
-    ToleranceSettings,
-    AppSettings,
-):
-    """Combined application settings.
-
-    All settings are loaded from environment variables with appropriate
-    prefixes and validation applied.
-    """
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        case_sensitive=False,
         extra="ignore",
     )
+
+    # Application
+    app_name: str = "AP Automation Engine"
+    app_version: str = "0.1.0"
+    debug: bool = Field(default=False)
+
+    # Database
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        alias="DATABASE_URL",
+    )
+    database_echo: bool = Field(default=False)
+    database_pool_size: int = Field(default=20)
+    database_max_overflow: int = Field(default=10)
+
+    # PGBouncer (optional)
+    pgbouncer_host: Optional[str] = Field(default=None)
+    pgbouncer_port: int = Field(default=5432)
+
+    # JWT Authentication
+    jwt_secret_key: str = Field(
+        default="change-me-in-production",
+        alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_access_token_expire_minutes: int = Field(default=30)
+    jwt_refresh_token_expire_days: int = Field(default=7)
+
+    # Matching Thresholds
+    threshold_high: float = Field(
+        default=95.0,
+        description="Auto-approve threshold (percentage)",
+    )
+    threshold_mid: float = Field(
+        default=70.0,
+        description="1-click review threshold (percentage)",
+    )
+    threshold_low: float = Field(
+        default=40.0,
+        description="Exception threshold (percentage)",
+    )
+
+    # Matching Tolerances
+    tolerance_price: float = Field(
+        default=5.0,
+        description="Price match tolerance (percentage)",
+    )
+    tolerance_qty: float = Field(
+        default=10.0,
+        description="Quantity match tolerance (percentage)",
+    )
+
+    # API
+    api_v1_prefix: str = "/api/v1"
+    cors_origins: list[str] = Field(default=["*"])
+
+    # Logging
+    log_level: str = Field(default="INFO")
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance.
-
-    Returns:
-        Settings: The application settings singleton.
-
-    Note:
-        Uses lru_cache to ensure settings are only loaded once.
-    """
+    """Get cached settings instance."""
     return Settings()
+
+
+# Global settings instance
+settings = get_settings()

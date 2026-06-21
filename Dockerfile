@@ -1,42 +1,45 @@
 # Dockerfile
-FROM python:3.11-slim AS builder
-
-WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --prefix=/install -e .[dev]
-
 FROM python:3.11-slim
 
-WORKDIR /app
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
     curl \
+    build-essential \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /install /usr/local
+# Create non-root user
+RUN groupadd --gid 1000 appgroup \
+    && useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app && \
-    chown -R appuser:appuser /app
+# Set working directory
+WORKDIR /app
 
+# Install Python dependencies
+COPY --chown=appuser:appgroup pyproject.toml ./
+
+# Install dependencies as app user
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -e ".[dev]" \
+    && pip cache purge
+
+# Copy application code
+COPY --chown=appuser:appgroup . .
+
+# Switch to non-root user
 USER appuser
 
-COPY --chown=appuser:appuser . .
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
+# Expose port
 EXPOSE 8000
 
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

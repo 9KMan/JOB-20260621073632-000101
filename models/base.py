@@ -1,69 +1,61 @@
 # models/base.py
-"""SQLAlchemy declarative base configuration.
+"""SQLAlchemy declarative base."""
 
-All database models should inherit from this Base class.
-"""
-
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
-from sqlalchemy import DateTime, String, event
+from sqlalchemy import DateTime, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class.
+    """Base class for all database models."""
 
-    Provides common table arguments and automatic timestamp management.
-    """
+    type_annotation_map = {
+        uuid.UUID: StringUUID,
+    }
 
-    pass
+
+class StringUUID:
+    """Custom type for UUID columns that stores as string."""
+
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> str | None:
+        if value is None:
+            return value
+        return str(value)
+
+    def process_result_value(self, value: Any, dialect: Any) -> uuid.UUID | None:
+        if value is None:
+            return value
+        if isinstance(value, uuid.UUID):
+            return value
+        return uuid.UUID(value)
 
 
 class TimestampMixin:
-    """Mixin that adds created_at and updated_at timestamp columns."""
+    """Mixin for created_at and updated_at timestamps."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
 
-class UUIDMixin:
-    """Mixin that adds a UUID primary key."""
+class UUIDPrimaryKeyMixin:
+    """Mixin for UUID primary key."""
 
-    id: Mapped[str] = mapped_column(
-        String(36),
+    id: Mapped[uuid.UUID] = mapped_column(
+        StringUUID(),
         primary_key=True,
-        default=lambda: str(uuid4()),
-        nullable=False,
+        default=uuid.uuid4,
     )
-
-
-class SoftDeleteMixin:
-    """Mixin that adds soft delete functionality."""
-
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        default=None,
-        nullable=True,
-    )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-    )
-
-
-@event.listens_for(Base, "before_update", propagate=True)
-def set_updated_at(mapper: Any, connection: Any, target: Any) -> None:
-    """Automatically update the updated_at timestamp on modifications."""
-    if hasattr(target, "updated_at"):
-        target.updated_at = datetime.now(timezone.utc)
