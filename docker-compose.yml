@@ -1,4 +1,4 @@
-# docker-compose.yml
+// docker-compose.yml
 version: "3.9"
 
 services:
@@ -6,40 +6,39 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
     container_name: ap-automation-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appassword@postgres:5432/apautomation
-      - SYNC_DATABASE_URL=postgresql+psycopg2://apuser:appassword@postgres:5432/apautomation
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ap_automation
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=postgres
+      - DATABASE_NAME=ap_automation
       - PGBOUNCER_HOST=pgbouncer
       - PGBOUNCER_PORT=5432
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - REFRESH_TOKEN_EXPIRE_DAYS=7
       - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=70
+      - THRESHOLD_MID=75
       - THRESHOLD_LOW=50
-      - TOLERANCE_PRICE=5
-      - TOLERANCE_QTY=10
-      - LOG_LEVEL=INFO
+      - TOLERANCE_PRICE=5.0
+      - TOLERANCE_QTY=10.0
       - CORS_ORIGINS=http://localhost:3000,http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
-        condition: service_healthy
-    volumes:
-      - .:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    restart: unless-stopped
     networks:
       - ap-network
 
@@ -47,21 +46,19 @@ services:
     image: postgres:15-alpine
     container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appassword
-      - POSTGRES_DB=apautomation
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ap_automation
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ap_automation"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+    restart: unless-stopped
     networks:
       - ap-network
 
@@ -69,69 +66,55 @@ services:
     image: edoburu/pgbouncer:latest
     container_name: ap-automation-pgbouncer
     environment:
-      - DATABASE_URL=postgresql://apuser:appassword@postgres:5432/apautomation
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=postgres
+      - DATABASE_NAME=ap_automation
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
       - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=10
-      - SERVER_RESET_ON_RETURN=ROLLBACK
+      - RESERVE_POOL_SIZE=5
+      - SERVER_RESET_QUERY=DISCARD ALL
       - SERVER_CHECK_DELAY=30
-      - SERVER_LIFETIME=3600
-      - SERVER_IDLE_TIMEOUT=600
+      - SERVER_CHECK_QUERY=SELECT 1
     ports:
       - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U apuser -d apautomation || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -h pgbouncer -p 6432 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
       - ap-network
 
-  redis:
-    image: redis:7-alpine
-    container_name: ap-automation-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ap-network
-
-  alembic-migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: development
-    container_name: ap-automation-alembic
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ap-automation-pgadmin
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appassword@postgres:5432/apautomation
-      - SYNC_DATABASE_URL=postgresql+psycopg2://apuser:appassword@postgres:5432/apautomation
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+      - PGADMIN_LISTEN_PORT=5050
+    ports:
+      - "5050:5050"
     depends_on:
       postgres:
         condition: service_healthy
-    command: >
-      sh -c "alembic upgrade head"
+    restart: unless-stopped
     networks:
       - ap-network
+    profiles:
+      - dev
 
 volumes:
   postgres_data:
-    driver: local
-  redis_data:
     driver: local
 
 networks:
   ap-network:
     driver: bridge
-    name: ap-automation-network

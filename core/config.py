@@ -1,194 +1,15 @@
-# core/config.py
-"""
-Configuration management using pydantic-settings.
-
-All configuration is loaded from environment variables.
-Never hardcode secrets or connection strings.
-"""
+// core/config.py
+"""Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import List
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="DATABASE_",
-        case_sensitive=False,
-    )
-
-    url: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        description="Async database URL for SQLAlchemy async engine",
-    )
-
-    sync_url: str = Field(
-        default="postgresql+psycopg2://apuser:appassword@localhost:5432/apautomation",
-        description="Sync database URL for Alembic migrations",
-    )
-
-    pool_size: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="Connection pool size",
-    )
-
-    max_overflow: int = Field(
-        default=10,
-        ge=0,
-        le=50,
-        description="Maximum overflow connections",
-    )
-
-    pool_timeout: int = Field(
-        default=30,
-        ge=1,
-        description="Pool timeout in seconds",
-    )
-
-    pool_recycle: int = Field(
-        default=3600,
-        ge=0,
-        description="Pool recycle time in seconds (0 = never)",
-    )
-
-    echo: bool = Field(
-        default=False,
-        description="Echo SQL queries (for debugging)",
-    )
-
-    @field_validator("url", "sync_url", mode="before")
-    @classmethod
-    def validate_database_url(cls, v: str) -> str:
-        """Ensure database URL has proper scheme."""
-        if not v:
-            raise ValueError("Database URL cannot be empty")
-        return v
-
-
-class PgbouncerSettings(BaseSettings):
-    """PGBouncer connection settings (optional)."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="PGBOUNCER_",
-        case_sensitive=False,
-    )
-
-    host: str = Field(
-        default="localhost",
-        description="PGBouncer host",
-    )
-
-    port: int = Field(
-        default=5432,
-        ge=1,
-        le=65535,
-        description="PGBouncer port",
-    )
-
-
-class JWTSettings(BaseSettings):
-    """JWT authentication settings."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="JWT_",
-        case_sensitive=False,
-    )
-
-    secret_key: str = Field(
-        default="dev-secret-key-change-in-production-minimum-32-chars",
-        description="Secret key for JWT signing (HS256)",
-        min_length=32,
-    )
-
-    algorithm: Literal["HS256", "HS384", "HS512"] = Field(
-        default="HS256",
-        description="JWT algorithm",
-    )
-
-    access_token_expire_minutes: int = Field(
-        default=30,
-        ge=1,
-        le=1440,
-        description="Access token expiry in minutes",
-    )
-
-    refresh_token_expire_days: int = Field(
-        default=7,
-        ge=1,
-        le=30,
-        description="Refresh token expiry in days",
-    )
-
-
-class ThresholdSettings(BaseSettings):
-    """Matching threshold configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="THRESHOLD_",
-        case_sensitive=False,
-    )
-
-    high: int = Field(
-        default=95,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold (percentage)",
-    )
-
-    mid: int = Field(
-        default=70,
-        ge=0,
-        le=100,
-        description="One-click review threshold (percentage)",
-    )
-
-    low: int = Field(
-        default=50,
-        ge=0,
-        le=100,
-        description="Exception threshold (percentage)",
-    )
-
-    @field_validator("high", "mid", "low", mode="after")
-    @classmethod
-    def validate_threshold_order(cls, v: int, info) -> int:
-        """Ensure thresholds are in valid range."""
-        if not 0 <= v <= 100:
-            raise ValueError(f"{info.field_name} must be between 0 and 100")
-        return v
-
-
-class ToleranceSettings(BaseSettings):
-    """Matching tolerance configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="TOLERANCE_",
-        case_sensitive=False,
-    )
-
-    price: float = Field(
-        default=5.0,
-        ge=0.0,
-        le=100.0,
-        description="Price match tolerance percentage",
-    )
-
-    quantity: float = Field(
-        default=10.0,
-        ge=0.0,
-        le=100.0,
-        description="Quantity match tolerance percentage",
-    )
-
-
-class AppSettings(BaseSettings):
-    """Main application settings."""
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -198,106 +19,90 @@ class AppSettings(BaseSettings):
     )
 
     # Application
-    app_name: str = Field(
-        default="AP Automation Core Engine",
-        description="Application name",
+    app_name: str = Field(default="AP Automation Engine", alias="APP_NAME")
+    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
+    debug: bool = Field(default=False, alias="DEBUG")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    # Database
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/ap_automation",
+        alias="DATABASE_URL",
+    )
+    database_host: str = Field(default="localhost", alias="DATABASE_HOST")
+    database_port: int = Field(default=5432, alias="DATABASE_PORT")
+    database_user: str = Field(default="postgres", alias="DATABASE_USER")
+    database_password: str = Field(default="postgres", alias="DATABASE_PASSWORD")
+    database_name: str = Field(default="ap_automation", alias="DATABASE_NAME")
+
+    # PGBouncer
+    pgbouncer_host: str = Field(default="localhost", alias="PGBOUNCER_HOST")
+    pgbouncer_port: int = Field(default=5432, alias="PGBOUNCER_PORT")
+
+    # JWT Security
+    jwt_secret_key: str = Field(
+        default="supersecretkey-change-in-production",
+        alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(
+        default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
     )
 
-    app_version: str = Field(
-        default="0.1.0",
-        description="Application version",
-    )
+    # Matching Thresholds
+    threshold_high: int = Field(default=95, alias="THRESHOLD_HIGH")
+    threshold_mid: int = Field(default=75, alias="THRESHOLD_MID")
+    threshold_low: int = Field(default=50, alias="THRESHOLD_LOW")
 
-    debug: bool = Field(
-        default=False,
-        description="Debug mode",
-    )
-
-    environment: Literal["development", "staging", "production"] = Field(
-        default="development",
-        description="Runtime environment",
-    )
-
-    # Server
-    host: str = Field(
-        default="0.0.0.0",
-        description="Server host",
-    )
-
-    port: int = Field(
-        default=8000,
-        ge=1,
-        le=65535,
-        description="Server port",
-    )
+    # Tolerance Settings
+    tolerance_price: float = Field(default=5.0, alias="TOLERANCE_PRICE")
+    tolerance_qty: float = Field(default=10.0, alias="TOLERANCE_QTY")
 
     # CORS
-    cors_origins: list[str] = Field(
+    cors_origins: List[str] = Field(
         default=["http://localhost:3000", "http://localhost:8080"],
-        description="Allowed CORS origins",
+        alias="CORS_ORIGINS",
     )
 
-    cors_allow_credentials: bool = Field(
-        default=True,
-        description="Allow credentials in CORS",
-    )
+    @property
+    def sync_database_url(self) -> str:
+        """Get synchronous database URL for Alembic migrations."""
+        return self.database_url.replace("+asyncpg", "")
 
-    cors_allow_methods: list[str] = Field(
-        default=["*"],
-        description="Allowed CORS methods",
-    )
+    @property
+    def database_pool_size(self) -> int:
+        """Default pool size for database connections."""
+        return 20
 
-    cors_allow_headers: list[str] = Field(
-        default=["*"],
-        description="Allowed CORS headers",
-    )
+    @property
+    def database_max_overflow(self) -> int:
+        """Max overflow for database connections."""
+        return 10
 
-    # Logging
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO",
-        description="Logging level",
-    )
-
-    # Sub-settings
-    database: DatabaseSettings = Field(
-        default_factory=DatabaseSettings,
-        description="Database connection settings",
-    )
-
-    pgbouncer: PgbouncerSettings = Field(
-        default_factory=PgbouncerSettings,
-        description="PGBouncer connection settings",
-    )
-
-    jwt: JWTSettings = Field(
-        default_factory=JWTSettings,
-        description="JWT authentication settings",
-    )
-
-    threshold: ThresholdSettings = Field(
-        default_factory=ThresholdSettings,
-        description="Matching threshold configuration",
-    )
-
-    tolerance: ToleranceSettings = Field(
-        default_factory=ToleranceSettings,
-        description="Matching tolerance configuration",
-    )
+    def get_threshold_decision(self, score: float) -> str:
+        """Determine decision based on matching score.
+        
+        Args:
+            score: Matching score (0-100)
+            
+        Returns:
+            Decision: 'auto_approve', 'review', or 'exception'
+        """
+        if score >= self.threshold_high:
+            return "auto_approve"
+        elif score >= self.threshold_mid:
+            return "review"
+        elif score >= self.threshold_low:
+            return "exception"
+        else:
+            return "rejected"
 
 
-@lru_cache
-def get_settings() -> AppSettings:
-    """
-    Get cached application settings.
-    
-    Uses lru_cache to ensure settings are only loaded once
-    and reused across the application lifecycle.
-    
-    Returns:
-        AppSettings: The application settings instance.
-    """
-    return AppSettings()
+@lru_cache()
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()
 
 
-# Convenience alias
-Settings = AppSettings
+# Global settings instance
+settings = get_settings()

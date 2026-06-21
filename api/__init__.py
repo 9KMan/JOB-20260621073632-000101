@@ -1,4 +1,36 @@
 // api/__init__.py
-"""API routes and schemas for FinaRo AP Automation."""
+"""API module for the AP Automation Engine."""
 
-__all__ = ["routes", "schemas"]
+from api.schemas import (
+    InvoiceCreate,
+    InvoiceUpdate,
+    InvoiceResponse,
+    PurchaseOrderCreate,
+    PurchaseOrderResponse,
+    DeliveryNoteCreate,
+    DeliveryNoteResponse,
+    MatchingRequest,
+    MatchingResponse,
+    ExceptionResponse,
+    ExceptionResolveRequest,
+    BalanceResponse,
+    PaginatedResponse,
+    ErrorResponse,
+)
+
+__all__ = [
+    "InvoiceCreate",
+    "InvoiceUpdate",
+    "InvoiceResponse",
+    "PurchaseOrderCreate",
+    "PurchaseOrderResponse",
+    "DeliveryNoteCreate",
+    "DeliveryNoteResponse",
+    "MatchingRequest",
+    "MatchingResponse",
+    "ExceptionResponse",
+    "ExceptionResolveRequest",
+    "BalanceResponse",
+    "PaginatedResponse",
+    "ErrorResponse",
+]
