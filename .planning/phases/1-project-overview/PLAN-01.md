@@ -59,12 +59,6 @@ All matches route through a decision engine: CONFIRMED → AUTO-APPROVE, PENDING
 
 ---
 
-## 4. Files to Create
-
-docs/architecture.md
-
----
-
 ## 5. Phase Completion Criteria
 
 - [ ] Architecture overview written and accurate
