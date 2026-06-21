@@ -1,93 +1,100 @@
 # docker-compose.yml
-version: "3.9"
+version: '3.9'
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@db:5432/${POSTGRES_DB:-apautomation}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-90}
-      - THRESHOLD_MID=${THRESHOLD_MID:-70}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/finaro
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@db:5432/finaro
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DEBUG=false
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
     depends_on:
       db:
         condition: service_healthy
-      pgbouncer:
+      redis:
         condition: service_started
     volumes:
-      - .:/app
-    networks:
-      - ap-network
-    restart: unless-stopped
+      - ./src:/app/src
+      - ./api:/app/api
+      - ./models:/app/models
+      - ./services:/app/services
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
 
-  db:
-    image: postgres:15-alpine
-    container_name: ap-automation-db
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-apuser}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appassword}
-      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - ap-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  pgBouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
-    environment:
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - RESERVE_POOL_SIZE=10
-      - RESERVE_POOL_TIMEOUT=5
-      - MAX_DB_CONNECTIONS=50
-      - ADMIN_USERS=${POSTGRES_USER:-apuser}
-      - AUTH_TYPE=md5
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/finaro
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@db:5432/finaro
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - ap-network
-    restart: unless-stopped
+      redis:
+        condition: service_started
+    volumes:
+      - ./src:/app/src
+      - ./api:/app/api
+      - ./models:/app/models
+      - ./services:/app/services
+      - ./workers:/app/workers
+    command: celery -A workers.celery_app worker --loglevel=info
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finaro
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.io
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
 
 volumes:
   postgres_data:
-    driver: local
-
-networks:
-  ap-network:
-    driver: bridge
+  redis_data:

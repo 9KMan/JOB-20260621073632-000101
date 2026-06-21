@@ -1,2 +1,2 @@
-// api/routes/__init__.py
+# api/routes/__init__.py
 """API routes package."""

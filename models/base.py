@@ -1,67 +1,49 @@
 # models/base.py
-"""SQLAlchemy declarative base and mixins."""
+"""Base model with common fields."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.database import Base
 
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
+class BaseModel(Base):
+    """Base model with common fields for all tables."""
 
-    type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
-    }
-
-
-class TimestampMixin:
-    """Mixin that adds created_at and updated_at timestamp columns."""
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-
-class UUIDMixin:
-    """Mixin that adds a UUID primary key column."""
+    __abstract__ = True
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        index=True,
     )
 
-
-class SoftDeleteMixin:
-    """Mixin that adds soft delete functionality."""
-
-    deleted_at: Mapped[datetime | None] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        nullable=True,
-        default=None,
+        server_default=func.now(),
+        nullable=False,
     )
 
-    @property
-    def is_deleted(self) -> bool:
-        """Check if the record is soft deleted."""
-        return self.deleted_at is not None
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-    def soft_delete(self) -> None:
-        """Soft delete the record by setting deleted_at."""
-        self.deleted_at = datetime.now(timezone.utc)
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            column.name: getattr(self, column.name)
+            for column in self.__table__.columns
+        }
 
-    def restore(self) -> None:
-        """Restore a soft deleted record."""
-        self.deleted_at = None
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<{self.__class__.__name__}(id={self.id})>"

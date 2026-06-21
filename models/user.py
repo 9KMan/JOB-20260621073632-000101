@@ -1,26 +1,65 @@
-// models/user.py
-"""User model."""
+# models/user.py
+"""User model for authentication."""
 
-from sqlalchemy import Column, String, Boolean
-from sqlalchemy.orm import relationship
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from app.database import Base
+from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from models.base import BaseModel
 
+if TYPE_CHECKING:
+    pass
 
-class User(Base, BaseModel):
-    """User model for authentication."""
+
+class User(BaseModel):
+    """User model for authentication and authorization."""
 
     __tablename__ = "users"
 
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    username = Column(String(100), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_superuser = Column(Boolean, default=False, nullable=False)
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
 
-    # Relationships
-    purchase_orders = relationship("PurchaseOrder", back_populates="created_by_user")
-    invoices = relationship("Invoice", back_populates="created_by_user")
-    delivery_notes = relationship("DeliveryNote", back_populates="created_by_user")
+    hashed_password: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    full_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    is_superuser: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    last_login: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<User(email={self.email})>"

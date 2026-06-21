@@ -1,140 +1,101 @@
-// src/main.py
-"""
-FinaRo AP Automation Core Engine
-Main application entry point
-"""
-from fastapi import FastAPI, Request
+# src/main.py
+"""FastAPI application entry point."""
+
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import logging
-import time
+from structlog import get_logger
 
-from src.core.config import settings
-from src.core.database import engine, Base
-from src.api import auth, purchase_orders, invoices, delivery_notes, matching, users
-from src.models.base import BaseModel
+from api.routes import invoices, delivery_notes, purchase_orders, matches, auth
+from src.config import get_settings
+from src.database import close_db, init_db
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+settings = get_settings()
+logger = get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan events"""
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan manager."""
     # Startup
-    logger.info("Starting FinaRo AP Automation Core Engine...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created/verified")
+    logger.info(
+        "application_starting",
+        app_name=settings.app_name,
+        version=settings.app_version,
+    )
+    await init_db()
+    logger.info("database_initialized")
+
     yield
+
     # Shutdown
-    logger.info("Shutting down FinaRo AP Automation Core Engine...")
-    await engine.dispose()
+    logger.info("application_shutting_down")
+    await close_db()
+    logger.info("database_connections_closed")
 
 
-# Create FastAPI application
 app = FastAPI(
-    title="FinaRo AP Automation Core Engine",
-    description="3-Way Matching Engine (Invoice × Delivery Note × Purchase Order)",
-    version="1.0.0",
-    lifespan=lifespan,
+    title=settings.app_name,
+    version=settings.app_version,
+    description="FinaRo AP Automation Core Engine - 3-Way Matching Engine for Invoice, Delivery Note, and Purchase Order",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests"""
-    start_time = time.time()
-    
-    logger.info(f"Request: {request.method} {request.url.path}")
-    
-    try:
-        response = await call_next(request)
-        process_time = time.time() - start_time
-        response.headers["X-Process-Time"] = str(process_time)
-        logger.info(
-            f"Response: {request.method} {request.url.path} "
-            f"Status: {response.status_code} Time: {process_time:.3f}s"
-        )
-        return response
-    except Exception as e:
-        process_time = time.time() - start_time
-        logger.error(
-            f"Error: {request.method} {request.url.path} "
-            f"Error: {str(e)} Time: {process_time:.3f}s"
-        )
-        raise
-
-
-# Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions"""
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Global exception handler."""
+    logger.error(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        exc_type=type(exc).__name__,
+    )
     return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "error": str(exc) if settings.DEBUG else "An unexpected error occurred"
-        }
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
     )
 
 
-# Health check endpoint
 @app.get("/health", tags=["Health"])
-async def health_check():
-    """Health check endpoint for container orchestration"""
+async def health_check() -> dict:
+    """Health check endpoint."""
     return {
         "status": "healthy",
-        "service": "FinaRo AP Automation Core Engine",
-        "version": "1.0.0"
+        "app_name": settings.app_name,
+        "version": settings.app_version,
+    }
+
+
+@app.get("/", tags=["Root"])
+async def root() -> dict:
+    """Root endpoint."""
+    return {
+        "message": f"Welcome to {settings.app_name}",
+        "version": settings.app_version,
+        "docs": "/docs",
     }
 
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(purchase_orders.router, prefix="/api/v1/purchase-orders", tags=["Purchase Orders"])
 app.include_router(invoices.router, prefix="/api/v1/invoices", tags=["Invoices"])
 app.include_router(delivery_notes.router, prefix="/api/v1/delivery-notes", tags=["Delivery Notes"])
-app.include_router(matching.router, prefix="/api/v1/matching", tags=["Matching Engine"])
-
-
-# Root endpoint
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "name": "FinaRo AP Automation Core Engine",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health"
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matches"])

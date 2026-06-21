@@ -3,8 +3,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
 
 # Distribution / packaging
@@ -25,71 +23,52 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
-*.manifest
-*.spec
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# Unit test / coverage reports
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
 htmlcov/
 .tox/
 .nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-pytest_cache/
 
-# Translations
-*.mo
-*.pot
+# Database
+*.db
+*.sqlite3
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-.idea/
-.vscode/
-*.swp
-*.swo
+# Celery
+celerybeat-schedule
+celerybeat.pid
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyright
-.pyright/
-
-# Alembic
-alembic/
-versions/
-
-# Local development
+# Logs
 *.log
-*.pid
+logs/
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
+
+# Docker
+.docker/
+
+# Migration files (keep directory, remove contents)
+migrations/versions/*.pyc
 
 # Worker-internal files — NEVER push to GitHub
 PROPOSAL.md
