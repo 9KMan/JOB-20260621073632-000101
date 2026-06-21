@@ -1,10 +1,10 @@
 // src/app/config.py
 """Application configuration management."""
+
 import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,72 +14,63 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
+        case_sensitive=True,
         extra="ignore",
     )
 
     # Application
-    app_name: str = "FinaRo AP Automation"
-    app_version: str = "1.0.0"
-    debug: bool = Field(default=False, validation_alias="DEBUG")
-    environment: str = Field(default="development", validation_alias="ENVIRONMENT")
-
-    # API
-    api_v1_prefix: str = "/api/v1"
-    api_key_header: str = "X-API-Key"
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
 
     # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro",
-        validation_alias="DATABASE_URL",
-    )
-    database_pool_size: int = Field(default=20, validation_alias="DB_POOL_SIZE")
-    database_max_overflow: int = Field(default=10, validation_alias="DB_MAX_OVERFLOW")
-    database_pool_timeout: int = Field(default=30, validation_alias="DB_POOL_TIMEOUT")
+    DATABASE_URL: str = "postgresql+asyncpg://finaro:finaro_secret@localhost:5432/finaro"
+    DATABASE_POOL_SIZE: int = 5
+    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT: int = 30
+    DATABASE_POOL_RECYCLE: int = 3600
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # Authentication
-    jwt_secret_key: str = Field(
-        default="your-super-secret-key-change-in-production",
-        validation_alias="JWT_SECRET_KEY",
-    )
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = Field(
-        default=30, validation_alias="JWT_EXPIRE_MINUTES"
-    )
-    jwt_refresh_token_expire_days: int = Field(
-        default=7, validation_alias="JWT_REFRESH_DAYS"
-    )
-
-    # Password
-    bcrypt_rounds: int = Field(default=12, validation_alias="BCRYPT_ROUNDS")
+    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS
-    cors_origins: list[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
-        validation_alias="CORS_ORIGINS",
-    )
-    cors_allow_credentials: bool = True
-    cors_allow_methods: list[str] = ["*"]
-    cors_allow_headers: list[str] = ["*"]
+    CORS_ORIGINS: list[str] = ["*"]
+
+    # API
+    API_V1_PREFIX: str = "/api/v1"
 
     # Matching Engine Weights
-    matching_line_weight: float = 0.70
-    matching_amount_weight: float = 0.20
-    matching_date_weight: float = 0.10
+    MATCHING_LINE_WEIGHT: float = 0.70
+    MATCHING_AMOUNT_WEIGHT: float = 0.20
+    MATCHING_DATE_WEIGHT: float = 0.10
 
-    # Auto-approval threshold
-    auto_approve_threshold: float = 0.95
-    pending_review_threshold: float = 0.70
+    # Matching Thresholds
+    MATCHING_AUTO_APPROVE_THRESHOLD: float = 0.95
+    MATCHING_HUMAN_REVIEW_THRESHOLD: float = 0.70
 
-    # Pagination
-    default_page_size: int = 20
-    max_page_size: int = 100
+    @property
+    def sync_database_url(self) -> str:
+        """Convert async database URL to sync version."""
+        return self.DATABASE_URL.replace("+asyncpg", "").replace("+asyncpg", "")
+
+    def get_database_config(self) -> dict:
+        """Get SQLAlchemy database configuration."""
+        return {
+            "pool_size": self.DATABASE_POOL_SIZE,
+            "max_overflow": self.DATABASE_MAX_OVERFLOW,
+            "pool_timeout": self.DATABASE_POOL_TIMEOUT,
+            "pool_recycle": self.DATABASE_POOL_RECYCLE,
+            "echo": self.DEBUG,
+        }
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
-
-
-settings = get_settings()

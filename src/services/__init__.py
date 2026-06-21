@@ -1,16 +1,14 @@
 // src/services/__init__.py
-"""Business logic services package."""
+"""Business logic services for FinaRo AP Automation."""
 
-from app.services.auth import AuthService
-from app.services.anchoring import AnchoringService
-from app.services.cascade_matching import CascadeMatchingService
-from app.services.balance_resolution import BalanceResolutionService
-from app.services.decision_engine import DecisionEngine
+from src.services.auth import AuthService
+from src.services.matching import MatchingService
+from src.services.balance import BalanceService
+from src.services.document import DocumentService
 
 __all__ = [
     "AuthService",
-    "AnchoringService",
-    "CascadeMatchingService",
-    "BalanceResolutionService",
-    "DecisionEngine",
+    "MatchingService",
+    "BalanceService",
+    "DocumentService",
 ]

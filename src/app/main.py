@@ -1,40 +1,69 @@
 // src/app/main.py
-"""FastAPI application entry point for FinaRo AP Automation Engine."""
+"""FastAPI application entry point for FinaRo AP Automation."""
 
+import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import auth, invoices, delivery_notes, purchase_orders, matching
-from app.config import settings
-from app.database import engine, Base
+from src.app.config import get_settings
+from src.api import api_router
+from src.database import engine, Base
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan handler for startup and shutdown events."""
-    # Startup: Create database tables
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup and shutdown."""
+    # Startup
+    logger.info("Starting FinaRo AP Automation Engine...")
+    
+    # Create database tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    logger.info("Database initialized successfully")
+    
     yield
-    # Shutdown: Dispose connection pool
+    
+    # Shutdown
+    logger.info("Shutting down FinaRo AP Automation Engine...")
     await engine.dispose()
+    logger.info("Database connections closed")
 
 
+# Create FastAPI application
 app = FastAPI(
-    title="FinaRo AP Automation Engine",
-    description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
-    version="1.0.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="""
+    ## FinaRo AP Automation Core Engine
+    
+    A 3-Way Matching Engine for Invoice × Delivery Note × Purchase Order reconciliation.
+    
+    ### Features
+    - **Layer 1 - Anchoring**: Uses PO as single source of truth
+    - **Layer 2 - Cascade Matching**: Multi-directional document matching
+    - **Layer 3 - Balance Resolution**: Partial matches and balance tracking
+    - **Decision Routing**: Auto-approve, Human review, or Dispute workflow
+    """,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
 )
 
-# CORS middleware
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -44,24 +73,51 @@ app.add_middleware(
 )
 
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests."""
+    logger.info(f"Request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    logger.info(f"Response: {response.status_code}")
+    return response
+
+
+# Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler for unhandled errors."""
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions globally."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "message": str(exc)},
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "An internal server error occurred",
+            "type": type(exc).__name__,
+        },
     )
 
 
-# Include routers with prefix
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-app.include_router(purchase_orders.router, prefix="/api/v1/purchase-orders", tags=["Purchase Orders"])
-app.include_router(invoices.router, prefix="/api/v1/invoices", tags=["Invoices"])
-app.include_router(delivery_notes.router, prefix="/api/v1/delivery-notes", tags=["Delivery Notes"])
-app.include_router(matching.router, prefix="/api/v1/matching", tags=["Matching"])
+# Include API router
+app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
-@app.get("/api/health")
-async def health_check() -> dict:
-    """Health check endpoint."""
-    return {"status": "healthy", "version": "1.0.0"}
+# Health check endpoint
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """Health check endpoint for monitoring."""
+    return {
+        "status": "healthy",
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+    }
+
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "docs": "/docs",
+        "health": "/health",
+    }

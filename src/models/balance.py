@@ -1,87 +1,166 @@
 // src/models/balance.py
-"""Balance tracking models for partial matches and split scenarios."""
+// src/models/balance.py
+"""Balance Ledger model for tracking balances across matched documents."""
 
-from datetime import datetime
+from datetime import date
 from decimal import Decimal
+from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Numeric, Integer, ForeignKey, Index
+from sqlalchemy import (
+    Date,
+    Enum as SQLEnum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+)
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models.base import BaseModel
+from src.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.purchase_order import PurchaseOrderLine
-    from app.models.invoice import InvoiceLine
-    from app.models.delivery_note import DeliveryNoteLine
+    from src.models.purchase_order import PurchaseOrder
+    from src.models.invoice import Invoice
+    from src.models.delivery_note import DeliveryNote
 
 
-class BalanceLedger(Base, BaseModel):
-    """Balance ledger for tracking outstanding amounts across documents."""
+class BalanceType(str, Enum):
+    """Balance type enumeration."""
 
-    __tablename__ = "balance_ledgers"
-    __table_args__ = (
-        Index("ix_bl_document_type_document_id", "document_type", "document_id"),
-        Index("ix_bl_po_line_id", "po_line_id"),
+    PO_OPEN = "po_open"
+    PO_INVOICED = "po_invoiced"
+    PO_DELIVERED = "po_delivered"
+    PO_BILLED = "po_billed"
+    INVOICE_OPEN = "invoice_open"
+    INVOICE_MATCHED = "invoice_matched"
+    INVOICE_PAID = "invoice_paid"
+    DELIVERY_OPEN = "delivery_open"
+    DELIVERY_RECEIVED = "delivery_received"
+
+
+class TransactionType(str, Enum):
+    """Transaction type for balance ledger."""
+
+    INITIAL = "initial"
+    MATCH = "match"
+    PARTIAL_MATCH = "partial_match"
+    REVERSE = "reverse"
+    ADJUSTMENT = "adjustment"
+    PAYMENT = "payment"
+
+
+class BalanceLedger(BaseModel):
+    """Balance Ledger model for tracking balances across all document types."""
+
+    __tablename__ = "balance_ledger"
+
+    # Document references
+    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    match_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("matches.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
-    document_type: Mapped[str] = mapped_column(String(20), nullable=False)  # INVOICE, DELIVERY_NOTE
-    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    po_line_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("purchase_order_lines.id"), nullable=True)
+    # Balance type
+    balance_type: Mapped[BalanceType] = mapped_column(
+        SQLEnum(BalanceType, name="balance_type"),
+        nullable=False,
+    )
+
+    # Transaction info
+    transaction_type: Mapped[TransactionType] = mapped_column(
+        SQLEnum(TransactionType, name="transaction_type"),
+        nullable=False,
+    )
+    transaction_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    reference_number: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
 
     # Amount tracking
-    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    matched_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    remaining_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    previous_balance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    transaction_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    current_balance: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
 
-    # Quantity tracking
-    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    matched_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
-    remaining_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    # Line-level tracking
+    line_number: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+    )
+    sku: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 3),
+        nullable=True,
+    )
 
-    status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False)  # OPEN, PARTIAL, CLOSED
-    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # Metadata
+    description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
 
     # Relationships
-    po_line: Mapped[Optional["PurchaseOrderLine"]] = relationship("PurchaseOrderLine")
-    entries: Mapped[list["BalanceEntry"]] = relationship(
-        "BalanceEntry",
-        back_populates="ledger",
-        cascade="all, delete-orphan",
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[purchase_order_id],
+        back_populates="balance_entries",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_bl_po_id", "purchase_order_id"),
+        Index("ix_bl_invoice_id", "invoice_id"),
+        Index("ix_bl_dn_id", "delivery_note_id"),
+        Index("ix_bl_match_id", "match_id"),
+        Index("ix_bl_balance_type", "balance_type"),
+        Index("ix_bl_transaction_date", "transaction_date"),
+        Index("ix_bl_sku", "sku"),
     )
 
     def __repr__(self) -> str:
-        return f"<BalanceLedger {self.document_type}:{self.document_id}>"
+        return f"<BalanceLedger type={self.balance_type} amount={self.current_balance}>"
 
     @property
     def is_balanced(self) -> bool:
-        """Check if ledger is fully balanced."""
-        return self.remaining_amount == Decimal("0.00") and self.remaining_quantity == Decimal("0.00")
+        """Check if this balance entry represents a balanced state."""
+        return self.current_balance == Decimal("0.00")
 
 
-class BalanceEntry(Base, BaseModel):
-    """Individual balance entry for tracking match history."""
-
-    __tablename__ = "balance_entries"
-    __table_args__ = (
-        Index("ix_be_ledger_id", "ledger_id"),
-        Index("ix_be_match_id", "match_id"),
-    )
-
-    ledger_id: Mapped[str] = mapped_column(String(36), ForeignKey("balance_ledgers.id", ondelete="CASCADE"), nullable=False)
-    match_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-
-    # Entry details
-    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)  # MATCH, REVERSAL, ADJUSTMENT
-    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    balance_before: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    balance_after: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-
-    # Relationships
-    ledger: Mapped["BalanceLedger"] = relationship("BalanceLedger", back_populates="entries")
-
-    def __repr__(self) -> str:
-        return f"<BalanceEntry {self.entry_type}: {self.amount}>"
+import uuid

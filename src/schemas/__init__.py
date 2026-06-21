@@ -1,105 +1,95 @@
-# src/schemas/__init__.py
-"""Pydantic schemas package."""
-from src.schemas.user import UserCreate, UserUpdate, UserInDB, UserResponse
+// src/schemas/__init__.py
+"""Pydantic schemas for API request/response validation."""
+
+from src.schemas.base import BaseSchema, PaginationParams
+from src.schemas.user import (
+    UserCreate,
+    UserUpdate,
+    UserResponse,
+    UserLogin,
+    Token,
+    TokenData,
+)
+from src.schemas.supplier import (
+    SupplierCreate,
+    SupplierUpdate,
+    SupplierResponse,
+)
 from src.schemas.purchase_order import (
     PurchaseOrderCreate,
     PurchaseOrderUpdate,
-    PurchaseOrderInDB,
     PurchaseOrderResponse,
     PurchaseOrderLineCreate,
     PurchaseOrderLineUpdate,
-    PurchaseOrderLineInDB,
     PurchaseOrderLineResponse,
 )
 from src.schemas.invoice import (
     InvoiceCreate,
     InvoiceUpdate,
-    InvoiceInDB,
     InvoiceResponse,
     InvoiceLineCreate,
     InvoiceLineUpdate,
-    InvoiceLineInDB,
     InvoiceLineResponse,
 )
 from src.schemas.delivery_note import (
     DeliveryNoteCreate,
     DeliveryNoteUpdate,
-    DeliveryNoteInDB,
     DeliveryNoteResponse,
     DeliveryNoteLineCreate,
     DeliveryNoteLineUpdate,
-    DeliveryNoteLineInDB,
     DeliveryNoteLineResponse,
 )
-from src.schemas.matching import (
-    MatchingRecordCreate,
-    MatchingRecordUpdate,
-    MatchingRecordInDB,
-    MatchingRecordResponse,
-    MatchingLineCreate,
-    MatchingLineUpdate,
-    MatchingLineInDB,
-    MatchingLineResponse,
+from src.schemas.match import (
+    MatchCreate,
+    MatchUpdate,
+    MatchResponse,
+    MatchLineResponse,
+    MatchDecision,
+    MatchingResult,
 )
-from src.schemas.balance_ledger import (
+from src.schemas.balance import (
     BalanceLedgerCreate,
-    BalanceLedgerUpdate,
-    BalanceLedgerInDB,
     BalanceLedgerResponse,
+    BalanceSummary,
 )
-from src.schemas.common import Token, TokenData, Message, PaginationParams, PaginatedResponse
 
 __all__ = [
-    # User
+    "BaseSchema",
+    "PaginationParams",
     "UserCreate",
     "UserUpdate",
-    "UserInDB",
     "UserResponse",
-    # Purchase Order
+    "UserLogin",
+    "Token",
+    "TokenData",
+    "SupplierCreate",
+    "SupplierUpdate",
+    "SupplierResponse",
     "PurchaseOrderCreate",
     "PurchaseOrderUpdate",
-    "PurchaseOrderInDB",
     "PurchaseOrderResponse",
     "PurchaseOrderLineCreate",
     "PurchaseOrderLineUpdate",
-    "PurchaseOrderLineInDB",
     "PurchaseOrderLineResponse",
-    # Invoice
     "InvoiceCreate",
     "InvoiceUpdate",
-    "InvoiceInDB",
     "InvoiceResponse",
     "InvoiceLineCreate",
     "InvoiceLineUpdate",
-    "InvoiceLineInDB",
     "InvoiceLineResponse",
-    # Delivery Note
     "DeliveryNoteCreate",
     "DeliveryNoteUpdate",
-    "DeliveryNoteInDB",
     "DeliveryNoteResponse",
     "DeliveryNoteLineCreate",
     "DeliveryNoteLineUpdate",
-    "DeliveryNoteLineInDB",
     "DeliveryNoteLineResponse",
-    # Matching
-    "MatchingRecordCreate",
-    "MatchingRecordUpdate",
-    "MatchingRecordInDB",
-    "MatchingRecordResponse",
-    "MatchingLineCreate",
-    "MatchingLineUpdate",
-    "MatchingLineInDB",
-    "MatchingLineResponse",
-    # Balance Ledger
+    "MatchCreate",
+    "MatchUpdate",
+    "MatchResponse",
+    "MatchLineResponse",
+    "MatchDecision",
+    "MatchingResult",
     "BalanceLedgerCreate",
-    "BalanceLedgerUpdate",
-    "BalanceLedgerInDB",
     "BalanceLedgerResponse",
-    # Common
-    "Token",
-    "TokenData",
-    "Message",
-    "PaginationParams",
-    "PaginatedResponse",
+    "BalanceSummary",
 ]

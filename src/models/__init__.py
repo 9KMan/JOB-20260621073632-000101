@@ -1,17 +1,23 @@
 // src/models/__init__.py
-"""SQLAlchemy models package."""
+"""SQLAlchemy models for FinaRo AP Automation."""
 
-from app.models.base import BaseModel
-from app.models.user import User
-from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from app.models.invoice import Invoice, InvoiceLine
-from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.models.matching import Match, MatchLine, MatchDecision
-from app.models.balance import BalanceLedger, BalanceEntry
+from src.models.base import BaseModel, UUIDMixin, TimestampMixin, SoftDeleteMixin
+from src.models.user import User
+from src.models.supplier import Supplier
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from src.models.invoice import Invoice, InvoiceLine
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from src.models.match import Match, MatchLine
+from src.models.balance import BalanceLedger
+from src.models.audit_log import AuditLog
 
 __all__ = [
     "BaseModel",
+    "UUIDMixin",
+    "TimestampMixin",
+    "SoftDeleteMixin",
     "User",
+    "Supplier",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "Invoice",
@@ -20,7 +26,6 @@ __all__ = [
     "DeliveryNoteLine",
     "Match",
     "MatchLine",
-    "MatchDecision",
     "BalanceLedger",
-    "BalanceEntry",
+    "AuditLog",
 ]

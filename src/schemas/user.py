@@ -1,57 +1,68 @@
-# src/schemas/user.py
-"""User schemas."""
+// src/schemas/user.py
+"""User-related Pydantic schemas."""
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from src.schemas.base import BaseSchema, TimestampMixin
 
 
-class UserBase(BaseModel):
+class UserBase(BaseSchema):
     """Base user schema."""
+
     email: EmailStr
-    full_name: Optional[str] = None
-    role: str = "user"
+    username: str = Field(min_length=3, max_length=100)
+    full_name: Optional[str] = Field(default=None, max_length=255)
 
 
 class UserCreate(UserBase):
-    """User creation schema."""
+    """Schema for creating a new user."""
+
     password: str = Field(min_length=8, max_length=100)
+    is_superuser: bool = False
 
 
-class UserUpdate(BaseModel):
-    """User update schema."""
+class UserUpdate(BaseSchema):
+    """Schema for updating a user."""
+
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
-    role: Optional[str] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    full_name: Optional[str] = Field(default=None, max_length=255)
     password: Optional[str] = Field(default=None, min_length=8, max_length=100)
     is_active: Optional[bool] = None
 
 
-class UserInDB(UserBase):
-    """User database schema."""
-    id: UUID
-    hashed_password: str
-    is_active: bool
-    is_superuser: bool
-    created_at: datetime
-    updated_at: datetime
+class UserResponse(UserBase, TimestampMixin):
+    """Schema for user response."""
 
     model_config = ConfigDict(from_attributes=True)
 
-
-class UserResponse(UserBase):
-    """User response schema."""
     id: UUID
     is_active: bool
     is_superuser: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 
-class UserLogin(BaseModel):
-    """User login schema."""
-    email: EmailStr
+class UserLogin(BaseSchema):
+    """Schema for user login."""
+
+    username: str
     password: str
+
+
+class Token(BaseSchema):
+    """Schema for JWT token response."""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class TokenData(BaseSchema):
+    """Schema for token payload data."""
+
+    sub: Optional[str] = None
+    exp: Optional[datetime] = None
+    type: str = "access"

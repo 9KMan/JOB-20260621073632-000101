@@ -1,78 +1,84 @@
 // src/schemas/balance.py
-"""Balance schemas for tracking partial matches."""
-from datetime import datetime
+"""Balance Ledger-related Pydantic schemas."""
+
+from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.schemas.common import BaseSchema, PaginatedResponse
+from src.schemas.base import BaseSchema, TimestampMixin
 
 
-class BalanceBase(BaseSchema):
-    """Base schema for Balances."""
+class BalanceLedgerBase(BaseSchema):
+    """Base balance ledger schema."""
 
-    purchase_order_id: UUID
+    balance_type: str
+    transaction_type: str
+    transaction_date: date
+    reference_number: Optional[str] = None
+    original_amount: Decimal
+    previous_balance: Decimal = Decimal("0.00")
+    transaction_amount: Decimal
+    current_balance: Decimal
+    line_number: Optional[int] = None
+    sku: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    description: Optional[str] = None
+
+
+class BalanceLedgerCreate(BalanceLedgerBase):
+    """Schema for creating a balance ledger entry."""
+
+    purchase_order_id: Optional[UUID] = None
     invoice_id: Optional[UUID] = None
     delivery_note_id: Optional[UUID] = None
-    balance_type: str = Field(..., max_length=20)
-    direction: str = Field(..., max_length=30)
-    product_code: Optional[str] = Field(None, max_length=100)
-    po_quantity: Decimal = Field(default=Decimal("0"), ge=0)
-    matched_quantity: Decimal = Field(default=Decimal("0"), ge=0)
-    remaining_quantity: Decimal = Field(default=Decimal("0"), ge=0)
-    po_amount: Decimal = Field(default=Decimal("0"), ge=0)
-    matched_amount: Decimal = Field(default=Decimal("0"), ge=0)
-    remaining_amount: Decimal = Field(default=Decimal("0"), ge=0)
-    is_resolved: bool = Field(default=False)
-    resolved_at: Optional[UUID] = None
-    notes: Optional[str] = Field(None, max_length=500)
+    match_id: Optional[UUID] = None
 
 
-class BalanceCreate(BalanceBase):
-    """Schema for creating Balances."""
-
-    pass
-
-
-class BalanceUpdate(BaseSchema):
-    """Schema for updating Balances."""
-
-    matched_quantity: Optional[Decimal] = Field(None, ge=0)
-    remaining_quantity: Optional[Decimal] = Field(None, ge=0)
-    matched_amount: Optional[Decimal] = Field(None, ge=0)
-    remaining_amount: Optional[Decimal] = Field(None, ge=0)
-    is_resolved: Optional[bool] = None
-    resolved_at: Optional[UUID] = None
-    notes: Optional[str] = Field(None, max_length=500)
-
-
-class BalanceResponse(BalanceBase):
-    """Schema for Balance responses."""
+class BalanceLedgerResponse(BalanceLedgerBase, TimestampMixin):
+    """Schema for balance ledger response."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    created_at: datetime
-    updated_at: datetime
-
-
-class BalanceListResponse(PaginatedResponse[BalanceResponse]):
-    """Schema for paginated Balance list response."""
-
-    pass
+    purchase_order_id: Optional[UUID] = None
+    invoice_id: Optional[UUID] = None
+    delivery_note_id: Optional[UUID] = None
+    match_id: Optional[UUID] = None
 
 
 class BalanceSummary(BaseSchema):
-    """Schema for Balance summary (minimal data)."""
+    """Schema for balance summary."""
 
-    model_config = ConfigDict(from_attributes=True)
+    po_open_balance: Decimal
+    po_invoiced_balance: Decimal
+    po_delivered_balance: Decimal
+    invoice_open_balance: Decimal
+    invoice_matched_balance: Decimal
+    invoice_paid_balance: Decimal
+    total_po_balance: Decimal
+    total_invoice_balance: Decimal
 
-    id: UUID
-    purchase_order_id: UUID
-    balance_type: str
-    direction: str
-    remaining_quantity: Decimal
-    remaining_amount: Decimal
-    is_resolved: bool
+
+class BalanceBySupplier(BaseSchema):
+    """Schema for balance breakdown by supplier."""
+
+    supplier_id: UUID
+    supplier_code: str
+    supplier_name: str
+    po_open_balance: Decimal
+    invoice_open_balance: Decimal
+    variance: Decimal
+
+
+class TransactionHistory(BaseSchema):
+    """Schema for transaction history."""
+
+    date: date
+    transaction_type: str
+    reference_number: Optional[str] = None
+    description: Optional[str] = None
+    amount: Decimal
+    balance_after: Decimal

@@ -1,126 +1,62 @@
-# docker-compose.yml
-version: "3.9"
+version: '3.8'
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://apuser:appassword@db:5432/apautomation
-      - PGBOUNCER_HOST=pgbouncer
-      - PGBOUNCER_PORT=5432
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=70
-      - THRESHOLD_LOW=40
-      - TOLERANCE_PRICE=5
-      - TOLERANCE_QTY=10
-      - LOG_LEVEL=INFO
-      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://finaro:finaro_secret@db:5432/finaro
+      - REDIS_URL=redis://cache:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
     depends_on:
       db:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
+      cache:
+        condition: service_started
     volumes:
-      - ./:/app
-    networks:
-      - ap-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - ./src:/app/src
+    command: uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
 
   db:
     image: postgres:15-alpine
-    container_name: ap-automation-db
     environment:
-      - POSTGRES_USER=apuser
-      - POSTGRES_PASSWORD=appassword
-      - POSTGRES_DB=apautomation
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+      - POSTGRES_USER=finaro
+      - POSTGRES_PASSWORD=finaro_secret
+      - POSTGRES_DB=finaro
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - ap-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U finaro"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    restart: unless-stopped
 
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
-    environment:
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=apautomation
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - RESERVE_POOL_SIZE=5
-      - RESERVE_POOL_TIMEOUT=3
-      - USER_LIST_FILE=/etc/pgbouncer/userlist.txt
-      - AUTH_TYPE=md5
+  cache:
+    image: redis:7-alpine
     ports:
-      - "6432:5432"
+      - "6379:6379"
     volumes:
-      - pgbouncer_config:/etc/pgbouncer
-      - pgbouncer_logs:/var/log/pgbouncer
-    networks:
-      - ap-network
+      - redis_data:/data
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://finaro:finaro_secret@db:5432/finaro
     depends_on:
       db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo show version | nc localhost 5432 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ap-automation-pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@apautomation.local
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-      - PGADMIN_CONFIG_SERVER_MODE=False
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - ap-network
-    depends_on:
-      - db
-    restart: unless-stopped
+    command: alembic upgrade head
+    restart: "no"
 
 volumes:
   postgres_data:
-    driver: local
-  pgbouncer_config:
-    driver: local
-  pgbouncer_logs:
-    driver: local
-  pgadmin_data:
-    driver: local
-
-networks:
-  ap-network:
-    driver: bridge
-    name: ap-automation-network
+  redis_data:
