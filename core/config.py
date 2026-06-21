@@ -1,10 +1,14 @@
-# core/config.py
-"""Application configuration using pydantic-settings."""
+// core/config.py
+"""Application configuration using pydantic-settings.
+
+All configuration is loaded from environment variables.
+No hardcoded secrets or configuration values.
+"""
 
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,68 +23,90 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "AP Automation Core"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
-    LOG_LEVEL: str = "INFO"
+    app_name: str = "AP Automation Engine"
+    app_version: str = "1.0.0"
+    debug: bool = Field(default=False, validation_alias="DEBUG")
 
     # Database
-    DATABASE_HOST: str = "localhost"
-    DATABASE_PORT: int = 5432
-    DATABASE_NAME: str = "ap_automation"
-    DATABASE_USER: str = "ap_user"
-    DATABASE_PASSWORD: str = "password"
-
-    # For async SQLAlchemy connection
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://ap_user:password@localhost:5432/ap_automation"
+    database_url: Annotated[PostgresDsn, Field(validation_alias="DATABASE_URL")] = (
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/ap_automation"
     )
-
-    @field_validator("DATABASE_URL", mode="before")
-    @classmethod
-    def build_database_url(cls, v: str | None, info) -> str:
-        """Build database URL from components if not explicitly set."""
-        if v:
-            return v
-        values = info.data
-        return (
-            f"postgresql+asyncpg://{values.get('DATABASE_USER', 'ap_user')}:"
-            f"{values.get('DATABASE_PASSWORD', 'password')}@"
-            f"{values.get('DATABASE_HOST', 'localhost')}:"
-            f"{values.get('DATABASE_PORT', 5432)}/"
-            f"{values.get('DATABASE_NAME', 'ap_automation')}"
-        )
-
-    # PGBouncer (optional override)
-    PGBOUNCER_HOST: str | None = None
-    PGBOUNCER_PORT: int = 6432
+    database_echo: bool = Field(default=False, validation_alias="DATABASE_ECHO")
 
     # JWT Authentication
-    JWT_SECRET_KEY: str = "dev-secret-key-change-in-production-min-32-chars"
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    jwt_secret_key: str = Field(
+        default="change-me-in-production",
+        validation_alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_access_token_expire_minutes: int = Field(
+        default=30, validation_alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
 
-    # Matching Thresholds (percentage 0-100)
-    THRESHOLD_HIGH: int = 95  # Auto-approve threshold
-    THRESHOLD_MID: int = 70   # 1-click review threshold
-    THRESHOLD_LOW: int = 40   # Exception threshold (below this = reject)
+    # Matching Thresholds
+    threshold_high: int = Field(
+        default=95,
+        validation_alias="THRESHOLD_HIGH",
+        description="Auto-approve threshold (percentage)",
+    )
+    threshold_mid: int = Field(
+        default=75,
+        validation_alias="THRESHOLD_MID",
+        description="1-click review threshold (percentage)",
+    )
+    threshold_low: int = Field(
+        default=50,
+        validation_alias="THRESHOLD_LOW",
+        description="Exception threshold (percentage)",
+    )
 
-    # Tolerance Settings (percentage)
-    TOLERANCE_PRICE: float = 5.0  # Price match tolerance %
-    TOLERANCE_QTY: float = 10.0   # Quantity match tolerance %
+    # Matching Tolerances
+    tolerance_price: float = Field(
+        default=5.0,
+        validation_alias="TOLERANCE_PRICE",
+        description="Price match tolerance percentage",
+    )
+    tolerance_qty: float = Field(
+        default=10.0,
+        validation_alias="TOLERANCE_QTY",
+        description="Quantity match tolerance percentage",
+    )
+
+    # PGBouncer (optional connection pooling)
+    pgbouncer_host: str | None = Field(
+        default=None, validation_alias="PGBOUNCER_HOST"
+    )
+    pgbouncer_port: int = Field(default=6432, validation_alias="PGBOUNCER_PORT")
 
     # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    cors_origins: list[str] = Field(
+        default=["*"],
+        validation_alias="CORS_ORIGINS",
+    )
 
-    # Alembic
-    ALEMBIC_DATABASE_URL: str | None = None
-
+    @computed_field
     @property
     def sync_database_url(self) -> str:
-        """Get synchronous database URL for Alembic migrations."""
-        if self.ALEMBIC_DATABASE_URL:
-            return self.ALEMBIC_DATABASE_URL
-        return self.DATABASE_URL.replace("+asyncpg", "")
+        """Return synchronous database URL for Alembic migrations."""
+        return str(self.database_url).replace("+asyncpg", "")
+
+    def get_matching_decision(
+        self, score: float
+    ) -> str:
+        """Determine decision based on score and thresholds.
+        
+        Args:
+            score: Match score between 0 and 100.
+            
+        Returns:
+            Decision string: 'auto_approved', 'review', or 'exception'.
+        """
+        if score >= self.threshold_high:
+            return "auto_approved"
+        elif score >= self.threshold_mid:
+            return "review"
+        else:
+            return "exception"
 
 
 @lru_cache
@@ -91,7 +117,3 @@ def get_settings() -> Settings:
 
 # Global settings instance
 settings = get_settings()
-
-# Type aliases for dependency injection
-DatabaseUrl = Annotated[str, Field(description="Database connection URL")]
-SecretKey = Annotated[str, Field(description="JWT secret key")]

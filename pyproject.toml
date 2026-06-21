@@ -1,40 +1,37 @@
-# pyproject.toml
+// pyproject.toml
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ap-automation-core"
+name = "ap-automation-engine"
 version = "1.0.0"
-description = "AP Automation Core Engine for Finaro"
+description = "AP Automation Core Engine for FinaRo"
 readme = "README.md"
-license = {text = "PROPRIETARY"}
 requires-python = ">=3.11"
+license = { text = "Proprietary" }
 authors = [
-    {name = "Finaro Engineering", email = "engineering@finaro.com"}
+    { name = "FinaRo", email = "dev@finaro.com" }
 ]
-keywords = ["ap", "automation", "invoice", "matching", "erp"]
+keywords = ["accounts-payable", "automation", "invoice-matching", "fastapi"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Framework :: FastAPI",
 ]
 
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.30",
+    "sqlalchemy[asyncio]>=2.0.29",
     "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
+    "alembic>=1.13.1",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
     "httpx>=0.27.0",
     "greenlet>=3.0.0",
 ]
@@ -45,47 +42,34 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
-    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
-    "pre-commit>=3.7.0",
+    "types-python-jose>=3.3.0",
 ]
-
-[project.urls]
-Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
-Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*", "core*", "models*", "services*", "workers*", "migrations*"]
+include = ["api*", "core*", "models*", "services*", "workers*"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # Pyflakes
-    "I",   # isort
-    "C",   # flake8-comprehensions
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-]
-ignore = [
-    "E501",  # line too long (handled by formatter)
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
-]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["B011", "S101"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+warn_return_any = true
 warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -96,14 +80,13 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["api", "core", "models", "services", "workers"]
-omit = ["*/tests/*", "*/migrations/*", "*/__init__.py"]
+source = ["api", "core", "models", "services"]
+omit = ["tests/*", "migrations/*"]
 
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "raise NotImplementedError",
-    "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]

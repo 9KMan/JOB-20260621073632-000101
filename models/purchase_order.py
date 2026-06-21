@@ -1,158 +1,171 @@
-# models/purchase_order.py
-"""Purchase Order model definition."""
+// models/purchase_order.py
+"""PurchaseOrder and PurchaseOrderLine SQLAlchemy models.
 
-from datetime import date, datetime, timezone
+Purchase orders are created in the ERP system and imported into
+the matching engine for invoice verification.
+"""
+
+from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import (
-    Boolean,
     Date,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
-    Integer,
     Numeric,
     String,
     Text,
-    func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from models.base import Base
 from models.enums import PurchaseOrderStatus
 
-if TYPE_CHECKING:
-    from models.balance_ledger import BalanceLedger
-    from models.cross_ref import CrossRef
-    from models.delivery_note import DeliveryNote
-    from models.invoice import InvoiceLine
 
+class PurchaseOrder(Base):
+    """Purchase order header model.
 
-class PurchaseOrder(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    """Purchase Order model representing a PO from the ERP system."""
+    Represents a PO created in the ERP system.
+    """
 
     __tablename__ = "purchase_orders"
     __table_args__ = (
-        Index("ix_po_vendor_number", "vendor_number"),
-        Index("ix_po_po_number", "po_number"),
-        Index("ix_po_status", "status"),
-        Index("ix_po_order_date", "order_date"),
+        Index("ix_purchase_orders_po_number", "po_number", unique=True),
+        Index("ix_purchase_orders_vendor_code", "vendor_code"),
+        Index("ix_purchase_orders_status", "status"),
+        Index("ix_purchase_orders_created_at", "created_at"),
+        Index("ix_purchase_orders_expected_date", "expected_delivery_date"),
     )
 
-    # Header fields
-    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # External references
+    po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    vendor_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    po_number: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[PurchaseOrderStatus] = mapped_column(
-        Enum(PurchaseOrderStatus),
-        default=PurchaseOrderStatus.DRAFT,
-        nullable=False,
-        index=True,
-    )
+    department_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    # Amount fields
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    # PO dates
+    po_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Financial fields
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
 
-    # Additional fields
-    payment_terms: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    shipping_terms: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    raw_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Status
+    status: Mapped[PurchaseOrderStatus] = mapped_column(
+        PurchaseOrderStatus,
+        default=PurchaseOrderStatus.DRAFT,
+        nullable=False,
+    )
 
     # ERP reference
-    erp_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    erp_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(),
+        nullable=False,
+    )
+
+    # Metadata
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_data: Mapped[dict | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     lines: Mapped[list["PurchaseOrderLine"]] = relationship(
         "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
-        "DeliveryNote",
+    matched_invoices: Mapped[list["Invoice"]] = relationship(
+        "Invoice",
+        back_populates="matched_po",
+        foreign_keys="Invoice.matched_po_id",
+    )
+    balance_ledger_entries: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
         back_populates="purchase_order",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number} - {self.vendor_number}>"
+        return f"<PurchaseOrder {self.po_number} ({self.status.value})>"
 
 
-class PurchaseOrderLine(Base, UUIDMixin, TimestampMixin):
-    """Purchase Order Line Item model."""
+class PurchaseOrderLine(Base):
+    """Purchase order line item model.
+
+    Represents individual line items on a PO.
+    """
 
     __tablename__ = "purchase_order_lines"
     __table_args__ = (
-        Index("ix_pol_po_id", "purchase_order_id"),
-        Index("ix_pol_line_number", "line_number"),
-        Index("ix_pol_item_number", "item_number"),
+        Index("ix_purchase_order_lines_po_id", "po_id"),
+        Index("ix_purchase_order_lines_line_number", "line_number"),
+        Index("ix_purchase_order_lines_sku", "sku"),
     )
 
-    purchase_order_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+    # Parent reference
+    po_id: Mapped[UUID] = mapped_column(
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    line_number: Mapped[str] = mapped_column(String(50), nullable=False)
-    item_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    ordered_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    received_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), default=Decimal("0"))
-    invoiced_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), default=Decimal("0"))
-    unit_of_measure: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Line details
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    manufacturer_part: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Quantities and amounts
+    ordered_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
-    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
 
-    # Calculated fields
-    remaining_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
+    # Delivered quantity tracking
+    delivered_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
         nullable=False,
         default=Decimal("0"),
     )
-    remaining_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+    invoiced_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
         nullable=False,
         default=Decimal("0"),
     )
-
-    # Status
-    is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        back_populates="lines",
+        "PurchaseOrder", back_populates="lines"
     )
-    invoice_lines: Mapped[list["InvoiceLine"]] = relationship(
+    matched_invoice_lines: Mapped[list["InvoiceLine"]] = relationship(
         "InvoiceLine",
-        back_populates="purchase_order_line",
+        back_populates="matched_po_line",
+        foreign_keys="InvoiceLine.matched_po_line_id",
     )
     delivery_note_lines: Mapped[list["DeliveryNoteLine"]] = relationship(
         "DeliveryNoteLine",
-        back_populates="purchase_order_line",
+        back_populates="po_line",
+        foreign_keys="DeliveryNoteLine.matched_po_line_id",
     )
-    balance_entries: Mapped[list["BalanceLedger"]] = relationship(
-        "BalanceLedger",
-        back_populates="purchase_order_line",
-    )
+
+    @property
+    def remaining_quantity(self) -> Decimal:
+        """Calculate remaining quantity to be delivered."""
+        return self.ordered_quantity - self.delivered_quantity
+
+    @property
+    def remaining_to_invoice(self) -> Decimal:
+        """Calculate remaining quantity to be invoiced."""
+        return self.delivered_quantity - self.invoiced_quantity
 
     def __repr__(self) -> str:
         return f"<PurchaseOrderLine {self.line_number}: {self.description[:30]}>"
 
-    def update_remaining(self) -> None:
-        """Update remaining quantity and amount based on received and invoiced."""
-        self.remaining_quantity = self.ordered_quantity - self.received_quantity - self.invoiced_quantity
-        self.remaining_amount = self.remaining_quantity * self.unit_price
-        if self.remaining_quantity <= 0:
-            self.is_closed = True
+
+# Import at bottom to avoid circular imports
+from models.invoice import Invoice, InvoiceLine
+from models.delivery_note import DeliveryNoteLine
+from models.balance_ledger import BalanceLedger

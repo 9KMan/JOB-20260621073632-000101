@@ -1,46 +1,49 @@
-# Dockerfile
-FROM python:3.11-slim AS base
+// Dockerfile
+# syntax=docker/dockerfile:1
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
-    UV_SYSTEM_PYTHON=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv for faster dependency installation
-RUN pip install --no-cache-dir uv
+# Build stage
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install dependencies
-FROM base AS dependencies
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
 COPY pyproject.toml ./
-
-# Install dependencies using uv
-RUN uv sync --frozen --no-install-project
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir .
 
 # Production stage
-FROM base AS production
+FROM python:3.11-slim
 
-# Copy virtual environment from dependencies stage
-COPY --from=dependencies /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Create non-root user
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
 # Copy application code
-COPY --chown=app:app . /app
+COPY --chown=appuser:appgroup . .
 
 # Switch to non-root user
-RUN useradd -m -u 1000 app && chown -R app:app /app
-USER app
+USER appuser
 
 # Expose port
 EXPOSE 8000
@@ -50,16 +53,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-# Development stage
-FROM dependencies AS development
-
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-USER app
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]

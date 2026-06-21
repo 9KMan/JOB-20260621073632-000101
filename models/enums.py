@@ -1,16 +1,24 @@
-# models/enums.py
-"""SQLAlchemy and Pydantic enum definitions."""
+// models/enums.py
+"""SQLAlchemy and Pydantic enums for the AP Automation Engine.
 
-from enum import Enum
+These enums define the valid states and types throughout the system.
+"""
+
+import enum
+from typing import Annotated
+
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
 
-class InvoiceStatus(str, Enum):
-    """Status of an invoice."""
+class InvoiceStatus(str, enum.Enum):
+    """Status of an invoice in the system."""
 
     DRAFT = "draft"
-    PENDING = "pending"
-    MATCHING = "matching"
+    PENDING_MATCHING = "pending_matching"
     MATCHED = "matched"
+    AUTO_APPROVED = "auto_approved"
+    UNDER_REVIEW = "under_review"
     EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -18,72 +26,103 @@ class InvoiceStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, Enum):
+class PurchaseOrderStatus(str, enum.Enum):
     """Status of a purchase order."""
 
     DRAFT = "draft"
     ACTIVE = "active"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class DeliveryNoteStatus(str, Enum):
+class DeliveryNoteStatus(str, enum.Enum):
     """Status of a delivery note."""
 
     DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    PARTIALLY_INVOICED = "partially_invoiced"
-    FULLY_INVOICED = "fully_invoiced"
+    RECEIVED = "received"
+    INVOICED = "invoiced"
     CANCELLED = "cancelled"
 
 
-class MatchStatus(str, Enum):
-    """Status of a matching process."""
-
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class MatchDecision(str, Enum):
-    """Decision outcome of the matching engine."""
-
-    AUTO_APPROVED = "auto_approved"
-    REVIEW_REQUIRED = "review_required"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
-
-
-class MatchConfidence(str, Enum):
-    """Confidence level of a match."""
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
-
-
-class ExceptionReason(str, Enum):
-    """Reason for an exception."""
-
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    NO_PO_FOUND = "no_po_found"
-    PARTIAL_MATCH = "partial_match"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    DATE_MISMATCH = "date_mismatch"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    OTHER = "other"
-
-
-class ExceptionStatus(str, Enum):
-    """Status of an exception."""
+class ExceptionStatus(str, enum.Enum):
+    """Status of a matching exception."""
 
     OPEN = "open"
     UNDER_REVIEW = "under_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
-    ESCALATED = "escalated"
+
+
+class ExceptionReason(str, enum.Enum):
+    """Reason codes for matching exceptions."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY = "missing_delivery"
+    PARTIAL_DELIVERY = "partial_delivery"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    DATE_VARIANCE = "date_variance"
+    MULTIPLE_MATCHES = "multiple_matches"
+    NO_MATCH = "no_match"
+    OTHER = "other"
+
+
+class MatchDecision(str, enum.Enum):
+    """Matching engine decision outcomes."""
+
+    AUTO_APPROVED = "auto_approved"
+    REVIEW = "review"
+    EXCEPTION = "exception"
+
+
+class DecisionType(str, enum.Enum):
+    """Type of matching decision."""
+
+    FULL_MATCH = "full_match"
+    PARTIAL_MATCH = "partial_match"
+    EXCEPTION = "exception"
+    MANUAL = "manual"
+
+
+class LineMatchStatus(str, enum.Enum):
+    """Status of a line-level match."""
+
+    PENDING = "pending"
+    MATCHED = "matched"
+    OVER_MATCHED = "over_matched"
+    UNDER_MATCHED = "under_matched"
+    UNMATCHED = "unmatched"
+
+
+class MatchConfirmation(str, enum.Enum):
+    """Confirmation status for learning loop."""
+
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+
+
+class PydanticEnumMixin:
+    """Mixin to provide Pydantic schema support for enums."""
+
+    @classmethod
+    def get_pydantic_schema(cls, handler: GetCoreSchemaHandler) -> CoreSchema:
+        """Return Pydantic-compatible schema for the enum."""
+        return core_schema.nullable_schema(
+            inner_schema=core_schema.enum_schema(
+                list(cls),
+                serialization=core_schema.to_string_enum_serialization(cls),
+            )
+        )
+
+
+# Annotated types for better IDE support
+InvoiceStatusType = Annotated[InvoiceStatus, PydanticEnumMixin]
+PurchaseOrderStatusType = Annotated[PurchaseOrderStatus, PydanticEnumMixin]
+DeliveryNoteStatusType = Annotated[DeliveryNoteStatus, PydanticEnumMixin]
+ExceptionStatusType = Annotated[ExceptionStatus, PydanticEnumMixin]
+MatchDecisionType = Annotated[MatchDecision, PydanticEnumMixin]
+DecisionTypeType = Annotated[DecisionType, PydanticEnumMixin]

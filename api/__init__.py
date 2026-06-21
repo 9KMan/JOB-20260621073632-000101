@@ -1,6 +1,9 @@
-# api/__init__.py
-"""API package initialization."""
+// api/__init__.py
+"""API package for AP Automation Engine.
 
-from api.schemas import __all__ as schemas_all
+Exposes the FastAPI application and API routers.
+"""
 
-__all__ = schemas_all
+from api.v1.router import api_router
+
+__all__ = ["api_router"]

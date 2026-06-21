@@ -1,73 +1,88 @@
-# api/schemas.py
-"""Shared Pydantic request/response models."""
+// api/schemas.py
+"""Shared Pydantic schemas for request/response models.
+
+These schemas are used across multiple API endpoints for
+common data structures.
+"""
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Generic, TypeVar
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from models.enums import (
-    DeliveryNoteStatus,
-    ExceptionReason,
-    ExceptionStatus,
-    InvoiceStatus,
-    MatchConfidence,
-    MatchDecision,
-    MatchStatus,
-    PurchaseOrderStatus,
-)
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
-# Generic response wrapper
-T = TypeVar("T")
+class PaginationParams(BaseModel):
+    """Standard pagination parameters."""
+
+    page: int = Field(default=1, ge=1, description="Page number")
+    page_size: int = Field(default=20, ge=1, le=100, description="Items per page")
+
+    @computed_field
+    @property
+    def offset(self) -> int:
+        """Calculate offset for database query."""
+        return (self.page - 1) * self.page_size
+
+    @computed_field
+    @property
+    def limit(self) -> int:
+        """Return page size as limit."""
+        return self.page_size
 
 
-class ApiResponse(BaseModel, Generic[T]):
-    """Standard API response wrapper."""
+class PaginatedResponse(BaseModel):
+    """Standard paginated response wrapper."""
 
-    success: bool = True
-    data: T | None = None
-    message: str | None = None
-    error: str | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PaginatedResponse(BaseModel, Generic[T]):
-    """Paginated response wrapper."""
-
-    success: bool = True
-    data: list[T]
+    items: list[dict]
     total: int
     page: int
     page_size: int
     total_pages: int
 
+    @classmethod
+    def create(
+        cls,
+        items: list[dict],
+        total: int,
+        page: int,
+        page_size: int,
+    ) -> "PaginatedResponse":
+        """Create a paginated response."""
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+        return cls(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
 
-class ErrorResponse(BaseModel):
-    """Error response model."""
 
-    success: bool = False
-    error: str
-    detail: str | None = None
-    code: str | None = None
+class TimestampMixin(BaseModel):
+    """Mixin for timestamp fields in responses."""
+
+    created_at: datetime
+    updated_at: datetime
+
+
+class UUIDMixin(BaseModel):
+    """Mixin for UUID id field."""
+
+    id: UUID
 
 
 # Invoice Schemas
 class InvoiceLineBase(BaseModel):
-    """Base schema for invoice line items."""
+    """Base schema for invoice line."""
 
-    line_number: str
-    description: str
-    quantity: Decimal
-    unit_of_measure: str | None = None
-    unit_price: Decimal
-    line_amount: Decimal
-    tax_rate: Decimal | None = None
-    tax_amount: Decimal | None = None
-    purchase_order_line_id: UUID | None = None
+    line_number: int
+    description: str = Field(max_length=500)
+    sku: str | None = None
+    quantity: Decimal = Field(ge=0)
+    unit_price: Decimal = Field(ge=0)
+    line_amount: Decimal = Field(ge=0)
 
 
 class InvoiceLineCreate(InvoiceLineBase):
@@ -76,422 +91,303 @@ class InvoiceLineCreate(InvoiceLineBase):
     pass
 
 
-class InvoiceLineResponse(InvoiceLineBase):
+class InvoiceLineResponse(InvoiceLineBase, TimestampMixin):
     """Schema for invoice line response."""
+
+    id: UUID
+    invoice_id: UUID
+    matched_po_line_id: UUID | None = None
+    match_status: str | None = None
+    match_score: float | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    matched_quantity: Decimal = Decimal("0")
-    matched_amount: Decimal = Decimal("0")
-    match_score: float | None = None
-
 
 class InvoiceBase(BaseModel):
-    """Base schema for invoices."""
+    """Base schema for invoice."""
 
-    vendor_number: str
-    vendor_name: str
-    invoice_number: str
+    vendor_code: str = Field(max_length=50)
+    vendor_name: str = Field(max_length=255)
+    invoice_number: str = Field(max_length=100)
     invoice_date: date
+    total_amount: Decimal = Field(ge=0)
+    tax_amount: Decimal | None = None
+    currency: str = Field(default="USD", max_length=3)
     due_date: date | None = None
-    subtotal: Decimal
-    tax_amount: Decimal = Decimal("0")
-    total_amount: Decimal
-    currency: str = "USD"
-    purchase_order_number: str | None = None
-    delivery_note_number: str | None = None
     payment_terms: str | None = None
-    description: str | None = None
-    raw_data: dict[str, Any] | None = None
+    notes: str | None = None
 
 
 class InvoiceCreate(InvoiceBase):
     """Schema for creating an invoice."""
 
-    lines: list[InvoiceLineCreate]
+    lines: list[InvoiceLineCreate] = Field(min_length=1)
 
 
 class InvoiceUpdate(BaseModel):
     """Schema for updating an invoice."""
 
-    status: InvoiceStatus | None = None
-    match_status: MatchStatus | None = None
-    approved_by: str | None = None
-    rejection_reason: str | None = None
-    description: str | None = None
+    status: str | None = None
+    notes: str | None = None
+    due_date: date | None = None
 
 
-class InvoiceResponse(InvoiceBase):
+class InvoiceResponse(InvoiceBase, TimestampMixin):
     """Schema for invoice response."""
 
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
-    status: InvoiceStatus
-    match_status: MatchStatus
+    status: str
+    matched_po_id: UUID | None = None
     match_score: float | None = None
     match_decision: str | None = None
     matched_at: datetime | None = None
-    approved_by: str | None = None
-    approved_at: datetime | None = None
-    rejection_reason: str | None = None
-    created_at: datetime
-    updated_at: datetime
     lines: list[InvoiceLineResponse] = []
-
-
-class InvoiceListResponse(BaseModel):
-    """Schema for invoice list response."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    vendor_number: str
-    vendor_name: str
-    invoice_number: str
-    invoice_date: date
-    total_amount: Decimal
-    currency: str
-    status: InvoiceStatus
-    match_status: MatchStatus
-    match_score: float | None = None
-    match_decision: str | None = None
-
 
 # Purchase Order Schemas
-class PurchaseOrderLineBase(BaseModel):
-    """Base schema for PO lines."""
+class POLineBase(BaseModel):
+    """Base schema for PO line."""
 
-    line_number: str
-    item_number: str | None = None
-    description: str
-    ordered_quantity: Decimal
-    unit_of_measure: str | None = None
-    unit_price: Decimal
-    line_amount: Decimal
-    tax_rate: Decimal | None = None
-    tax_amount: Decimal | None = None
+    line_number: int
+    description: str = Field(max_length=500)
+    sku: str | None = None
+    manufacturer_part: str | None = None
+    ordered_quantity: Decimal = Field(ge=0)
+    unit_price: Decimal = Field(ge=0)
+    line_amount: Decimal = Field(ge=0)
 
 
-class PurchaseOrderLineCreate(PurchaseOrderLineBase):
+class POLineCreate(POLineBase):
     """Schema for creating a PO line."""
 
     pass
 
 
-class PurchaseOrderLineResponse(PurchaseOrderLineBase):
+class POLineResponse(POLineBase, TimestampMixin):
     """Schema for PO line response."""
 
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
-    received_quantity: Decimal = Decimal("0")
+    po_id: UUID
+    delivered_quantity: Decimal = Decimal("0")
     invoiced_quantity: Decimal = Decimal("0")
-    remaining_quantity: Decimal
-    remaining_amount: Decimal
-    is_closed: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseOrderBase(BaseModel):
-    """Base schema for purchase orders."""
+    """Base schema for purchase order."""
 
-    vendor_number: str
-    vendor_name: str
-    po_number: str
-    order_date: date
+    po_number: str = Field(max_length=50)
+    vendor_code: str = Field(max_length=50)
+    vendor_name: str = Field(max_length=255)
+    department_code: str | None = None
+    po_date: date
     expected_delivery_date: date | None = None
-    subtotal: Decimal
-    tax_amount: Decimal = Decimal("0")
-    total_amount: Decimal
-    currency: str = "USD"
-    payment_terms: str | None = None
-    shipping_terms: str | None = None
-    description: str | None = None
-    erp_id: str | None = None
-    raw_data: dict[str, Any] | None = None
+    total_amount: Decimal = Field(ge=0)
+    currency: str = Field(default="USD", max_length=3)
+    notes: str | None = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for creating a PO."""
+    """Schema for creating a purchase order."""
 
-    lines: list[PurchaseOrderLineCreate]
+    lines: list[POLineCreate] = Field(min_length=1)
 
 
-class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for PO response."""
-
-    model_config = ConfigDict(from_attributes=True)
+class PurchaseOrderResponse(PurchaseOrderBase, TimestampMixin):
+    """Schema for purchase order response."""
 
     id: UUID
-    status: PurchaseOrderStatus
-    created_at: datetime
-    updated_at: datetime
-    lines: list[PurchaseOrderLineResponse] = []
-
-
-class PurchaseOrderListResponse(BaseModel):
-    """Schema for PO list response."""
+    status: str
+    erp_reference: str | None = None
+    lines: list[POLineResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    vendor_number: str
-    vendor_name: str
-    po_number: str
-    order_date: date
-    total_amount: Decimal
-    currency: str
-    status: PurchaseOrderStatus
 
 
 # Delivery Note Schemas
-class DeliveryNoteLineBase(BaseModel):
-    """Base schema for DN lines."""
+class DNLineBase(BaseModel):
+    """Base schema for DN line."""
 
-    line_number: str
-    item_number: str | None = None
-    description: str
-    quantity: Decimal
-    unit_of_measure: str | None = None
-    purchase_order_line_id: UUID | None = None
+    line_number: int
+    description: str = Field(max_length=500)
+    sku: str | None = None
+    delivered_quantity: Decimal = Field(ge=0)
 
 
-class DeliveryNoteLineCreate(DeliveryNoteLineBase):
+class DNLineCreate(DNLineBase):
     """Schema for creating a DN line."""
 
     pass
 
 
-class DeliveryNoteLineResponse(DeliveryNoteLineBase):
+class DNLineResponse(DNLineBase, TimestampMixin):
     """Schema for DN line response."""
 
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
-    is_invoiced: bool = False
-    invoiced_quantity: Decimal = Decimal("0")
+    dn_id: UUID
+    matched_po_line_id: UUID | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DeliveryNoteBase(BaseModel):
-    """Base schema for delivery notes."""
+    """Base schema for delivery note."""
 
-    vendor_number: str
-    vendor_name: str
-    dn_number: str
+    dn_number: str = Field(max_length=100)
+    vendor_code: str = Field(max_length=50)
+    vendor_name: str = Field(max_length=255)
+    po_number: str | None = None
+    dn_date: date
     receipt_date: date
-    purchase_order_id: UUID | None = None
-    purchase_order_number: str | None = None
-    received_by: str | None = None
-    location: str | None = None
     notes: str | None = None
-    erp_id: str | None = None
-    raw_data: dict[str, Any] | None = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """Schema for creating a DN."""
+    """Schema for creating a delivery note."""
 
-    lines: list[DeliveryNoteLineCreate]
+    lines: list[DNLineCreate] = Field(min_length=1)
 
 
-class DeliveryNoteResponse(DeliveryNoteBase):
-    """Schema for DN response."""
-
-    model_config = ConfigDict(from_attributes=True)
+class DeliveryNoteResponse(DeliveryNoteBase, TimestampMixin):
+    """Schema for delivery note response."""
 
     id: UUID
-    status: DeliveryNoteStatus
-    created_at: datetime
-    updated_at: datetime
-    lines: list[DeliveryNoteLineResponse] = []
-
-
-class DeliveryNoteListResponse(BaseModel):
-    """Schema for DN list response."""
+    status: str
+    source: str = "manual"
+    lines: list[DNLineResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    vendor_number: str
-    vendor_name: str
-    dn_number: str
-    receipt_date: date
-    status: DeliveryNoteStatus
 
 
 # Matching Schemas
-class MatchRequest(BaseModel):
-    """Schema for triggering a match."""
+class MatchingResult(BaseModel):
+    """Result of a matching operation."""
 
     invoice_id: UUID
-    purchase_order_id: UUID | None = None
-    force_rematch: bool = False
+    status: str
+    match_score: float
+    decision: str
+    matched_po_id: UUID | None = None
+    line_matches: list[dict] = []
+    exceptions: list[dict] = []
 
 
-class MatchResultLine(BaseModel):
-    """Schema for a single line match result."""
-
-    invoice_line_id: UUID
-    purchase_order_line_id: UUID | None = None
-    price_match_score: float
-    quantity_match_score: float
-    date_match_score: float | None = None
-    item_match_score: float | None = None
-    overall_score: float
-    match_decision: MatchDecision
-    match_confidence: MatchConfidence
-    exception_reason: ExceptionReason | None = None
-
-
-class MatchResult(BaseModel):
-    """Schema for complete match result."""
+class MatchingDecision(BaseModel):
+    """Matching decision with detailed breakdown."""
 
     invoice_id: UUID
     overall_score: float
-    decision: MatchDecision
-    confidence: MatchConfidence
-    matched_lines: list[MatchResultLine]
-    unmatched_lines: list[UUID]
-    exceptions: list[dict[str, Any]] = []
+    decision: str
+    decision_type: str
+    threshold_high: int
+    threshold_mid: int
+    threshold_low: int
+    line_scores: list[dict]
+    recommended_action: str
 
 
-class MatchDecisionRequest(BaseModel):
-    """Schema for approving/rejecting a match."""
+class MatchConfirmationInput(BaseModel):
+    """Input for confirming or rejecting a match."""
 
-    invoice_id: UUID
-    decision: MatchDecision
-    approved_lines: list[UUID] = []
-    rejected_lines: list[UUID] = []
-    override_reason: str | None = None
+    match_id: str
+    confirmed: bool
+    source: str = "manual"
+    notes: str | None = None
 
 
 # Exception Schemas
 class ExceptionBase(BaseModel):
-    """Base schema for exceptions."""
+    """Base schema for exception."""
 
-    reason: ExceptionReason
-    invoice_id: UUID
-    purchase_order_id: UUID | None = None
-    invoice_line_id: UUID | None = None
-    purchase_order_line_id: UUID | None = None
-    expected_value: Decimal | None = None
-    actual_value: Decimal | None = None
-    variance: Decimal | None = None
-    notes: str | None = None
+    reason: str
+    description: str | None = None
 
 
-class ExceptionCreate(ExceptionBase):
-    """Schema for creating an exception."""
-
-    pass
-
-
-class ExceptionResponse(ExceptionBase):
+class ExceptionResponse(BaseModel):
     """Schema for exception response."""
+
+    id: UUID
+    invoice_id: UUID
+    po_id: UUID | None = None
+    reason: str
+    status: str
+    description: str | None = None
+    created_at: datetime
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    resolution_notes: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    status: ExceptionStatus
-    created_at: datetime
-    updated_at: datetime
-    resolved_by: str | None = None
-    resolved_at: datetime | None = None
+
+class ExceptionResolveInput(BaseModel):
+    """Input for resolving an exception."""
+
     resolution_notes: str | None = None
+    override_amount: Decimal | None = None
 
 
-class ExceptionResolveRequest(BaseModel):
-    """Schema for resolving an exception."""
+class ExceptionDismissInput(BaseModel):
+    """Input for dismissing an exception."""
 
-    exception_id: UUID
-    resolution: str
-    adjust_values: bool = False
-
-
-class ExceptionDismissRequest(BaseModel):
-    """Schema for dismissing an exception."""
-
-    exception_id: UUID
     reason: str
+    notes: str | None = None
 
 
 # Balance Ledger Schemas
 class BalanceLedgerResponse(BaseModel):
     """Schema for balance ledger response."""
 
+    po_id: UUID
+    po_line_id: UUID
+    ordered_qty: Decimal
+    delivered_qty: Decimal
+    invoiced_qty: Decimal
+    approved_invoiced_qty: Decimal
+    remaining_to_deliver: Decimal
+    remaining_to_invoice: Decimal
+    pending_approval_qty: Decimal
+    last_delivery_date: datetime | None = None
+    last_invoice_date: datetime | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    purchase_order_line_id: UUID
-    reference_type: str
-    reference_id: UUID
-    reference_number: str
-    transaction_date: date
-    transaction_type: str
-    quantity_change: Decimal
-    amount_change: Decimal
-    running_quantity: Decimal
-    running_amount: Decimal
-    match_status: MatchStatus
-    match_score: float | None = None
-    match_decision: str | None = None
 
-
-class BalanceSummary(BaseModel):
-    """Schema for balance summary per PO line."""
-
-    purchase_order_line_id: UUID
-    po_number: str
-    line_number: str
-    description: str
-    original_quantity: Decimal
-    original_amount: Decimal
-    open_quantity: Decimal
-    open_amount: Decimal
-    match_status: str
-
-
-# Cross Reference Schemas
+# CrossRef Schemas
 class CrossRefResponse(BaseModel):
     """Schema for cross-reference response."""
 
+    id: UUID
+    vendor_code: str
+    vendor_name: str
+    sku: str | None = None
+    po_description: str
+    unit_price: float
+    match_count: int
+    avg_match_score: float
+    confirmation: str
+    success_rate: float
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    vendor_number: str
-    supplier_item_number: str | None = None
-    our_item_number: str | None = None
-    item_description: str | None = None
-    standard_price: Decimal | None = None
-    standard_quantity: Decimal | None = None
-    match_score: float
-    match_confidence: MatchConfidence
-    times_matched: int
-    times_confirmed: int
-    times_rejected: int
-    confirmation_rate: float
-    is_active: bool
+
+# Health Check
+class HealthResponse(BaseModel):
+    """Health check response."""
+
+    status: str = "healthy"
+    version: str
+    timestamp: datetime
+    database: str = "connected"
 
 
-# Auth Schemas
-class Token(BaseModel):
-    """JWT Token response."""
+# Error Response
+class ErrorResponse(BaseModel):
+    """Standard error response."""
 
-    access_token: str
-    token_type: str = "bearer"
-
-
-class TokenData(BaseModel):
-    """Token payload data."""
-
-    sub: str
-    exp: datetime
-    iat: datetime
-
-
-class LoginRequest(BaseModel):
-    """Login request."""
-
-    username: str
-    password: str
+    error: str
+    detail: str | None = None
+    status_code: int

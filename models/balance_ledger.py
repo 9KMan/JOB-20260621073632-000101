@@ -1,92 +1,146 @@
-# models/balance_ledger.py
-"""Balance Ledger model definition."""
+// models/balance_ledger.py
+"""BalanceLedger SQLAlchemy model.
 
-from datetime import date, datetime, timezone
+The balance ledger tracks the running balances for PO lines,
+recording what's been delivered, invoiced, and what's remaining.
+"""
+
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import (
-    Date,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Numeric,
     String,
-    func,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import MatchStatus
-
-if TYPE_CHECKING:
-    from models.purchase_order import PurchaseOrderLine
+from models.base import Base
 
 
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """Balance Ledger for tracking open balances per PO line."""
+class BalanceLedger(Base):
+    """Balance ledger entry model.
+
+    Tracks running balances for PO lines including:
+    - Total ordered
+    - Total delivered
+    - Total invoiced
+    - Remaining to deliver
+    - Remaining to invoice
+    """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        Index("ix_bl_po_line_id", "purchase_order_line_id"),
-        Index("ix_bl_transaction_date", "transaction_date"),
-        Index("ix_bl_reference_type", "reference_type"),
+        UniqueConstraint(
+            "po_line_id",
+            name="uq_balance_ledger_po_line",
+        ),
+        Index("ix_balance_ledger_po_id", "po_id"),
+        Index("ix_balance_ledger_created_at", "created_at"),
     )
 
-    # Reference to PO Line
-    purchase_order_line_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+    # References to PO
+    po_id: Mapped[UUID] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    po_line_id: Mapped[UUID] = mapped_column(
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # Transaction reference
-    reference_type: Mapped[str] = mapped_column(String(50), nullable=False)  # 'invoice', 'dn', 'adjustment'
-    reference_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    reference_number: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    # Transaction details
-    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
-    transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'debit', 'credit'
-    quantity_change: Mapped[Decimal] = mapped_column(Numeric(15, 4), default=Decimal("0"))
-    amount_change: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
-
-    # Running balance (calculated)
-    running_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
-    running_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-
-    # Match status for this balance entry
-    match_status: Mapped[MatchStatus] = mapped_column(
-        Enum(MatchStatus),
-        default=MatchStatus.PENDING,
+    # Quantity balances
+    ordered_qty: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
         nullable=False,
+        default=Decimal("0"),
     )
-    match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    match_decision: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    delivered_qty: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    invoiced_qty: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    approved_invoiced_qty: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("0"),
+    )
 
-    # Notes
-    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Amount balances
+    ordered_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    delivered_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    invoiced_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    approved_invoiced_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0"),
+    )
+
+    # Last transaction tracking
+    last_delivery_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    last_delivery_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_invoice_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    last_invoice_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
-    purchase_order_line: Mapped["PurchaseOrderLine"] = relationship(
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="balance_ledger_entries",
+    )
+    po_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
-        back_populates="balance_entries",
+        foreign_keys=[po_line_id],
     )
 
+    @property
+    def remaining_to_deliver(self) -> Decimal:
+        """Calculate remaining quantity to deliver."""
+        return self.ordered_qty - self.delivered_qty
+
+    @property
+    def remaining_to_invoice(self) -> Decimal:
+        """Calculate remaining quantity to invoice."""
+        return self.delivered_qty - self.invoiced_qty
+
+    @property
+    def pending_approval_qty(self) -> Decimal:
+        """Calculate quantity pending approval."""
+        return self.invoiced_qty - self.approved_invoiced_qty
+
     def __repr__(self) -> str:
-        return f"<BalanceLedger {self.reference_type}:{self.reference_number} - Qty: {self.running_quantity}>"
+        return (
+            f"<BalanceLedger PO:{self.po_id} Line:{self.po_line_id} "
+            f"Ordered:{self.ordered_qty} Delivered:{self.delivered_qty} "
+            f"Invoiced:{self.invoiced_qty}>"
+        )
 
-    def is_balanced(self) -> bool:
-        """Check if the balance is zero (fully matched)."""
-        return self.running_quantity == Decimal("0") and self.running_amount == Decimal("0")
 
-    def get_open_quantity(self) -> Decimal:
-        """Get the open quantity for this balance entry."""
-        return self.running_quantity
-
-    def get_open_amount(self) -> Decimal:
-        """Get the open amount for this balance entry."""
-        return self.running_amount
+# Import at bottom to avoid circular imports
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
