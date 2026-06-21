@@ -1,341 +1,172 @@
 // src/models/matching.py
-"""Matching models for 3-way matching."""
+"""Matching result models."""
+import enum
 import uuid
-import decimal
-from datetime import date, datetime
-from typing import TYPE_CHECKING, Optional, List
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
 
-from sqlalchemy import String, Integer, Numeric, Date, DateTime, ForeignKey, Index, Text
+from sqlalchemy import String, Numeric, DateTime, Text, Enum, ForeignKey, Index, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import func
 
-from src.models.base import Base, TimestampMixin, UUIDMixin
-from src.models.enums import MatchStatus, MatchDecision, DocumentType
-
-if TYPE_CHECKING:
-    from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-    from src.models.invoice import Invoice, InvoiceLine
-    from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
-    from src.models.user import User
+from app.models.base import Base, TimestampMixin
 
 
-class MatchRecord(Base, UUIDMixin, TimestampMixin):
-    """Record of a match between documents (3-way matching)."""
-    
-    __tablename__ = "match_records"
-    __table_args__ = (
-        Index("ix_mr_invoice_dn", "invoice_id", "delivery_note_id"),
-        Index("ix_mr_invoice_po", "invoice_id", "purchase_order_id"),
-        Index("ix_mr_dn_po", "delivery_note_id", "purchase_order_id"),
-        Index("ix_mr_status", "status"),
-        Index("ix_mr_decision", "decision"),
+class MatchStatus(str, enum.Enum):
+    """Match status enumeration."""
+
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    AUTO_APPROVED = "AUTO_APPROVED"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    REJECTED = "REJECTED"
+    DISPUTED = "DISPUTED"
+
+
+class MatchType(str, enum.Enum):
+    """Match type enumeration."""
+
+    PO_INVOICE = "PO_INVOICE"
+    PO_DELIVERY_NOTE = "PO_DELIVERY_NOTE"
+    INVOICE_DELIVERY_NOTE = "INVOICE_DELIVERY_NOTE"
+    THREE_WAY = "THREE_WAY"
+
+
+class MatchResult(Base, TimestampMixin):
+    """Match Result model storing all match outcomes."""
+
+    __tablename__ = "match_results"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
     )
-
-    # Document references (at least two must be present for a valid match)
-    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    invoice_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
         ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
-    invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    
-    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    delivery_note_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
-    delivery_note_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    
-    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    purchase_order_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    # Match details
-    match_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-    matched_quantity: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-    matched_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    # Scoring
-    line_match_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-    amount_match_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-    date_match_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-    total_match_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-
-    # Decision
-    status: Mapped[MatchStatus] = mapped_column(
-        String(50),
-        default=MatchStatus.PENDING,
-        nullable=False,
-        index=True,
-    )
-    decision: Mapped[Optional[MatchDecision]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-    decision_reason: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-    decided_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    decided_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-    # Variance tracking
-    quantity_variance: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-    amount_variance: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
-    )
-    
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    # Relationships
-    invoice: Mapped[Optional["Invoice"]] = relationship(
-        "Invoice",
-        back_populates="matched_records",
-        foreign_keys=[invoice_id],
-    )
-    invoice_line: Mapped[Optional["InvoiceLine"]] = relationship(
-        "InvoiceLine",
-        back_populates="matched_records",
-        foreign_keys=[invoice_line_id],
-    )
-    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
-        "DeliveryNote",
-        back_populates="matched_records",
-        foreign_keys=[delivery_note_id],
-    )
-    delivery_note_line: Mapped[Optional["DeliveryNoteLine"]] = relationship(
-        "DeliveryNoteLine",
-        back_populates="matched_records",
-        foreign_keys=[delivery_note_line_id],
-    )
-    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
-        "PurchaseOrder",
-        back_populates="matched_invoice_lines",
-        foreign_keys=[purchase_order_id],
-    )
-    purchase_order_line: Mapped[Optional["PurchaseOrderLine"]] = relationship(
-        "PurchaseOrderLine",
-        back_populates="matched_invoice_lines",
-        foreign_keys=[purchase_order_line_id],
-    )
-    confirmed_by_user: Mapped[Optional["User"]] = relationship(
-        "User",
-        foreign_keys=[decided_by],
-    )
-
-    def __repr__(self) -> str:
-        return f"<MatchRecord {self.id}: {self.match_type} - {self.status}>"
-
-
-class MatchConfirmation(Base, UUIDMixin, TimestampMixin):
-    """Confirmation record for human-reviewed matches (learning loop)."""
-    
-    __tablename__ = "match_confirmations"
-    __table_args__ = (
-        Index("ix_mc_match_record_id", "match_record_id", unique=True),
-    )
-
-    match_record_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("match_records.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    confirmed_by: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    confirmation_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-    original_match_score: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-    )
-    confirmation_notes: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-
-    # Relationships
-    match_record: Mapped["MatchRecord"] = relationship(
-        "MatchRecord",
-        foreign_keys=[match_record_id],
-    )
-    confirmed_by_user: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="match_confirmations",
-        foreign_keys=[confirmed_by],
-    )
-
-    def __repr__(self) -> str:
-        return f"<MatchConfirmation {self.id}>"
-
-
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """Ledger to track partial matches and balances across all document types."""
-    
-    __tablename__ = "balance_ledger"
-    __table_args__ = (
-        Index("ix_bl_document", "document_type", "document_id"),
-        Index("ix_bl_po_line", "purchase_order_id", "purchase_order_line_id"),
-        Index("ix_bl_outstanding", "is_outstanding"),
-    )
-
-    document_type: Mapped[DocumentType] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        nullable=False,
-        index=True,
-    )
-    document_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        nullable=True,
-        index=True,
-    )
-
-    # PO references (for 3-way balance tracking)
-    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    po_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
-    purchase_order_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
-    # Invoice references
-    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
-    # Delivery Note references
-    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    delivery_note_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("delivery_note_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
-    # Balance tracking
-    original_quantity: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 4),
+    match_type: Mapped[MatchType] = mapped_column(Enum(MatchType), nullable=False)
+    status: Mapped[MatchStatus] = mapped_column(
+        Enum(MatchStatus),
+        default=MatchStatus.PENDING,
         nullable=False,
     )
-    matched_quantity: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 4),
-        default=decimal.Decimal("0.0000"),
-        nullable=False,
-    )
-    outstanding_quantity: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-
-    original_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    matched_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=decimal.Decimal("0.00"),
-        nullable=False,
-    )
-    outstanding_amount: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-
-    is_outstanding: Mapped[bool] = mapped_column(
-        default=True,
-        nullable=False,
-        index=True,
-    )
-    last_match_date: Mapped[Optional[date]] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    notes: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-    )
+    
+    # Overall score
+    total_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    
+    # Component scores
+    line_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    amount_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    date_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    
+    # Amount differences
+    po_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    invoice_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    delivery_note_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    amount_variance: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    
+    # Quantity differences
+    po_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    invoice_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    delivery_note_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    quantity_variance: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    
+    # Decision
+    decision: Mapped[str] = mapped_column(String(50), nullable=False)
+    decision_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Human review
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Match details (JSON)
+    line_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
 
     # Relationships
+    invoice: Mapped[Optional["Invoice"]] = relationship(
+        "Invoice",
+        foreign_keys=[invoice_id],
+        back_populates="match_results",
+    )
+    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
+        "DeliveryNote",
+        foreign_keys=[delivery_note_id],
+        back_populates="match_results",
+    )
     purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
         "PurchaseOrder",
-        back_populates="balance_ledger",
-        foreign_keys=[purchase_order_id],
+        foreign_keys=[po_id],
+        back_populates="matched_invoices",
     )
 
-    def __repr__(self) -> str:
-        return f"<BalanceLedger {self.document_type}: {self.outstanding_amount}>"
+    __table_args__ = (
+        Index("ix_match_results_status", "status"),
+        Index("ix_match_results_match_type", "match_type"),
+        Index("ix_match_results_po_invoice", "po_id", "invoice_id"),
+        Index("ix_match_results_po_dn", "po_id", "delivery_note_id"),
+    )
+
+
+class MatchScore(Base, TimestampMixin):
+    """Detailed line-level match scores."""
+
+    __tablename__ = "match_scores"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    match_result_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("match_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    
+    # Line references
+    po_line_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    invoice_line_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    delivery_note_line_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    
+    # Product match
+    product_code_match: Mapped[bool] = mapped_column(nullable=False, default=False)
+    
+    # Quantity match
+    po_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    matched_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)
+    quantity_match_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    
+    # Amount match
+    po_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    matched_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    amount_match_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    
+    # Combined score for this line
+    line_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    
+    # Status
+    is_matched: Mapped[bool] = mapped_column(nullable=False, default=False)
+    variance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    match_result: Mapped["MatchResult"] = relationship(
+        "MatchResult",
+        back_populates="scores",
+    )

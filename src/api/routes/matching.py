@@ -1,267 +1,348 @@
 // src/api/routes/matching.py
-"""Matching endpoints for 3-way matching operations."""
+"""Matching engine routes."""
 from typing import Optional
-from uuid import UUID
+from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from src.app.database import get_db
-from src.api.schemas.matching import (
+from app.api.dependencies import get_db
+from app.api.schemas.matching import (
     MatchRequest,
-    MatchResponse,
     MatchResultResponse,
-    BalanceResponse,
-    BatchMatchRequest,
-    BatchMatchResponse,
+    MatchResultDetailResponse,
+    MatchScoreResponse,
+    MatchingSummaryResponse,
+    ManualReviewRequest,
+    BalanceLedgerResponse,
     MatchStatusEnum,
 )
-from src.models.document import Document, DocumentLine
-from src.models.matching import MatchResult, BalanceLedger, CrossReference
-from src.services.matching_service import MatchingService
-from src.services.balance_service import BalanceService
-from src.services.decision_engine import DecisionEngine
+from app.models.matching import MatchResult, MatchScore, MatchStatus, MatchType
+from app.models.balance import BalanceLedger, BalanceType
+from app.services.matching.anchor_service import AnchorService
+from app.services.matching.cascade_service import CascadeService
+from app.services.matching.balance_service import BalanceService
+from app.services.matching.decision_engine import DecisionEngine
 
-router = APIRouter(prefix="/matching", tags=["Matching"])
-
-
-def get_matching_service(db: AsyncSession = Depends(get_db)) -> MatchingService:
-    """Dependency to get matching service instance."""
-    return MatchingService(db)
+router = APIRouter()
 
 
-def get_balance_service(db: AsyncSession = Depends(get_db)) -> BalanceService:
-    """Dependency to get balance service instance."""
-    return BalanceService(db)
-
-
-def get_decision_engine() -> DecisionEngine:
-    """Dependency to get decision engine instance."""
-    return DecisionEngine()
-
-
-@router.post("/match", response_model=MatchResponse)
-async def match_documents(
+@router.post("/match", response_model=MatchResultDetailResponse)
+async def initiate_matching(
     request: MatchRequest,
-    matching_service: MatchingService = Depends(get_matching_service),
-    decision_engine: DecisionEngine = Depends(get_decision_engine)
-) -> MatchResponse:
-    """
-    Perform 3-way matching between Invoice, Delivery Note, and Purchase Order.
-    
-    Layer 1: Anchoring - Match against Purchase Order first
-    Layer 2: Cascade Matching - Match invoice↔PO, DN↔PO, invoice↔DN
-    Layer 3: Balance Resolution - Track partial matches and balances
-    """
-    # Fetch documents
-    invoice = await matching_service.get_document(request.invoice_id)
-    delivery_note = None
-    if request.delivery_note_id:
-        delivery_note = await matching_service.get_document(request.delivery_note_id)
-    purchase_order = await matching_service.get_document(request.purchase_order_id)
-
-    if not purchase_order:
+    db: AsyncSession = Depends(get_db),
+):
+    """Initiate matching for provided documents."""
+    # Validate at least one document is provided
+    if not any([request.invoice_id, request.delivery_note_id, request.po_id]):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Purchase Order is required for matching"
+            status_code=400,
+            detail="At least one document ID (invoice_id, delivery_note_id, or po_id) is required",
         )
 
-    # Perform 3-way matching
-    match_results = await matching_service.perform_3way_match(
-        invoice=invoice,
-        delivery_note=delivery_note,
-        purchase_order=purchase_order
-    )
+    # Perform matching
+    anchor_service = AnchorService(db)
+    cascade_service = CascadeService(db)
+    decision_engine = DecisionEngine(db)
+    balance_service = BalanceService(db)
 
-    # Determine decision
-    overall_score = match_results.overall_score
-    decision = decision_engine.determine_decision(
-        score=overall_score,
-        has_warnings=match_results.has_warnings,
-        balance_status=match_results.balance_status
-    )
+    # Step 1: Anchor the PO if available
+    po = None
+    if request.po_id:
+        result = await db.execute(
+            select(MatchResult).options(selectinload(MatchResult.scores)).where(MatchResult.id == request.po_id)
+        )
+        # If po_id provided, get the PO
+        from app.models.document import PurchaseOrder
+        result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == request.po_id))
+        po = result.scalar_one_or_none()
+        if not po:
+            raise HTTPException(status_code=404, detail="Purchase order not found")
 
-    # Save match result
-    saved_result = await matching_service.save_match_result(
+    # Step 2: Cascade matching
+    match_result = await cascade_service.match_documents(
         invoice_id=request.invoice_id,
         delivery_note_id=request.delivery_note_id,
-        purchase_order_id=request.purchase_order_id,
-        match_results=match_results,
-        decision=decision
+        po_id=request.po_id,
+        match_type=request.match_type.value if request.match_type else None,
     )
 
-    return MatchResponse(
-        match_id=saved_result.id,
-        invoice_id=request.invoice_id,
-        delivery_note_id=request.delivery_note_id,
-        purchase_order_id=request.purchase_order_id,
-        status=MatchStatusEnum(decision.status),
-        overall_score=overall_score,
-        line_matches=match_results.line_matches,
-        amount_variance=match_results.amount_variance,
-        quantity_variance=match_results.quantity_variance,
-        date_variance=match_results.date_variance,
-        balance_status=match_results.balance_status,
-        warnings=match_results.warnings,
-        decision=decision,
-        created_at=saved_result.created_at
+    # Step 3: Make decision
+    decision = await decision_engine.make_decision(match_result)
+
+    # Update match result with decision
+    match_result.decision = decision.decision
+    match_result.decision_reason = decision.reason
+    if decision.auto_approve:
+        match_result.status = MatchStatus.AUTO_APPROVED
+
+    # Step 4: Update balance ledger if matched
+    if decision.decision == "CONFIRMED":
+        await balance_service.update_balances(match_result)
+
+    await db.commit()
+
+    # Reload with scores
+    result = await db.execute(
+        select(MatchResult)
+        .options(selectinload(MatchResult.scores))
+        .where(MatchResult.id == match_result.id)
+    )
+    match_result = result.scalar_one()
+
+    return _match_result_to_detail_response(match_result)
+
+
+@router.get("/match-results", response_model=MatchingSummaryResponse)
+async def list_match_results(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    invoice_id: Optional[str] = None,
+    delivery_note_id: Optional[str] = None,
+    po_id: Optional[str] = None,
+    status: Optional[MatchStatusEnum] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all match results with filtering and pagination."""
+    query = select(MatchResult)
+    count_query = select(func.count(MatchResult.id))
+
+    if invoice_id:
+        query = query.where(MatchResult.invoice_id == invoice_id)
+        count_query = count_query.where(MatchResult.invoice_id == invoice_id)
+    if delivery_note_id:
+        query = query.where(MatchResult.delivery_note_id == delivery_note_id)
+        count_query = count_query.where(MatchResult.delivery_note_id == delivery_note_id)
+    if po_id:
+        query = query.where(MatchResult.po_id == po_id)
+        count_query = count_query.where(MatchResult.po_id == po_id)
+    if status:
+        query = query.where(MatchResult.status == MatchStatus(status.value))
+        count_query = count_query.where(MatchResult.status == MatchStatus(status.value))
+
+    # Get total count
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    # Get paginated results
+    query = query.offset((page - 1) * page_size).limit(page_size).order_by(MatchResult.created_at.desc())
+    result = await db.execute(query)
+    matches = result.scalars().all()
+
+    # Calculate summary
+    auto_approved = sum(1 for m in matches if m.status == MatchStatus.AUTO_APPROVED)
+    pending_review = sum(1 for m in matches if m.status == MatchStatus.HUMAN_REVIEW)
+    rejected = sum(1 for m in matches if m.status == MatchStatus.REJECTED)
+    disputed = sum(1 for m in matches if m.status == MatchStatus.DISPUTED)
+    avg_score = sum(m.total_score for m in matches) / len(matches) if matches else Decimal("0")
+    total_amount = sum(
+        m.invoice_amount or Decimal("0") for m in matches if m.invoice_amount
     )
 
+    total_pages = (total + page_size - 1) // page_size
 
-@router.post("/batch", response_model=BatchMatchResponse)
-async def batch_match_documents(
-    request: BatchMatchRequest,
-    matching_service: MatchingService = Depends(get_matching_service),
-    decision_engine: DecisionEngine = Depends(get_decision_engine)
-) -> BatchMatchResponse:
-    """Perform batch matching for multiple document sets."""
-    results = []
-    auto_approved = 0
-    pending_review = 0
-    rejected = 0
-
-    for match_request in request.matches:
-        try:
-            invoice = await matching_service.get_document(match_request.invoice_id)
-            delivery_note = None
-            if match_request.delivery_note_id:
-                delivery_note = await matching_service.get_document(match_request.delivery_note_id)
-            purchase_order = await matching_service.get_document(match_request.purchase_order_id)
-
-            if not purchase_order:
-                results.append({
-                    "request": match_request.model_dump(),
-                    "error": "Purchase Order not found"
-                })
-                continue
-
-            match_results = await matching_service.perform_3way_match(
-                invoice=invoice,
-                delivery_note=delivery_note,
-                purchase_order=purchase_order
-            )
-
-            decision = decision_engine.determine_decision(
-                score=match_results.overall_score,
-                has_warnings=match_results.has_warnings,
-                balance_status=match_results.balance_status
-            )
-
-            saved_result = await matching_service.save_match_result(
-                invoice_id=match_request.invoice_id,
-                delivery_note_id=match_request.delivery_note_id,
-                purchase_order_id=match_request.purchase_order_id,
-                match_results=match_results,
-                decision=decision
-            )
-
-            if decision.status == "AUTO_APPROVED":
-                auto_approved += 1
-            elif decision.status == "PENDING_REVIEW":
-                pending_review += 1
-            else:
-                rejected += 1
-
-            results.append({
-                "match_id": str(saved_result.id),
-                "status": decision.status,
-                "score": match_results.overall_score
-            })
-
-        except Exception as e:
-            results.append({
-                "request": match_request.model_dump(),
-                "error": str(e)
-            })
-
-    return BatchMatchResponse(
-        total=len(request.matches),
-        successful=len([r for r in results if "match_id" in r]),
-        failed=len([r for r in results if "error" in r]),
+    return MatchingSummaryResponse(
+        total_matches=total,
         auto_approved=auto_approved,
         pending_review=pending_review,
         rejected=rejected,
-        results=results
+        disputed=disputed,
+        average_score=avg_score,
+        total_amount_involved=total_amount,
+        results=[_match_result_to_response(m) for m in matches],
     )
 
 
-@router.get("/results/{match_id}", response_model=MatchResultResponse)
-async def get_match_result(
-    match_id: UUID,
-    db: AsyncSession = Depends(get_db)
-) -> MatchResultResponse:
-    """Get a specific match result."""
+@router.get("/match-results/{match_id}", response_model=MatchResultDetailResponse)
+async def get_match_result(match_id: str, db: AsyncSession = Depends(get_db)):
+    """Get a specific match result with detailed scores."""
     result = await db.execute(
         select(MatchResult)
-        .options(
-            selectinload(MatchResult.line_matches),
-            selectinload(MatchResult.cross_references)
-        )
+        .options(selectinload(MatchResult.scores))
         .where(MatchResult.id == match_id)
     )
-    match_result = result.scalar_one_or_none()
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match result not found")
+    return _match_result_to_detail_response(match)
 
-    if not match_result:
+
+@router.post("/match-results/{match_id}/review", response_model=MatchResultResponse)
+async def submit_manual_review(
+    match_id: str,
+    review: ManualReviewRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit manual review decision for a match result."""
+    from datetime import datetime, timezone
+
+    result = await db.execute(
+        select(MatchResult).where(MatchResult.id == match_id)
+    )
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match result not found")
+
+    if match.status not in [MatchStatus.PENDING, MatchStatus.HUMAN_REVIEW]:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Match result with ID {match_id} not found"
+            status_code=400,
+            detail=f"Cannot review match in status {match.status.value}",
         )
 
-    return MatchResultResponse.model_validate(match_result)
+    # Update with review decision
+    match.status = MatchStatus.CONFIRMED if review.decision == "CONFIRMED" else MatchStatus.REJECTED
+    match.reviewed_by = review.reviewed_by
+    match.reviewed_at = datetime.now(timezone.utc)
+    match.review_notes = review.notes
+
+    # Update document statuses
+    if review.decision == "CONFIRMED":
+        await _update_document_statuses_on_confirmation(db, match)
+
+    await db.commit()
+    await db.refresh(match)
+    return _match_result_to_response(match)
 
 
-@router.get("/results", response_model=list[MatchResultResponse])
-async def list_match_results(
-    status_filter: Optional[MatchStatusEnum] = Query(None, alias="status"),
-    invoice_id: Optional[UUID] = Query(None),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: AsyncSession = Depends(get_db)
-) -> list[MatchResultResponse]:
-    """List match results with optional filters."""
-    query = select(MatchResult).options(
-        selectinload(MatchResult.line_matches),
-        selectinload(MatchResult.cross_references)
-    )
+@router.get("/balances", response_model=list[BalanceLedgerResponse])
+async def list_balances(
+    po_id: Optional[str] = None,
+    invoice_id: Optional[str] = None,
+    delivery_note_id: Optional[str] = None,
+    is_settled: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List balance ledger entries."""
+    query = select(BalanceLedger)
 
-    if status_filter:
-        query = query.where(MatchResult.status == status_filter.value)
+    if po_id:
+        query = query.where(BalanceLedger.po_id == po_id)
     if invoice_id:
-        query = query.where(MatchResult.invoice_id == invoice_id)
+        query = query.where(BalanceLedger.invoice_id == invoice_id)
+    if delivery_note_id:
+        query = query.where(BalanceLedger.delivery_note_id == delivery_note_id)
+    if is_settled is not None:
+        query = query.where(BalanceLedger.is_settled == is_settled)
 
-    query = query.offset(skip).limit(limit).order_by(MatchResult.created_at.desc())
-
+    query = query.order_by(BalanceLedger.effective_date.desc())
     result = await db.execute(query)
-    return [MatchResultResponse.model_validate(mr) for mr in result.scalars().all()]
+    balances = result.scalars().all()
+
+    return [_balance_to_response(b) for b in balances]
 
 
-@router.get("/balance/{document_id}", response_model=list[BalanceResponse])
-async def get_document_balance(
-    document_id: UUID,
-    db: AsyncSession = Depends(get_db)
-) -> list[BalanceResponse]:
-    """Get balance ledger entries for a document."""
-    balance_service = BalanceService(db)
-    balances = await balance_service.get_document_balance(document_id)
-    return [BalanceResponse.model_validate(b) for b in balances]
-
-
-@router.post("/balance/resolve", response_model=dict)
-async def resolve_balance(
-    document_id: UUID,
-    resolution_type: str,
-    resolution_amount: float,
-    notes: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
-) -> dict:
-    """Resolve a balance discrepancy."""
-    balance_service = BalanceService(db)
-    success = await balance_service.resolve_balance(
-        document_id=document_id,
-        resolution_type=resolution_type,
-        resolution_amount=resolution_amount,
-        notes=notes
+@router.get("/balances/{balance_id}", response_model=BalanceLedgerResponse)
+async def get_balance(balance_id: str, db: AsyncSession = Depends(get_db)):
+    """Get a specific balance ledger entry."""
+    result = await db.execute(
+        select(BalanceLedger).where(BalanceLedger.id == balance_id)
     )
-    return {"success": success, "message": f"Balance {resolution_type} processed"}
+    balance = result.scalar_one_or_none()
+    if not balance:
+        raise HTTPException(status_code=404, detail="Balance entry not found")
+    return _balance_to_response(balance)
+
+
+# Helper functions
+def _match_result_to_response(match: MatchResult) -> MatchResultResponse:
+    """Convert MatchResult model to response schema."""
+    return MatchResultResponse(
+        id=match.id,
+        invoice_id=match.invoice_id,
+        delivery_note_id=match.delivery_note_id,
+        po_id=match.po_id,
+        match_type=match.match_type,
+        status=MatchStatusEnum(match.status.value),
+        total_score=match.total_score,
+        line_score=match.line_score,
+        amount_score=match.amount_score,
+        date_score=match.date_score,
+        po_amount=match.po_amount,
+        invoice_amount=match.invoice_amount,
+        delivery_note_amount=match.delivery_note_amount,
+        amount_variance=match.amount_variance,
+        po_quantity=match.po_quantity,
+        invoice_quantity=match.invoice_quantity,
+        delivery_note_quantity=match.delivery_note_quantity,
+        quantity_variance=match.quantity_variance,
+        decision=match.decision,
+        decision_reason=match.decision_reason,
+        reviewed_by=match.reviewed_by,
+        reviewed_at=match.reviewed_at,
+        review_notes=match.review_notes,
+        created_at=match.created_at,
+        updated_at=match.updated_at,
+    )
+
+
+def _match_result_to_detail_response(match: MatchResult) -> MatchResultDetailResponse:
+    """Convert MatchResult model to detailed response schema."""
+    return MatchResultDetailResponse(
+        **_match_result_to_response(match).model_dump(),
+        scores=[_score_to_response(s) for s in match.scores],
+    )
+
+
+def _score_to_response(score: MatchScore) -> MatchScoreResponse:
+    """Convert MatchScore model to response schema."""
+    return MatchScoreResponse(
+        id=score.id,
+        po_line_id=score.po_line_id,
+        invoice_line_id=score.invoice_line_id,
+        delivery_note_line_id=score.delivery_note_line_id,
+        product_code_match=score.product_code_match,
+        po_quantity=score.po_quantity,
+        matched_quantity=score.matched_quantity,
+        quantity_match_score=score.quantity_match_score,
+        po_amount=score.po_amount,
+        matched_amount=score.matched_amount,
+        amount_match_score=score.amount_match_score,
+        line_score=score.line_score,
+        is_matched=score.is_matched,
+        variance_reason=score.variance_reason,
+    )
+
+
+def _balance_to_response(balance: BalanceLedger) -> BalanceLedgerResponse:
+    """Convert BalanceLedger model to response schema."""
+    return BalanceLedgerResponse(
+        id=balance.id,
+        po_id=balance.po_id,
+        invoice_id=balance.invoice_id,
+        delivery_note_id=balance.delivery_note_id,
+        balance_type=balance.balance_type.value,
+        original_amount=balance.original_amount,
+        original_quantity=balance.original_quantity,
+        remaining_amount=balance.remaining_amount,
+        remaining_quantity=balance.remaining_quantity,
+        billed_amount=balance.billed_amount,
+        billed_quantity=balance.billed_quantity,
+        is_settled=balance.is_settled,
+        settlement_date=balance.settlement_date,
+        effective_date=balance.effective_date,
+    )
+
+
+async def _update_document_statuses_on_confirmation(db: AsyncSession, match: MatchResult):
+    """Update document statuses when a match is confirmed."""
+    from app.models.document import DocumentStatus, Invoice, DeliveryNote, PurchaseOrder
+
+    if match.invoice_id:
+        result = await db.execute(select(Invoice).where(Invoice.id == match.invoice_id))
+        invoice = result.scalar_one_or_none()
+        if invoice:
+            invoice.status = DocumentStatus.CONFIRMED
+
+    if match.delivery_note_id:
+        result = await db.execute(select(DeliveryNote).where(DeliveryNote.id == match.delivery_note_id))
+        dn = result.scalar_one_or_none()
+        if dn:
+            dn.status = DocumentStatus.CONFIRMED
+
+    if match.po_id:
+        result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == match.po_id))
+        po = result.scalar_one_or_none()
+        if po:
+            po.status = DocumentStatus.CONFIRMED

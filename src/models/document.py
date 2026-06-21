@@ -1,181 +1,274 @@
 // src/models/document.py
-"""Base document model for PO, Invoice, and Delivery Note."""
+"""Document models for PO, Invoice, and Delivery Note."""
+import enum
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
-from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text, Enum as SQLEnum
+from sqlalchemy import String, Numeric, Date, DateTime, Text, Enum, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, UUIDMixin, TimestampMixin
-
-if TYPE_CHECKING:
-    from src.models.document_line import DocumentLine
-    from src.models.user import User
+from app.models.base import Base, TimestampMixin
 
 
-class DocumentType(str, Enum):
-    """Types of documents in the system."""
-    PURCHASE_ORDER = "purchase_order"
-    INVOICE = "invoice"
-    DELIVERY_NOTE = "delivery_note"
+class DocumentStatus(str, enum.Enum):
+    """Document status enumeration."""
+
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    MATCHED = "MATCHED"
+    PARTIALLY_MATCHED = "PARTIALLY_MATCHED"
+    CONFIRMED = "CONFIRMED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    DISPUTED = "DISPUTED"
+    CANCELLED = "CANCELLED"
 
 
-class DocumentStatus(str, Enum):
-    """Status of a document."""
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    DISPUTED = "disputed"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
+class DocumentType(str, enum.Enum):
+    """Document type enumeration."""
+
+    PURCHASE_ORDER = "PURCHASE_ORDER"
+    INVOICE = "INVOICE"
+    DELIVERY_NOTE = "DELIVERY_NOTE"
 
 
-class Document(UUIDMixin, TimestampMixin, Base):
-    """
-    Base document model representing PO, Invoice, or Delivery Note.
-    Uses single-table inheritance pattern for different document types.
-    """
-    
-    __tablename__ = "documents"
-    __mapper_args__ = {
-        "polymorphic_identity": "document",
-        "polymorphic_on": "document_type",
-    }
-    
-    # Document identification
-    document_number: Mapped[str] = mapped_column(
-        String(100),
-        unique=True,
-        index=True,
-        nullable=False,
+class PurchaseOrder(Base, TimestampMixin):
+    """Purchase Order model."""
+
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
     )
-    document_type: Mapped[DocumentType] = mapped_column(
-        SQLEnum(DocumentType, name="document_type_enum"),
-        nullable=False,
-    )
+    po_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(
-        SQLEnum(DocumentStatus, name="document_status_enum"),
-        default=DocumentStatus.SUBMITTED,
-        nullable=False,
-        index=True,
-    )
-    
-    # Supplier information
-    supplier_code: Mapped[str] = mapped_column(
-        String(100),
-        index=True,
+        Enum(DocumentStatus),
+        default=DocumentStatus.PENDING,
         nullable=False,
     )
-    supplier_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-    supplier_tax_id: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-    
-    # Reference numbers
-    reference_number: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    po_reference: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    
-    # Dates
-    document_date: Mapped[Date] = mapped_column(
-        Date,
-        nullable=False,
-        index=True,
-    )
-    expected_delivery_date: Mapped[Optional[Date]] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    
-    # Financial
-    subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    tax_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-        index=True,
-    )
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        default="USD",
-        nullable=False,
-    )
-    
-    # Metadata
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    
-    # Audit
-    created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
+
     # Relationships
-    lines: Mapped[list["DocumentLine"]] = relationship(
-        "DocumentLine",
-        back_populates="document",
+    lines: Mapped[list["POLine"]] = relationship(
+        "POLine",
+        back_populates="purchase_order",
         cascade="all, delete-orphan",
-        lazy="selectin",
     )
-    created_by: Mapped[Optional["User"]] = relationship(
-        "User",
-        foreign_keys=[created_by_id],
+    matched_invoices: Mapped[list["MatchResult"]] = relationship(
+        "MatchResult",
+        foreign_keys="MatchResult.po_id",
+        back_populates="purchase_order",
     )
-    
-    def __repr__(self) -> str:
-        return f"<Document {self.document_type.value}:{self.document_number}>"
-    
-    @property
-    def is_po(self) -> bool:
-        """Check if this is a purchase order."""
-        return self.document_type == DocumentType.PURCHASE_ORDER
-    
-    @property
-    def is_invoice(self) -> bool:
-        """Check if this is an invoice."""
-        return self.document_type == DocumentType.INVOICE
-    
-    @property
-    def is_delivery_note(self) -> bool:
-        """Check if this is a delivery note."""
-        return self.document_type == DocumentType.DELIVERY_NOTE
-    
-    @property
-    def open_amount(self) -> Decimal:
-        """Calculate open (unmatched) amount."""
-        from src.models.balance import Balance, BalanceType
-        matched_amount = sum(
-            b.amount for b in self.balances 
-            if b.balance_type == BalanceType.DEBIT if self.is_po or self.is_delivery_note
-            else b.amount if b.balance_type == BalanceType.CREDIT else Decimal("0")
-            for b in self.balances
-        )
-        return self.total_amount - matched_amount
+    matched_delivery_notes: Mapped[list["MatchResult"]] = relationship(
+        "MatchResult",
+        foreign_keys="MatchResult.delivery_note_id",
+        back_populates="delivery_note",
+    )
+
+    __table_args__ = (
+        Index("ix_purchase_orders_supplier_status", "supplier_id", "status"),
+    )
 
 
-import uuid
+class POLine(Base, TimestampMixin):
+    """Purchase Order Line Item model."""
+
+    __tablename__ = "po_lines"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    po_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    uom: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+
+    # Relationships
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="lines",
+    )
+
+
+class Invoice(Base, TimestampMixin):
+    """Invoice model."""
+
+    __tablename__ = "invoices"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    invoice_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    po_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    tax_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[DocumentStatus] = mapped_column(
+        Enum(DocumentStatus),
+        default=DocumentStatus.PENDING,
+        nullable=False,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[po_id],
+    )
+    lines: Mapped[list["InvoiceLine"]] = relationship(
+        "InvoiceLine",
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+    )
+    match_results: Mapped[list["MatchResult"]] = relationship(
+        "MatchResult",
+        back_populates="invoice",
+    )
+
+    __table_args__ = (
+        Index("ix_invoices_supplier_status", "supplier_id", "status"),
+        Index("ix_invoices_po_id", "po_id"),
+    )
+
+
+class InvoiceLine(Base, TimestampMixin):
+    """Invoice Line Item model."""
+
+    __tablename__ = "invoice_lines"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    invoice_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    uom: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+
+    # Relationships
+    invoice: Mapped["Invoice"] = relationship(
+        "Invoice",
+        back_populates="lines",
+    )
+
+
+class DeliveryNote(Base, TimestampMixin):
+    """Delivery Note model."""
+
+    __tablename__ = "delivery_notes"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    dn_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    po_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)
+    received_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    status: Mapped[DocumentStatus] = mapped_column(
+        Enum(DocumentStatus),
+        default=DocumentStatus.PENDING,
+        nullable=False,
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[po_id],
+    )
+    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
+        "DeliveryNoteLine",
+        back_populates="delivery_note",
+        cascade="all, delete-orphan",
+    )
+    match_results: Mapped[list["MatchResult"]] = relationship(
+        "MatchResult",
+        back_populates="delivery_note",
+    )
+
+    __table_args__ = (
+        Index("ix_delivery_notes_supplier_status", "supplier_id", "status"),
+        Index("ix_delivery_notes_po_id", "po_id"),
+    )
+
+
+class DeliveryNoteLine(Base, TimestampMixin):
+    """Delivery Note Line Item model."""
+
+    __tablename__ = "delivery_note_lines"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    delivery_note_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    product_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    uom: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+
+    # Relationships
+    delivery_note: Mapped["DeliveryNote"] = relationship(
+        "DeliveryNote",
+        back_populates="lines",
+    )

@@ -1,51 +1,64 @@
 // src/models/base.py
-"""Base model classes with common functionality."""
-import uuid
+"""SQLAlchemy base configuration."""
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, declared_attr, mapped_column
+from sqlalchemy import MetaData, DateTime
+from sqlalchemy.ext.asyncio import AsyncAttrs, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from src.app.database import Base
+from app.config import get_settings
+
+settings = get_settings()
+
+# Naming convention for constraints
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+metadata = MetaData(naming_convention=convention)
+
+# Async engine with connection pooling
+engine = create_async_engine(
+    settings.database_url,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    echo=settings.debug,
+)
+
+# Session factory
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+    autoflush=False,
+)
 
 
-class UUIDMixin:
-    """Mixin for UUID primary key."""
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        index=True,
-    )
+class Base(AsyncAttrs, DeclarativeBase):
+    """Base class for all models with common fields."""
+
+    metadata = metadata
+
+    id: Mapped[str]
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
 
 
 class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
-    
+    """Mixin to add timestamp columns."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.utcnow,
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
         nullable=False,
     )
-
-
-class Base(UUIDMixin, TimestampMixin, Base):
-    """Base class for all database models."""
-    
-    __abstract__ = True
-    
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        """Generate __tablename__ from class name."""
-        import re
-        name = cls.__name__
-        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
