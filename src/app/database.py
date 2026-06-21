@@ -1,70 +1,45 @@
 // src/app/database.py
-"""Database connection and session management."""
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from contextlib import contextmanager
+from typing import Generator
 
 from src.app.config import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(
+engine = create_engine(
     settings.DATABASE_URL,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    echo=settings.DATABASE_ECHO,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     pool_pre_ping=True,
+    echo=settings.DEBUG,
 )
 
-async_session_maker = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
 
 
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base."""
-    pass
+def get_db() -> Generator[Session, None, None]:
+    """Dependency for getting database sessions."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for getting async database session."""
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database session."""
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-async def init_db() -> None:
-    """Initialize database tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-async def close_db() -> None:
-    """Close database connections."""
-    await engine.dispose()
+@contextmanager
+def get_db_context() -> Generator[Session, None, None]:
+    """Context manager for database sessions."""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

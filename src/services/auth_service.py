@@ -1,139 +1,175 @@
 // src/services/auth_service.py
-"""Authentication service."""
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from jose import jwt, JWTError
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from src.config import get_settings
-from src.models.user import User
-from src.models.enums import UserRole
-from src.schemas.user import UserCreate, UserLogin
-from src.services.base_service import BaseService
+from src.app.config import get_settings
+from src.app.database import get_db
+from src.models.models import User
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-class AuthService(BaseService[User, UserCreate, dict]):
-    """Service for authentication operations."""
-    
+class AuthService:
+    """Authentication service for user management and JWT handling."""
+
     def __init__(self, db: Session):
-        super().__init__(User, db)
-    
-    def hash_password(self, password: str) -> str:
-        """Hash a password using bcrypt."""
-        return pwd_context.hash(password)
-    
-    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        self.db = db
+
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash."""
         return pwd_context.verify(plain_password, hashed_password)
-    
-    def create_user(self, user_data: UserCreate) -> User:
-        """
-        Create a new user with hashed password.
+
+    @staticmethod
+    def get_password_hash(password: str) -> str:
+        """Hash a password."""
+        return pwd_context.hash(password)
+
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        """Get user by email."""
+        return self.db.query(User).filter(User.email == email).first()
+
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Get user by username."""
+        return self.db.query(User).filter(User.username == username).first()
+
+    def get_user_by_id(self, user_id: UUID) -> Optional[User]:
+        """Get user by ID."""
+        return self.db.query(User).filter(User.id == user_id).first()
+
+    def create_user(
+        self,
+        email: str,
+        username: str,
+        password: str,
+        full_name: Optional[str] = None,
+        role: str = "reviewer",
+        approval_limit: float = 0,
+    ) -> User:
+        """Create a new user."""
+        hashed_password = self.get_password_hash(password)
         
-        Args:
-            user_data: User creation data
-            
-        Returns:
-            Created user
-        """
-        db_user = User(
-            email=user_data.email,
-            hashed_password=self.hash_password(user_data.password),
-            full_name=user_data.full_name,
-            role=user_data.role,
+        user = User(
+            email=email,
+            username=username,
+            hashed_password=hashed_password,
+            full_name=full_name,
+            role=role,
+            approval_limit=approval_limit,
         )
-        self.db.add(db_user)
-        self.db.commit()
-        self.db.refresh(db_user)
-        return db_user
-    
-    def authenticate(self, login_data: UserLogin) -> Optional[User]:
-        """
-        Authenticate a user by email and password.
         
-        Args:
-            login_data: Login credentials
-            
-        Returns:
-            User if authenticated, None otherwise
-        """
-        user = self.get_by(email=login_data.email)
+        self.db.add(user)
+        self.db.flush()
+        
+        logger.info(f"Created user: {username}")
+        return user
+
+    def authenticate_user(self, username: str, password: str) -> Optional[User]:
+        """Authenticate a user."""
+        user = self.get_user_by_username(username)
         if not user:
             return None
-        if not self.verify_password(login_data.password, user.hashed_password):
+        if not self.verify_password(password, user.hashed_password):
             return None
         if not user.is_active:
             return None
         return user
-    
+
     def create_access_token(
-        self,
-        user: User,
-        expires_delta: Optional[timedelta] = None
+        self, user_id: UUID, expires_delta: Optional[timedelta] = None
     ) -> str:
-        """
-        Create a JWT access token for a user.
-        
-        Args:
-            user: The user to create token for
-            expires_delta: Token expiration time
-            
-        Returns:
-            JWT token string
-        """
+        """Create a JWT access token."""
         if expires_delta:
-            expire = datetime.now(timezone.utc) + expires_delta
+            expire = datetime.utcnow() + expires_delta
         else:
-            expire = datetime.now(timezone.utc) + timedelta(
-                minutes=settings.access_token_expire_minutes
+            expire = datetime.utcnow() + timedelta(
+                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
             )
         
         to_encode = {
-            "sub": str(user.id),
+            "sub": str(user_id),
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
-            "role": user.role.value,
-            "email": user.email,
+            "iat": datetime.utcnow(),
         }
         
         encoded_jwt = jwt.encode(
-            to_encode,
-            settings.jwt_secret_key,
-            algorithm=settings.jwt_algorithm
+            to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
         )
+        
         return encoded_jwt
-    
+
     @staticmethod
     def decode_token(token: str) -> Optional[dict]:
-        """
-        Decode and validate a JWT token.
-        
-        Args:
-            token: JWT token string
-            
-        Returns:
-            Token payload or None if invalid
-        """
+        """Decode and validate a JWT token."""
         try:
             payload = jwt.decode(
-                token,
-                settings.jwt_secret_key,
-                algorithms=[settings.jwt_algorithm]
+                token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
             )
             return payload
         except JWTError:
             return None
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Dependency to get current authenticated user."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     
-    def get_user_by_email(self, email: str) -> Optional[User]:
-        """Get a user by email address."""
-        return self.get_by(email=email)
+    payload = AuthService.decode_token(token)
+    if payload is None:
+        raise credentials_exception
     
-    def get_user_by_id(self, user_id: UUID) -> Optional[User]:
-        """Get a user by ID."""
-        return self.get(user_id)
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+    
+    auth_service = AuthService(db)
+    user = auth_service.get_user_by_id(UUID(user_id))
+    
+    if user is None:
+        raise credentials_exception
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is inactive",
+        )
+    
+    return user
+
+
+def get_current_active_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Get current active user."""
+    return current_user
+
+
+def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Require admin role."""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return current_user
