@@ -1,22 +1,34 @@
-# src/models/user.py
-"""User model for authentication and authorization."""
-from sqlalchemy import Column, String, Boolean
-from sqlalchemy.orm import relationship
+// src/models/user.py
+"""User model for authentication."""
 
-from src.models.base import BaseModel
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import String, Boolean, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.matching import MatchDecision
 
 
-class User(BaseModel):
-    """User model for authentication."""
+class User(Base):
+    """User model for authentication and authorization."""
 
     __tablename__ = "users"
 
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_superuser = Column(Boolean, default=False, nullable=False)
-    role = Column(String(50), default="user", nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    audit_logs = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+    match_decisions: Mapped[list["MatchDecision"]] = relationship(
+        "MatchDecision", back_populates="reviewed_by_user"
+    )
+
+    def __repr__(self) -> str:
+        return f"<User {self.email}>"

@@ -1,23 +1,26 @@
-# src/models/__init__.py
-"""Database models package."""
-from src.models.base import BaseModel
-from src.models.user import User
-from src.models.purchase_order import PurchaseOrder
-from src.models.invoice import Invoice
-from src.models.delivery_note import DeliveryNote
-from src.models.matching import MatchingRecord
-from src.models.matching_line import MatchingLine
-from src.models.balance_ledger import BalanceLedger
-from src.models.audit_log import AuditLog
+// src/models/__init__.py
+"""SQLAlchemy models package."""
+
+from app.models.base import BaseModel
+from app.models.user import User
+from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from app.models.invoice import Invoice, InvoiceLine
+from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from app.models.matching import Match, MatchLine, MatchDecision
+from app.models.balance import BalanceLedger, BalanceEntry
 
 __all__ = [
     "BaseModel",
     "User",
     "PurchaseOrder",
+    "PurchaseOrderLine",
     "Invoice",
+    "InvoiceLine",
     "DeliveryNote",
-    "MatchingRecord",
-    "MatchingLine",
+    "DeliveryNoteLine",
+    "Match",
+    "MatchLine",
+    "MatchDecision",
     "BalanceLedger",
-    "AuditLog",
+    "BalanceEntry",
 ]

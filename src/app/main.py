@@ -1,51 +1,38 @@
-# src/app/main.py
+// src/app/main.py
+"""FastAPI application entry point for FinaRo AP Automation Engine."""
+
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import logging
-import time
 
-from src.app.config import get_settings
-from src.core.database import engine, Base, get_db
-from src.api.v1 import api_router
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-settings = get_settings()
+from app.api.routes import auth, invoices, delivery_notes, purchase_orders, matching
+from app.config import settings
+from app.database import engine, Base
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    logger.info("Starting FinaRo AP Automation Engine...")
-
-    # Create database tables
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan handler for startup and shutdown events."""
+    # Startup: Create database tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created/verified")
-
     yield
-
-    logger.info("Shutting down FinaRo AP Automation Engine...")
+    # Shutdown: Dispose connection pool
     await engine.dispose()
 
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
+    title="FinaRo AP Automation Engine",
     description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
+    version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
-
 
 # CORS middleware
 app.add_middleware(
@@ -57,67 +44,24 @@ app.add_middleware(
 )
 
 
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests."""
-    start_time = time.time()
-
-    logger.info(f"Request: {request.method} {request.url.path}")
-
-    try:
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        logger.info(
-            f"Response: {request.method} {request.url.path} "
-            f"Status: {response.status_code} Time: {process_time:.3f}s"
-        )
-
-        response.headers["X-Process-Time"] = str(process_time)
-        return response
-
-    except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        raise
-
-
-# Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions."""
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Global exception handler for unhandled errors."""
     return JSONResponse(
         status_code=500,
-        content={
-            "detail": "Internal server error",
-            "error": str(exc) if settings.DEBUG else None,
-        },
+        content={"detail": "Internal server error", "message": str(exc)},
     )
 
 
-# Health check endpoint
-@app.get("/health", tags=["health"])
-async def health_check():
-    """Health check endpoint for monitoring."""
-    return {
-        "status": "healthy",
-        "service": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-    }
+# Include routers with prefix
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(purchase_orders.router, prefix="/api/v1/purchase-orders", tags=["Purchase Orders"])
+app.include_router(invoices.router, prefix="/api/v1/invoices", tags=["Invoices"])
+app.include_router(delivery_notes.router, prefix="/api/v1/delivery-notes", tags=["Delivery Notes"])
+app.include_router(matching.router, prefix="/api/v1/matching", tags=["Matching"])
 
 
-# Include API routes
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-
-
-# Root endpoint
-@app.get("/", tags=["root"])
-async def root():
-    """Root endpoint with API information."""
-    return {
-        "service": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "docs": "/docs",
-        "health": "/health",
-    }
+@app.get("/api/health")
+async def health_check() -> dict:
+    """Health check endpoint."""
+    return {"status": "healthy", "version": "1.0.0"}

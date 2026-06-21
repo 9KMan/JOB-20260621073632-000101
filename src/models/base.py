@@ -1,24 +1,29 @@
-# src/models/base.py
-"""Base model with common fields."""
+// src/models/base.py
+"""Base model with common fields for all entities."""
+
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declared_attr
-
-from src.database import Base
+from sqlalchemy import DateTime, String, Boolean
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 
 
-class BaseModel(Base):
-    """Base model with common fields for all tables."""
+class BaseModel:
+    """Base model with UUID primary key and timestamps."""
 
-    __abstract__ = True
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
