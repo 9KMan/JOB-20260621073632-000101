@@ -1,18 +1,19 @@
-// models/enums.py
-"""Enumeration types for AP Automation Engine.
-
-Defines all status enums and decision types used across models.
-"""
+# models/enums.py
+"""SQLAlchemy and Pydantic enums for the application."""
 
 import enum
+from typing import Literal
+
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class InvoiceStatus(str, enum.Enum):
-    """Invoice processing status."""
-    
+    """Status of an invoice in the system."""
+
     DRAFT = "draft"
     PENDING = "pending"
-    PROCESSING = "processing"
+    UNDER_REVIEW = "under_review"
     MATCHED = "matched"
     APPROVED = "approved"
     EXCEPTION = "exception"
@@ -22,94 +23,85 @@ class InvoiceStatus(str, enum.Enum):
 
 
 class PurchaseOrderStatus(str, enum.Enum):
-    """Purchase order status."""
-    
+    """Status of a purchase order."""
+
     DRAFT = "draft"
-    SENT = "sent"
-    PARTIAL = "partial"
-    COMPLETE = "complete"
+    ACTIVE = "active"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
 class DeliveryNoteStatus(str, enum.Enum):
-    """Delivery note status."""
-    
+    """Status of a delivery note."""
+
     DRAFT = "draft"
-    ISSUED = "issued"
-    PARTIAL = "partial"
-    COMPLETE = "complete"
+    CONFIRMED = "confirmed"
     RECEIVED = "received"
     CANCELLED = "cancelled"
 
 
-class MatchStatus(str, enum.Enum):
-    """Matching process status."""
-    
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+class MatchingDecision(str, enum.Enum):
+    """Decision from the matching engine."""
 
-
-class MatchDecision(str, enum.Enum):
-    """Matching decision based on score thresholds."""
-    
     AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_REVIEW = "one_click_review"
+    ONE_CLICK_APPROVED = "one_click_approved"
+    MANUAL_REVIEW = "manual_review"
     EXCEPTION = "exception"
     REJECTED = "rejected"
-    MANUAL_REVIEW = "manual_review"
+    PENDING = "pending"
 
 
-class LineStatus(str, enum.Enum):
-    """Line item status within a document."""
-    
-    OPEN = "open"
-    PARTIAL = "partial"
-    FULL = "full"
-    CLOSED = "closed"
+class MatchStatus(str, enum.Enum):
+    """Status of a match record."""
+
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    DISMISSED = "dismissed"
+
+
+class ExceptionType(str, enum.Enum):
+    """Types of exceptions in the matching process."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    MISSING_PO = "missing_po"
+    MULTIPLE_MATCHES = "multiple_matches"
+    NO_MATCH = "no_match"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DUPLICATE_PO = "duplicate_po"
+    DATE_VARIANCE = "date_variance"
+    SUPPLIER_MISMATCH = "supplier_mismatch"
+    OTHER = "other"
 
 
 class ExceptionStatus(str, enum.Enum):
-    """Exception handling status."""
-    
+    """Status of an exception."""
+
     OPEN = "open"
-    UNDER_REVIEW = "under_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
 
 
-class ExceptionType(str, enum.Enum):
-    """Types of matching exceptions."""
-    
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    DATE_VARIANCE = "date_variance"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    MULTIPLE_POTENTIAL_MATCHES = "multiple_potential_matches"
-    AMOUNT_VARIANCE = "amount_variance"
-    UNMATCHED_LINES = "unmatched_lines"
-
-
 class MatchConfidence(str, enum.Enum):
     """Confidence level of a match."""
-    
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+    NONE = "none"
 
 
-class LearningStatus(str, enum.Enum):
-    """Learning/cross-reference status."""
-    
-    ACTIVE = "active"
-    LEARNING = "learning"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    ARCHIVED = "archived"
+# SQLAlchemy enum columns
+def create_enum_column(
+    enum_class: type[enum.Enum],
+    **kwargs,
+) -> Mapped[enum.Enum]:
+    """Helper to create a mapped column for an enum."""
+    return mapped_column(
+        SQLEnum(enum_class, native_enum=False, create_constraint=True),
+        **kwargs,
+    )

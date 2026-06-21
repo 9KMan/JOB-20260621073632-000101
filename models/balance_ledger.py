@@ -1,188 +1,177 @@
-// models/balance_ledger.py
-"""BalanceLedger SQLAlchemy model for tracking PO line balances.
+# models/balance_ledger.py
+"""Balance Ledger model for AP Automation Core Engine."""
 
-The balance ledger tracks the relationship between:
-- Purchase Order lines (what was ordered)
-- Delivery lines (what was delivered)
-- Invoice lines (what was invoiced)
-"""
-
-from datetime import datetime
+import uuid
+from datetime import date
 from decimal import Decimal
-from typing import Optional
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    DateTime,
-    ForeignKey,
+    Date,
     Index,
     Numeric,
     String,
-    func,
+    ForeignKey,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base
+from models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from models.purchase_order import PurchaseOrderLineItem
+    from models.invoice import InvoiceLineItem
 
 
-class BalanceLedger(Base):
-    """Balance Ledger model for tracking PO line balances.
-
-    Tracks the remaining quantities and amounts for each PO line
-    after accounting for deliveries and invoices.
-
+class BalanceLedger(Base, UUIDMixin, TimestampMixin):
+    """
+    Balance Ledger model tracking open balances for PO lines.
+    
+    This model maintains the running balance of what has been delivered
+    and invoiced against each purchase order line item.
+    
     Attributes:
         id: UUID primary key
-        po_line_id: Reference to purchase order line
-        delivery_note_line_id: Optional reference to delivery note line
-        invoice_line_id: Optional reference to invoice line
-        transaction_type: Type of transaction (delivery, invoice, adjustment)
-        quantity_before: Quantity before this transaction
-        quantity_change: Quantity changed by this transaction
-        quantity_after: Quantity remaining
-        amount_before: Amount before this transaction
-        amount_change: Amount changed by this transaction
-        amount_after: Amount remaining
+        po_line_item_id: Reference to the PO line item
+        original_quantity: Original PO quantity
+        quantity_delivered: Total quantity delivered via delivery notes
+        quantity_invoiced: Total quantity invoiced
+        quantity_credited: Total quantity credited
+        quantity_open: Open quantity available for invoicing
+        original_amount: Original PO line amount
+        amount_delivered: Amount for delivered goods
+        amount_invoiced: Amount invoiced
+        amount_credited: Amount credited
+        amount_open: Open amount available for invoicing
+        last_delivery_date: Date of last delivery
+        last_invoice_date: Date of last invoice
+        status: Current balance status
     """
 
     __tablename__ = "balance_ledger"
 
     # References
-    po_line_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+    po_line_item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_line_items.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
-    )
-    delivery_note_line_id: Mapped[Optional[UUID]] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    invoice_line_id: Mapped[Optional[UUID]] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    # Transaction type
-    transaction_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        index=True,
+        unique=True,
     )
 
     # Quantity tracking
-    quantity_before: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
+    original_quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     quantity_delivered: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
-        nullable=False,
         default=Decimal("0"),
+        nullable=False,
     )
     quantity_invoiced: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
-        nullable=False,
         default=Decimal("0"),
+        nullable=False,
     )
-    quantity_variance: Mapped[Decimal] = mapped_column(
+    quantity_credited: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
-        nullable=False,
         default=Decimal("0"),
+        nullable=False,
     )
+    quantity_open: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
 
     # Amount tracking
-    amount_before: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     amount_delivered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+        Numeric(15, 4),
+        default=Decimal("0"),
         nullable=False,
-        default=Decimal("0.00"),
     )
     amount_invoiced: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
-    amount_variance: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
-
-    # Running balance
-    quantity_remaining: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
+        default=Decimal("0"),
         nullable=False,
     )
-    amount_remaining: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+    amount_credited: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
         nullable=False,
     )
+    amount_open: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
 
-    # Reference document info
-    reference_number: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-    )
-    reference_date: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
+    # Dates
+    last_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_invoice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Status
-    is_reconciled: Mapped[bool] = mapped_column(
-        default=False,
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="open",
         nullable=False,
-    )
-    reconciled_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-    # Additional data
-    metadata: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
-        nullable=True,
-    )
-    notes: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
     )
 
     # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        backref="balance_entries",
+    po_line_item: Mapped["PurchaseOrderLineItem"] = relationship(
+        "PurchaseOrderLineItem",
+        back_populates="balance_ledgers",
+    )
+    invoice_line_items: Mapped[list["InvoiceLineItem"]] = relationship(
+        "InvoiceLineItem",
+        back_populates="balance_ledger",
     )
 
     __table_args__ = (
-        Index("ix_balance_po_line", "po_line_id", "transaction_type"),
-        Index("ix_balance_delivery", "delivery_note_line_id"),
-        Index("ix_balance_invoice", "invoice_line_id"),
-        Index("ix_balance_reference", "reference_number", "transaction_type"),
+        Index("ix_balance_ledger_po_line_item_id", "po_line_item_id", unique=True),
+        Index("ix_balance_ledger_status", "status"),
     )
 
     def __repr__(self) -> str:
-        return f"<BalanceLedger PO:{self.po_line_id} {self.transaction_type}>"
+        return f"<BalanceLedger PO Line {self.po_line_item_id} - Open: {self.quantity_open}>"
 
-    @property
-    def is_balanced(self) -> bool:
-        """Check if the line is fully balanced (no remaining)."""
-        return self.quantity_remaining == Decimal("0") and self.amount_remaining == Decimal("0")
+    def update_from_delivery(
+        self,
+        quantity: Decimal,
+        delivery_date: date,
+    ) -> None:
+        """Update balance from a delivery note."""
+        self.quantity_delivered += quantity
+        self.amount_delivered = (
+            self.quantity_delivered / self.original_quantity
+        ) * self.original_amount if self.original_quantity else Decimal("0")
+        self.last_delivery_date = delivery_date
+        self._recalculate_open()
 
-    @property
-    def balance_percentage(self) -> Decimal:
-        """Calculate balance percentage."""
-        original = self.quantity_before
-        if original == Decimal("0"):
-            return Decimal("0")
-        return (self.quantity_remaining / original) * Decimal("100")
+    def update_from_invoice(
+        self,
+        quantity: Decimal,
+        amount: Decimal,
+        invoice_date: date,
+    ) -> None:
+        """Update balance from an invoice."""
+        self.quantity_invoiced += quantity
+        self.amount_invoiced += amount
+        self.last_invoice_date = invoice_date
+        self._recalculate_open()
+
+    def update_from_credit(
+        self,
+        quantity: Decimal,
+        amount: Decimal,
+    ) -> None:
+        """Update balance from a credit memo."""
+        self.quantity_credited += quantity
+        self.amount_credited += amount
+        self._recalculate_open()
+
+    def _recalculate_open(self) -> None:
+        """Recalculate open quantities and amounts."""
+        self.quantity_open = (
+            self.original_quantity
+            - self.quantity_delivered
+            - self.quantity_invoiced
+            - self.quantity_credited
+        )
+        self.amount_open = (
+            self.original_amount
+            - self.amount_delivered
+            - self.amount_invoiced
+            - self.amount_credited
+        )
+        self.status = "closed" if self.quantity_open <= 0 else "open"

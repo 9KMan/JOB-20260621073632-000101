@@ -1,19 +1,19 @@
-// -SUMMARY-01.md
-# Phase 2 Summary — Technical Stack
+# Technical Stack Summary — AP Automation Core Engine
 
-## Technology Stack
+## Core Stack
+- **Python 3.11+** with FastAPI
+- **PostgreSQL 15+** with async SQLAlchemy 2.0
+- **Alembic** for database migrations
+- **Pydantic v2** for data validation
+- **Docker** + docker-compose for deployment
 
-| Component | Choice | Version |
-|-----------|--------|---------|
-| Language | Python | 3.11+ |
-| Framework | FastAPI | 0.110+ |
-| Database | PostgreSQL | 15+ |
-| ORM | SQLAlchemy (async) | 2.0+ |
-| Migrations | Alembic | 1.13+ |
-| Validation | Pydantic | 2.6+ |
-| Auth | JWT (HS256) + bcrypt | - |
-| Testing | pytest + pytest-asyncio | 8.1+ |
-| Container | Docker | - |
+## Authentication
+- JWT (HS256) for API authentication
+- bcrypt for password hashing
+
+## API Design
+- RESTful with `/api/v1/` versioning
+- Pydantic schemas for request/response validation
+- Auto-generated OpenAPI docs
 
 ## Project Structure
-

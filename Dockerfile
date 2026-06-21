@@ -1,79 +1,48 @@
-// Dockerfile
-# syntax=docker/dockerfile:1.7
-FROM python:3.11-slim-bookworm AS base
+# Dockerfile
+FROM python:3.11-slim as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1 \
-    UV_VERSION=0.2.27 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    POETRY_VERSION=1.8.3 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VIRTUALENVS_CREATE=true \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_NO_INTERACTION=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    build-essential \
+    gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
-ENV PATH="$POETRY_HOME/bin:$PATH"
+# Copy dependency files
+FROM base as builder
 
-WORKDIR /app
+COPY --from=python:3.11-slim /requirements.txt /requirements.txt
 
-# Install dependencies
-FROM base AS dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --prefix=/install -r /requirements.txt
 
-COPY pyproject.toml poetry.lock* ./
+# Production image
+FROM base
 
-# Configure Poetry
-RUN poetry config virtualenvs.in-project true \
-    && poetry lock --no-update \
-    && poetry install --no-root --no-interaction --all-extras
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
 
-# Development stage
-FROM dependencies AS development
-
-COPY . .
-RUN poetry install --all-extras --only-root
-
-ENV DEBUG=true
-ENV LOG_LEVEL=DEBUG
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-# Testing stage
-FROM dependencies AS testing
-
-COPY . .
-
-CMD ["pytest", "-v", "--cov=app", "--cov-report=xml"]
-
-# Production stage
-FROM base AS production
+# Copy project files
+COPY . /app
 
 # Create non-root user
-RUN groupadd --gid 1000 appgroup \
-    && useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
+RUN addgroup --system --gid 1001 apautomation && \
+    adduser --system --uid 1001 --ingroup apautomation --shell /bin/bash apautomation
 
-WORKDIR /app
-
-# Copy virtual environment from dependencies stage
-COPY --from=dependencies /app/.venv .venv
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Copy application code
-COPY --chown=appuser:appgroup . .
+# Set ownership
+RUN chown -R apautomation:apautomation /app
 
 # Switch to non-root user
-USER appuser
+USER apautomation
 
 # Expose port
 EXPOSE 8000
@@ -82,5 +51,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Default command
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

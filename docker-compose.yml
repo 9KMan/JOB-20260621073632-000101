@@ -1,103 +1,85 @@
-// docker-compose.yml
-version: '3.9'
+# docker-compose.yml
+version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap_automation_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apautomation}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apautomation_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apautomation} -d ${POSTGRES_DB:-apautomation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap_automation_network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap_automation_pgbouncer
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_dev}@postgres:5432/${POSTGRES_DB:-apautomation}"
+      POOL_MODE: "transaction"
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "20"
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ap_automation_network
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: finaro-api
-    ports:
-      - "8000:8000"
+    container_name: ap_automation_api
     environment:
-      - DATABASE_URL=postgresql://finaro_user:finaro_secure_password@db:5432/finaro_db
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - DEBUG=${DEBUG:-false}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_dev}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
+      DATABASE_HOST: "pgbouncer"
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: "${POSTGRES_DB:-apautomation}"
+      DATABASE_USER: "${POSTGRES_USER:-apautomation}"
+      DATABASE_PASSWORD: "${POSTGRES_PASSWORD:-apautomation_dev}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-secret-key-change-in-production}"
+      JWT_ALGORITHM: "HS256"
+      THRESHOLD_HIGH: "${THRESHOLD_HIGH:-95}"
+      THRESHOLD_MID: "${THRESHOLD_MID:-70}"
+      THRESHOLD_LOW: "${THRESHOLD_LOW:-40}"
+      TOLERANCE_PRICE: "${TOLERANCE_PRICE:-5}"
+      TOLERANCE_QTY: "${TOLERANCE_QTY:-10}"
+    ports:
+      - "${API_PORT:-8000}:8000"
     depends_on:
-      db:
-        condition: service_healthy
       pgbouncer:
-        condition: service_healthy
+        condition: service_started
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
     volumes:
-      - ./logs:/app/logs
+      - .:/app
     networks:
-      - finaro-network
-    restart: unless-stopped
+      - ap_automation_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
-
-  db:
-    image: postgres:16-alpine
-    container_name: finaro-db
-    environment:
-      - POSTGRES_USER=finaro_user
-      - POSTGRES_PASSWORD=finaro_secure_password
-      - POSTGRES_DB=finaro_db
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.utf8
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    ports:
-      - "5432:5432"
-    networks:
-      - finaro-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro_user -d finaro_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  pgbo ancer:
-    image: edoburu/pgbouncer:latest
-    container_name: finaro-pgbouncer
-    environment:
-      - DATABASE_URL=postgresql://finaro_user:finaro_secure_password@db:5432/finaro_db
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-      - MIN_POOL_SIZE=5
-      - SERVER_RESET_ON_RELEASE=true
-      - SERVER_LIFETIME=3600
-      - SERVER_IDLE_TIMEOUT=600
-    ports:
-      - "5433:5432"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - finaro-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U finaro_user -d finaro_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  migrations:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: finaro-migrations
-    command: alembic upgrade head
-    environment:
-      - DATABASE_URL=postgresql://finaro_user:finaro_secure_password@db:5432/finaro_db
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - finaro-network
-    restart: "no"
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  finaro-network:
+  ap_automation_network:
     driver: bridge
