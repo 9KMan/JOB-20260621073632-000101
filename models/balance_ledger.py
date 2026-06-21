@@ -1,94 +1,98 @@
 // models/balance_ledger.py
-"""BalanceLedger — financial balance tracking per PO line."""
-
+"""BalanceLedger SQLAlchemy model for tracking PO/DN/Invoice balances."""
 import uuid
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDPrimaryMixin
-from models.enums import MatchDecision
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from models.enums import LedgerEntryType
 
 if TYPE_CHECKING:
+    from models.purchase_order import PurchaseOrder, PurchaseOrderLine
     from models.invoice import Invoice
-    from models.purchase_order import PurchaseOrder, POLine
+    from models.delivery_note import DeliveryNote
 
 
-class BalanceLedger(Base, UUIDPrimaryMixin, TimestampMixin):
+class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
-    Balance ledger entry — tracks invoiced vs. delivered vs. received amounts
-    per PO line to enforce quantity and value controls.
+    Balance ledger for tracking quantities and amounts across PO, DN, and Invoice.
 
-    Schema:
-      debit  = amount invoiced  (positive)
-      credit = amount paid     (positive)
-      balance = SUM(debits) - SUM(credits)
-
-    The ledger is append-only; corrections are made via a new row with a
-    negative debit (or positive credit).
+    This is the authoritative record for remaining balances on purchase orders
+    and their associated deliveries and invoices.
     """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        Index("ix_balance_ledger_po_line_id", "po_line_id"),
-        Index("ix_balance_ledger_invoice_id", "invoice_id"),
         Index("ix_balance_ledger_po_id", "po_id"),
-        UniqueConstraint("po_line_id", "invoice_id", name="uq_balance_ledger_po_invoice"),
-        CheckConstraint(
-            "entry_type IN ('debit', 'credit', 'adjustment')",
-            name="ck_balance_ledger_entry_type",
-        ),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_reference_id", "reference_id"),
+        Index("ix_balance_ledger_reference_type", "reference_type"),
     )
 
+    # Reference to PO
     po_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    po_line_id: Mapped[uuid.UUID] = mapped_column(
+    po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("po_lines.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
+        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=True,
-        index=True,
     )
 
-    entry_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment="'debit' | 'credit' | 'adjustment'"
-    )
-    amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4), nullable=False, default=Decimal("0.0000")
-    )
-    quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4), nullable=False, default=Decimal("0.0000")
-    )
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
-    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Entry Details
+    entry_type: Mapped[LedgerEntryType] = mapped_column(String(30), nullable=False)
+    reference_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    reference_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    # Running balance snapshot (denormalised for query performance)
-    running_balance_qty: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4), nullable=False, default=Decimal("0.0000")
+    # Quantities
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    quantity_balance_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4), nullable=False
     )
-    running_balance_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4), nullable=False, default=Decimal("0.0000")
+    quantity_balance_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4), nullable=False
     )
 
-    # ── Relationships ──────────────────────────────────────────────────────────
+    # Amounts
+    amount_delta: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    amount_balance_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False
+    )
+    amount_balance_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False
+    )
+
+    # Metadata
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder", back_populates="balance_entries"
+        "PurchaseOrder"
     )
-    po_line: Mapped["POLine"] = relationship(
-        "POLine", back_populates="balance_entries"
+    purchase_order_line: Mapped[Optional["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine"
     )
-    invoice: Mapped["Invoice | None"] = relationship(
-        "Invoice", back_populates="balance_entries"
-    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BalanceLedger PO:{self.po_id} "
+            f"Type:{self.entry_type} "
+            f"QtyDelta:{self.quantity_delta}>"
+        )

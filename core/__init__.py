@@ -1,19 +1,20 @@
 // core/__init__.py
-"""Core package — application configuration, security, and database utilities."""
-
-from core.config import get_settings, Settings
-from core.database import (
-    get_db_session,
-    AsyncSessionLocal,
-    engine,
-    Base,
+"""Core module for configuration, security, and database management."""
+from core.config import settings
+from core.database import get_db_session, async_session_factory
+from core.security import (
+    create_access_token,
+    verify_password,
+    get_password_hash,
+    decode_token,
 )
 
 __all__ = [
-    "get_settings",
-    "Settings",
+    "settings",
     "get_db_session",
-    "AsyncSessionLocal",
-    "engine",
-    "Base",
+    "async_session_factory",
+    "create_access_token",
+    "verify_password",
+    "get_password_hash",
+    "decode_token",
 ]

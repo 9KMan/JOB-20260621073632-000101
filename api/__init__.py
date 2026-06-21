@@ -1,6 +1,15 @@
 // api/__init__.py
-"""API package — FastAPI routers and shared schemas."""
+"""API module for FastAPI endpoints and schemas."""
+from api.schemas import (
+    ErrorResponse,
+    HealthResponse,
+    PaginatedResponse,
+    PaginationParams,
+)
 
-from api.schemas import HealthResponse
-
-__all__ = ["HealthResponse"]
+__all__ = [
+    "ErrorResponse",
+    "HealthResponse",
+    "PaginatedResponse",
+    "PaginationParams",
+]

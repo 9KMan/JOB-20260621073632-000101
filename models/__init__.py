@@ -1,40 +1,40 @@
 // models/__init__.py
-"""Database models package — exports all SQLAlchemy models."""
-
+"""SQLAlchemy models for AP Automation Engine."""
 from models.base import Base
 from models.enums import (
     InvoiceStatus,
-    POStatus,
+    PurchaseOrderStatus,
     DeliveryNoteStatus,
     MatchDecision,
-    MatchScoreBand,
+    MatchStatus,
     ExceptionType,
     ExceptionStatus,
+    LedgerEntryType,
 )
 from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, POLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
-from models.cross_ref import CrossRef
+from models.cross_ref import CrossReference
 
 __all__ = [
-    # Base
     "Base",
     # Enums
     "InvoiceStatus",
-    "POStatus",
+    "PurchaseOrderStatus",
     "DeliveryNoteStatus",
     "MatchDecision",
-    "MatchScoreBand",
+    "MatchStatus",
     "ExceptionType",
     "ExceptionStatus",
+    "LedgerEntryType",
     # Models
     "Invoice",
     "InvoiceLine",
     "PurchaseOrder",
-    "POLine",
+    "PurchaseOrderLine",
     "DeliveryNote",
     "DeliveryNoteLine",
     "BalanceLedger",
-    "CrossRef",
+    "CrossReference",
 ]

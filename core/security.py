@@ -1,15 +1,13 @@
-# core/security.py
+// core/security.py
 """Security utilities for JWT and password handling."""
-
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Dict, Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from core.config import settings
 
-# Password hashing context using bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -24,17 +22,18 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
+    data: Dict[str, Any],
+    expires_delta: Optional[timedelta] = None,
 ) -> str:
-    """Create a JWT access token.
+    """
+    Create a JWT access token.
 
     Args:
-        data: Payload data to encode in the token.
-        expires_delta: Optional expiration time delta.
+        data: Payload data to encode in the token
+        expires_delta: Optional custom expiration time
 
     Returns:
-        Encoded JWT token string.
+        Encoded JWT token string
     """
     to_encode = data.copy()
 
@@ -46,61 +45,23 @@ def create_access_token(
         )
 
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-
     encoded_jwt = jwt.encode(
         to_encode,
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
-
     return encoded_jwt
 
 
-def create_refresh_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
-) -> str:
-    """Create a JWT refresh token.
-
-    Args:
-        data: Payload data to encode in the token.
-        expires_delta: Optional expiration time delta.
-
-    Returns:
-        Encoded JWT refresh token string.
+def decode_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    to_encode = data.copy()
-
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
-
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-        "type": "refresh",
-    })
-
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
-
-    return encoded_jwt
-
-
-def decode_token(token: str) -> dict[str, Any] | None:
-    """Decode and verify a JWT token.
+    Decode and validate a JWT token.
 
     Args:
-        token: JWT token string to decode.
+        token: JWT token string to decode
 
     Returns:
-        Decoded payload dictionary or None if invalid.
+        Decoded payload dict or None if invalid
     """
     try:
         payload = jwt.decode(
@@ -113,19 +74,20 @@ def decode_token(token: str) -> dict[str, Any] | None:
         return None
 
 
-def verify_token(token: str, expected_type: str = "access") -> bool:
-    """Verify a token and check its type.
+def create_refresh_token(
+    data: Dict[str, Any],
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a JWT refresh token with longer expiration."""
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=7)
 
-    Args:
-        token: JWT token string to verify.
-        expected_type: Expected token type ('access' or 'refresh').
-
-    Returns:
-        True if token is valid and matches expected type.
-    """
-    payload = decode_token(token)
-    if payload is None:
-        return False
-
-    token_type = payload.get("type", "access")
-    return token_type == expected_type
+    to_encode = data.copy()
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "refresh"})
+    return jwt.encode(
+        to_encode,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )

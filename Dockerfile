@@ -1,56 +1,30 @@
-# Dockerfile
+// Dockerfile
 FROM python:3.11-slim as base
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    POOL_MODE=transaction
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
     curl \
+    build-essential \
     libpq-dev \
-    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-FROM base as builder
+COPY --from=python:3.11-slim / /
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir --upgrade pip
 
 COPY pyproject.toml ./
 
-RUN uv pip install --system --no-cache -r pyproject.toml
+RUN pip install --no-cache-dir .
 
-# Production image
-FROM base as production
+COPY . .
 
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+RUN pip install pytest pytest-asyncio && \
+    pip cache purge
 
-# Create non-root user
-RUN groupadd --gid 1000 apgroup && \
-    useradd --uid 1000 --gid apgroup --shell /bin/bash --create-home apuser
-
-WORKDIR /app
-
-# Copy application code
-COPY --chown=apuser:apgroup . .
-
-# Switch to non-root user
-USER apuser
-
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Run the application
-CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
