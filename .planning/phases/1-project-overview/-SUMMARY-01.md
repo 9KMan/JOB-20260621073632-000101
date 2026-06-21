@@ -2,10 +2,10 @@
 
 ## Overview
 **Plan:** 
-**Completed:** 2026-06-21T10:26:04Z
-**Duration:** 1.3 min
+**Completed:** 2026-06-21T10:29:07Z
+**Duration:** 1.0 min
 **Model:** MiniMax-M2.7-highspeed
-**Commit:** 7b1337ae
+**Commit:** c8c2f2b8
 
 ## Execution
 - Files created: 1
@@ -28,9 +28,16 @@ None — plan executed exactly as written.
 // docs/architecture.md
 # FinaRo — AP Automation Core Engine
 
-**Project Name:** FinaRo — AP Automation Core Engine  
-**Type:** 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order)  
-**Purpose:** Automate the accounts payable matching process by comparing invoices against purchase orders and delivery notes, reducing manual review and accelerating approval workflows.
+| Field | Value |
+|---|---|
+| Project name | FinaRo — AP Automation Core Engine |
+| Client | Finaro |
+| Type | 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order) |
+| Tier | PREMIUM |
+| Budget | $14,250–$21,375 (150–225 hrs @ $95/hr) |
+| Timeline | 4–8 weeks |
+| GitHub | https://github.com/9KMan/JOB-20260621073632-000101 |
+| Rate | $95/hr |
 
 ## Next
 Ready for next plan in this phase.
