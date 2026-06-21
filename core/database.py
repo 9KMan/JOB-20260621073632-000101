@@ -1,179 +1,156 @@
 # core/database.py
-"""Async SQLAlchemy database session management.
+"""Async SQLAlchemy database session management."""
 
-Provides async database sessions with proper connection pooling,
-transaction management, and cleanup handling.
-"""
-
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import create_async_engine, event, exc, pool
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, QueuePool
 
-from core.config import get_settings
-
-logger = logging.getLogger(__name__)
-
-# Global engine instance - initialized on startup
-engine: AsyncEngine | None = None
-async_session_factory: async_sessionmaker[AsyncSession] | None = None
+from core.config import settings
 
 
-async def init_db() -> None:
-    """Initialize database engine and session factory.
+def create_engine() -> AsyncEngine:
+    """Create async SQLAlchemy engine with appropriate pool settings.
 
-    Creates the async engine with connection pooling configuration
-    and sets up the session factory for dependency injection.
+    In production with PGBouncer, use NullPool to let PGBouncer handle pooling.
+    In development, use QueuePool for better connection management.
     """
-    global engine, async_session_factory
+    engine_kwargs: dict[str, Any] = {
+        "echo": settings.debug,
+        "future": True,
+        "pool_pre_ping": True,
+    }
 
-    settings = get_settings()
+    if settings.environment == "production":
+        # In production, use PGBouncer which handles connection pooling
+        engine_kwargs["poolclass"] = NullPool
+    else:
+        # In development, use QueuePool for connection reuse
+        engine_kwargs["poolclass"] = QueuePool
+        engine_kwargs["pool_size"] = 10
+        engine_kwargs["max_overflow"] = 20
+        engine_kwargs["pool_recycle"] = 3600  # Recycle connections after 1 hour
 
-    # Create async engine with connection pooling
-    engine = create_async_engine(
+    return create_async_engine(
         settings.database_url,
-        echo=settings.debug,
-        pool_size=settings.database_pool_size,
-        max_overflow=settings.database_max_overflow,
-        pool_timeout=settings.database_pool_timeout,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-    )
-
-    # Create session factory
-    async_session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-    logger.info(
-        "Database engine initialized",
-        extra={
-            "pool_size": settings.database_pool_size,
-            "max_overflow": settings.database_max_overflow,
-        },
+        **engine_kwargs,
     )
 
 
-async def close_db() -> None:
-    """Close database engine and cleanup connections.
+# Create engine instance
+engine = create_engine()
 
-    Should be called on application shutdown.
-    """
-    global engine, async_session_factory
+# Session factory
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
-    if engine is not None:
-        await engine.dispose()
-        engine = None
-        async_session_factory = None
-        logger.info("Database engine closed")
 
-
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get async database session for dependency injection.
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for FastAPI to get async database session.
 
     Yields:
         AsyncSession: SQLAlchemy async session
 
-    Usage:
+    Example:
         @app.get("/items")
-        async def get_items(db: AsyncSession = Depends(get_db_session)):
+        async def get_items(db: AsyncSession = Depends(get_db)):
             ...
     """
-    if async_session_factory is None:
-        raise RuntimeError(
-            "Database not initialized. Call init_db() first."
-        )
-
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()
 
 
 @asynccontextmanager
-async def get_db_session_context() -> AsyncGenerator[AsyncSession, None]:
-    """Get async database session as context manager.
+async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """Context manager for database session outside of FastAPI dependency injection.
 
-    For use outside of FastAPI dependency injection.
+    Yields:
+        AsyncSession: SQLAlchemy async session
 
-    Usage:
-        async with get_db_session_context() as session:
-            result = await session.execute(select(Model))
+    Example:
+        async with get_db_context() as db:
+            result = await db.execute(select(Invoice))
     """
-    if async_session_factory is None:
-        raise RuntimeError(
-            "Database not initialized. Call init_db() first."
-        )
-
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()
 
 
-async def get_raw_connection() -> Any:
-    """Get raw asyncpg connection for advanced operations."""
-    if engine is None:
-        raise RuntimeError("Database not initialized")
+async def init_db() -> None:
+    """Initialize database - create all tables.
 
-    async with engine.connect() as conn:
-        return conn
+    Note: In production, use Alembic migrations instead.
+    This is primarily for development/testing.
+    """
+    from models.base import Base
 
-
-class AsyncSessionLocal:
-    """Async session factory for dependency injection compatibility."""
-
-    def __init__(self) -> None:
-        """Initialize session local."""
-        self._session_factory = async_session_factory
-
-    async def __call__(self) -> AsyncGenerator[AsyncSession, None]:
-        """Call as dependency."""
-        if self._session_factory is None:
-            raise RuntimeError("Database not initialized")
-        async with self._session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-# Create default instance for FastAPI Depends
-async def get_db(
-    session: AsyncSession = Depends(get_db_session),
-) -> AsyncSession:
-    """FastAPI dependency for database session.
+async def drop_db() -> None:
+    """Drop all database tables.
 
-    Args:
-        session: Injected async session
+    Warning: This will delete all data. Use with caution.
+    """
+    from models.base import Base
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+async def check_db_connection() -> bool:
+    """Check database connectivity.
 
     Returns:
-        AsyncSession instance
+        bool: True if connection is healthy
     """
-    return session
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
-# Import Depends at module level to avoid circular imports
-from fastapi import Depends
+async def get_db_version() -> str | None:
+    """Get PostgreSQL server version.
+
+    Returns:
+        str: PostgreSQL version string or None if unavailable
+    """
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version()"))
+            row = result.fetchone()
+            if row:
+                return str(row[0])
+    except Exception:
+        pass
+    return None

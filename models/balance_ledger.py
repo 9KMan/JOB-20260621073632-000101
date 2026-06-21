@@ -1,184 +1,138 @@
 # models/balance_ledger.py
-"""BalanceLedger and LedgerEntryType SQLAlchemy models.
+"""Balance Ledger SQLAlchemy model.
 
-Tracks the running balance of PO lines against invoices and delivery notes.
-Used to determine what's remaining to invoice or receive.
+Tracks running balances for PO lines to support matching calculations.
 """
 
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
-from sqlalchemy import (
-    DateTime,
-    Enum,
-    ForeignKey,
-    Index,
-    Integer,
-    Numeric,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import LedgerEntryType
-
-if TYPE_CHECKING:
-    from models.invoice import InvoiceLine
-    from models.purchase_order import PurchaseOrderLine
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """Balance ledger for tracking PO line balances.
+class BalanceLedger(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Balance Ledger database model.
 
-    Maintains a running balance for each PO line showing:
-    - Total ordered
-    - Total received (via delivery notes)
-    - Total invoiced
-    - Remaining to invoice/receive
-
-    Attributes:
-        entry_type: Type of ledger entry (invoice, delivery, adjustment)
-        po_line_id: Reference to PO line
-        invoice_line_id: Optional reference to invoice line
-        quantity: Quantity for this entry
-        amount: Monetary amount for this entry
-        running_balance: Balance after this entry
-        reference_id: External reference (invoice number, DN number, etc.)
-        reference_date: Date of the reference document
-        notes: Optional notes
+    Tracks cumulative balances for each PO line across deliveries and invoices.
+    This provides a real-time view of what's been delivered vs invoiced.
     """
 
     __tablename__ = "balance_ledger"
-
-    # Entry identification
-    entry_type: Mapped[LedgerEntryType] = mapped_column(
-        Enum(LedgerEntryType, name="ledger_entry_type"),
-        nullable=False,
-        index=True,
+    __table_args__ = (
+        UniqueConstraint(
+            "po_line_id",
+            "transaction_type",
+            "transaction_id",
+            name="uq_ledger_transaction",
+        ),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_transaction_type", "transaction_type"),
+        Index("ix_balance_ledger_created_at", "created_at"),
+        {"schema": None},
     )
 
     # References
     po_line_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "purchase_order_lines.id",
-            ondelete="CASCADE",
-            onupdate="CASCADE",
-        ),
+        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(
-            "invoice_lines.id",
-            ondelete="SET NULL",
-            onupdate="CASCADE",
-        ),
-        nullable=True,
+    transaction_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
         index=True,
     )
-    delivery_note_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    transaction_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "delivery_note_lines.id",
-            ondelete="SET NULL",
-            onupdate="CASCADE",
-        ),
-        nullable=True,
+        nullable=False,
+        index=True,
     )
 
-    # Quantities and amounts
-    quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
+    # Document references
+    document_type: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
     )
-    amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+    document_number: Mapped[str] = mapped_column(
+        String(100),
         nullable=False,
-    )
-    unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
     )
 
-    # Running balances (denormalized for performance)
-    running_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
+    # Quantity balance
+    quantity_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
         nullable=False,
-        default=Decimal("0.0000"),
+        default=Decimal("0.000"),
     )
-    running_amount: Mapped[Decimal] = mapped_column(
+    quantity_delta: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+    )
+    quantity_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3),
+        nullable=False,
+    )
+
+    # Value balance
+    value_before: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
         default=Decimal("0.00"),
     )
-
-    # Reference information
-    reference_id: Mapped[str] = mapped_column(
-        String(100),
+    value_delta: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
     )
-    reference_date: Mapped[datetime] = mapped_column(
+    value_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
         nullable=False,
-        default=datetime.utcnow,
-    )
-    source_system: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        default="manual",
     )
 
     # Metadata
-    notes: Mapped[str | None] = mapped_column(
+    description: Mapped[str | None] = mapped_column(
+        String(500),
         nullable=True,
     )
-    entry_number: Mapped[int] = mapped_column(
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
+        server_default=func.now(),
     )
 
-    # Relationships
-    po_line: Mapped["PurchaseOrderLine"] = relationship(
-        "PurchaseOrderLine",
-        back_populates="balance_ledger_entries",
-    )
-    invoice_line: Mapped["InvoiceLine | None"] = relationship(
-        "InvoiceLine",
-        back_populates="balance_ledger_entries",
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "po_line_id",
-            "entry_number",
-            name="uq_ledger_po_line_entry",
-        ),
-        Index("ix_ledger_po_line_running", "po_line_id", "running_quantity"),
-        Index("ix_ledger_reference", "reference_id"),
-    )
+    # Transaction types
+    TYPE_DELIVERY = "delivery"
+    TYPE_INVOICE = "invoice"
+    TYPE_CREDIT = "credit"
+    TYPE_ADJUSTMENT = "adjustment"
 
     def __repr__(self) -> str:
         return (
-            f"<BalanceLedger {self.entry_type.value} - "
-            f"Qty: {self.quantity} - Ref: {self.reference_id}>"
+            f"<BalanceLedger po_line={self.po_line_id} "
+            f"type={self.transaction_type} qty_delta={self.quantity_delta}>"
         )
 
     @property
-    def is_debit(self) -> bool:
-        """Check if this is a debit entry (increases balance)."""
-        return self.entry_type in (
-            LedgerEntryType.INVOICE,
-            LedgerEntryType.MANUAL_ADJUSTMENT,
-        )
+    def is_delivery(self) -> bool:
+        """Check if transaction is a delivery."""
+        return self.transaction_type == self.TYPE_DELIVERY
+
+    @property
+    def is_invoice(self) -> bool:
+        """Check if transaction is an invoice."""
+        return self.transaction_type == self.TYPE_INVOICE
 
     @property
     def is_credit(self) -> bool:
-        """Check if this is a credit entry (decreases balance)."""
-        return self.entry_type in (
-            LedgerEntryType.DELIVERY_NOTE,
-            LedgerEntryType.CREDIT_NOTE,
-        )
+        """Check if transaction is a credit."""
+        return self.transaction_type == self.TYPE_CREDIT
+
+    @property
+    def is_adjustment(self) -> bool:
+        """Check if transaction is an adjustment."""
+        return self.transaction_type == self.TYPE_ADJUSTMENT
