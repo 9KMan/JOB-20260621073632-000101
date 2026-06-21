@@ -468,10 +468,29 @@ npx @redocly/cli build-docs docs/openapi.json
 
 ---
 
-## 11. Dependencies & Blockers
+## 11. Files to Create
 
-| Dependency | Blocking | Notes |
-|---|---|---|
-| All previous phases (1–6) | Yes | All code must be written before docs are finalized |
-| API endpoints finalized | Yes | API.md cannot be written until routes are locked |
-| Test suite passing | Partial | README "Quick Start" requires passing tests to be accurate |
+The following files must be created to implement this phase:
+
+### Documentation Files
+| File | Purpose |
+|------|---------|
+| `README.md` | Final README with Business Problem, Architecture overview, Features, Tech Stack, Quick Start, Project Structure, Environment Variables |
+| `docs/api.md` | Full API reference with all endpoints, request/response examples, and error schemas |
+| `docs/architecture.md` | Architecture Decision Records (ADRs 001–006), data flow diagrams, database schema summary |
+| `docs/deployment.md` | Docker & environment guide covering dev/prod compose, env vars, secrets, migrations, monitoring, backup |
+
+### Specification Update
+| File | Purpose |
+|------|---------|
+| `SPEC.md` | Updated with any final design decisions from implementation phases |
+
+---
+
+## 12. Dependencies & Blockers
+
+|| Dependency | Blocking | Notes |
+||---|---|---|
+|| All previous phases (1–6) | Yes | All code must be written before docs are finalized |
+|| API endpoints finalized | Yes | API.md cannot be written until routes are locked |
+|| Test suite passing | Partial | README "Quick Start" requires passing tests to be accurate |

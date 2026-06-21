@@ -377,12 +377,50 @@ class TestCascadeWithLearning:
 
 ---
 
-## 12. Dependencies & Blockers
+## 12. Files to Create
 
-| Dependency | Blocking | Notes |
-|---|---|---|
-| Phase 3 — Core Engine (matching cascade) | Yes | Learning loop integrates INTO the cascade; cascade must exist first |
-| Phase 5 — Testing & Ops | Partial | Test fixtures from Phase 5 should be reused |
-| `suppliers` table | Yes | FK dependency |
-| `users` table | No | FK is nullable; existing users table assumed |
-| `invoices` / `po_lines` tables | Yes | FK dependencies |
+The following files must be created to implement this phase:
+
+### Service Layer
+| File | Purpose |
+|------|---------|
+| `src/services/learning_service.py` | `LearningService` class with `confirm_match()`, `get_promoted_match()`, and `deactivate_outdated()` methods |
+
+### Models
+| File | Purpose |
+|------|---------|
+| `src/models/cross_ref.py` | SQLAlchemy model for the `cross_ref` table |
+
+### API Schemas
+| File | Purpose |
+|------|---------|
+| `src/schemas/learning.py` | Pydantic request/response schemas for the learning loop API endpoints |
+
+### API Routes
+| File | Purpose |
+|------|---------|
+| `src/api/routes/learning.py` | REST endpoints: `POST /confirm`, `GET /promoted/{supplier_id}/{invoice_sku}`, `GET /supplier/{supplier_id}`, `DELETE /{cross_ref_id}` |
+
+### Database Migrations
+| File | Purpose |
+|------|---------|
+| `migrations/versions/006_add_cross_ref.py` | Alembic migration to create the `cross_ref` table with indexes and FK constraints |
+
+### Tests
+| File | Purpose |
+|------|---------|
+| `tests/test_learning_service.py` | Unit tests for `LearningService` methods |
+| `tests/test_learning_loop_integration.py` | End-to-end integration test for the human-confirm → auto-post loop |
+| `tests/test_matching_cascade.py` | Tests verifying cascade calls `get_promoted_match()` at Level 0 and stops correctly |
+
+---
+
+## 13. Dependencies & Blockers
+
+|| Dependency | Blocking | Notes |
+||---|---|---|
+|| Phase 3 — Core Engine (matching cascade) | Yes | Learning loop integrates INTO the cascade; cascade must exist first |
+|| Phase 5 — Testing & Ops | Partial | Test fixtures from Phase 5 should be reused |
+|| `suppliers` table | Yes | FK dependency |
+|| `users` table | No | FK is nullable; existing users table assumed |
+|| `invoices` / `po_lines` tables | Yes | FK dependencies |
