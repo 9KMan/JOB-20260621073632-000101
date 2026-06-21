@@ -1,73 +1,135 @@
 # src/models/balance_ledger.py
-"""Balance Ledger model for tracking partial matches and balances."""
+"""Balance Ledger model for tracking PO/Invoice balances."""
+
+from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
-from sqlalchemy import Column, String, Numeric, Date, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    func,
+)
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, UUIDMixin, TimestampMixin
+from models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
-    from src.models.purchase_order import PurchaseOrder
-    from src.models.invoice import Invoice
+    from models.invoice import Invoice
+    from models.purchase_order import PurchaseOrder, PurchaseOrderLine
 
 
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """Balance Ledger model for tracking partial matches across documents."""
+class BalanceLedger(UUIDMixin, TimestampMixin, Base):
+    """
+    Balance Ledger tracks the remaining balance on PO lines.
+    
+    This is a running balance ledger that records:
+    - Initial PO line balance
+    - Delivery quantities received
+    - Invoice quantities invoiced
+    - Current remaining balance
+    
+    Attributes:
+        id: Unique identifier (UUID)
+        po_id: Purchase order reference
+        po_line_id: Specific PO line reference
+        invoice_id: Invoice reference (if applicable)
+        transaction_type: Type of transaction (po_created, delivery, invoice)
+        quantity_change: Change in quantity (+/-)
+        amount_change: Change in amount (+/-)
+        balance_after: Running balance after transaction
+        notes: Transaction notes
+    """
     
     __tablename__ = "balance_ledger"
+    __table_args__ = (
+        Index("ix_balance_ledger_po_id", "po_id"),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_invoice_id", "invoice_id"),
+        Index("ix_balance_ledger_transaction_type", "transaction_type"),
+        Index("ix_balance_ledger_created_at", "created_at"),
+    )
     
-    # Document references
-    po_id = Column(
-        UUID(as_uuid=True),
+    po_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    invoice_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
+    po_line_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
-    
-    # Balance type: PO_OPEN, PO_INVOICED, PO_PAID, etc.
-    balance_type = Column(String(30), nullable=False, index=True)
-    
-    # Document amounts
-    po_total_amount = Column(Numeric(15, 2), nullable=False)
-    invoice_amount = Column(Numeric(15, 2), nullable=True)
-    matched_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
-    balance_amount = Column(Numeric(15, 2), nullable=False)
-    
-    # Quantities
-    po_quantity = Column(Numeric(15, 3), nullable=False)
-    invoiced_quantity = Column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
-    delivered_quantity = Column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
-    matched_quantity = Column(Numeric(15, 3), default=Decimal("0.00"), nullable=False)
-    
-    # Reference date
-    as_of_date = Column(Date, nullable=False)
-    
-    # Status
-    is_settled = Column(String(1), default="N", nullable=False)
-    settled_date = Column(Date, nullable=True)
-    
-    # Notes
-    notes = Column(String(500), nullable=True)
+    transaction_type: Mapped[str] = mapped_column(
+        Enum(
+            "po_created",
+            "po_updated",
+            "delivery_received",
+            "invoice_received",
+            "credit_note",
+            "adjustment",
+            name="ledger_transaction_type",
+            create_constraint=True,
+        ),
+        nullable=False,
+    )
+    quantity_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+    )
+    quantity_change: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    quantity_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+    )
+    amount_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    amount_change: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    amount_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="USD",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    reference_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
     
     # Relationships
-    purchase_order = relationship(
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
         "PurchaseOrder",
-        foreign_keys=[po_id],
-        back_populates="balance_entries",
+        back_populates="balance_ledger",
     )
-    invoice = relationship(
+    invoice: Mapped["Invoice | None"] = relationship(
         "Invoice",
-        foreign_keys=[invoice_id],
-        back_populates="balance_entries",
+        back_populates="balance_ledger",
     )
-    
-    def __repr__(self) -> str:
-        return f"<BalanceLedger(id={self.id}, balance_type={self.balance_type}, balance_amount={self.balance_amount})>"

@@ -1,111 +1,59 @@
-// src/models/base.py
-"""SQLAlchemy base configuration and database management."""
-import logging
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+# src/models/base.py
+"""SQLAlchemy declarative base configuration."""
 
-from sqlalchemy import create_engine, pool
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, declared_attr
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
-from config import get_cached_settings
-
-logger = logging.getLogger(__name__)
-settings = get_cached_settings()
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 
 class Base(DeclarativeBase):
-    """SQLAlchemy declarative base with common configurations."""
-
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        """Generate table name from class name."""
-        return cls.__name__.lower()
-
-    def to_dict(self) -> dict:
-        """Convert model to dictionary."""
-        result = {}
-        for column in self.__table__.columns:
-            value = getattr(self, column.name)
-            if hasattr(value, "isoformat"):
-                value = value.isoformat()
-            result[column.name] = value
-        return result
-
-
-class DatabaseManager:
-    """Manages database connections and sessions."""
-
-    def __init__(self, engine):
-        self.engine = engine
-        self.session_factory = async_sessionmaker(
-            bind=engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autoflush=False,
-        )
-
-    async def initialize(self) -> None:
-        """Initialize database connection pool."""
-        logger.info("Initializing database connection pool")
-        # Test connection
-        async with self.engine.begin() as conn:
-            await conn.execute("SELECT 1")
-
-    async def close(self) -> None:
-        """Close database connection pool."""
-        logger.info("Closing database connection pool")
-        await self.engine.dispose()
-
-
-# Create async engine
-def get_database_url(async_mode: bool = True) -> str:
-    """Get database URL with async driver if needed."""
-    url = settings.DATABASE_URL
+    """Base class for all database models."""
     
-    if async_mode:
-        if "postgresql://" in url:
-            url = url.replace("postgresql://", "postgresql+asyncpg://")
-        elif "postgres://" in url:
-            url = url.replace("postgres://", "postgresql+asyncpg://")
+    type_annotation_map = {
+        UUID: PGUUID(as_uuid=True),
+    }
+
+
+class TimestampMixin:
+    """Mixin providing created_at and updated_at timestamps."""
     
-    return url
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
-# Engine configuration
-engine = create_async_engine(
-    get_database_url(),
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,
-    echo=settings.DEBUG,
-)
-
-# Session factory
-async_session_factory = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-)
+class UUIDMixin:
+    """Mixin providing UUID primary key."""
+    
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        nullable=False,
+    )
 
 
-@asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get async database session context manager."""
-    session: AsyncSession = async_session_factory()
-    try:
-        yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for FastAPI to get database session."""
-    async for session in get_db_session():
-        yield session
+class SoftDeleteMixin:
+    """Mixin providing soft delete functionality."""
+    
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    deleted_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )

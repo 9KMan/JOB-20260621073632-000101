@@ -1,8 +1,10 @@
 # src/core/config.py
-import os
-from functools import lru_cache
-from typing import Optional
+"""Application configuration using pydantic-settings."""
 
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,65 +15,94 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
     )
 
     # Application
-    PROJECT_NAME: str = "FinaRo AP Automation"
-    VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api/v1"
-    DEBUG: bool = False
+    app_name: str = "AP Automation Core"
+    app_version: str = "0.1.0"
+    debug: bool = Field(default=False, validation_alias="DEBUG")
 
     # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/finaro_ap"
-    DB_POOL_SIZE: int = 10
-    DB_MAX_OVERFLOW: int = 20
-    DB_POOL_TIMEOUT: int = 30
-    DB_POOL_RECYCLE: int = 3600
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        validation_alias="DATABASE_URL",
+    )
+    database_pool_size: int = 20
+    database_max_overflow: int = 10
+    database_pool_timeout: int = 30
+    database_echo: bool = False
 
-    # Security
-    SECRET_KEY: str
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list[str] = ["*"]
-    CORS_ALLOW_HEADERS: list[str] = ["*"]
-
-    # Matching Engine Weights (must sum to 1.0)
-    MATCHING_LINE_WEIGHT: float = 0.70
-    MATCHING_AMOUNT_WEIGHT: float = 0.20
-    MATCHING_DATE_WEIGHT: float = 0.10
+    # Authentication
+    jwt_secret_key: str = Field(
+        default="change-me-in-production-32-chars-min",
+        validation_alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
 
     # Matching Thresholds
-    MATCHING_CONFIRMED_THRESHOLD: float = 0.90
-    MATCHING_PENDING_THRESHOLD: float = 0.60
+    threshold_high: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold (score >= threshold_high)",
+    )
+    threshold_mid: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="One-click review threshold (score >= threshold_mid)",
+    )
+    threshold_low: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold (score >= threshold_low)",
+    )
 
-    # Pagination
-    DEFAULT_PAGE_SIZE: int = 20
-    MAX_PAGE_SIZE: int = 100
+    # Matching Tolerances
+    tolerance_price: float = Field(
+        default=5.0,
+        ge=0.0,
+        description="Price match tolerance percentage",
+    )
+    tolerance_qty: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="Quantity match tolerance percentage",
+    )
+
+    # PGBouncer (optional override)
+    pgbouncer_host: str | None = Field(default=None, validation_alias="PGBOUNCER_HOST")
+    pgbouncer_port: int = 6432
+
+    @field_validator("threshold_high", "threshold_mid", "threshold_low", mode="before")
+    @classmethod
+    def validate_thresholds(cls, v: float) -> float:
+        """Ensure thresholds are between 0 and 1."""
+        if isinstance(v, str):
+            v = float(v)
+        return max(0.0, min(1.0, v))
+
+    def get_pg_url(self) -> str:
+        """Get PostgreSQL URL, respecting PGBouncer if configured."""
+        if self.pgbouncer_host:
+            return self.database_url.replace(
+                "@", f"@{self.pgbouncer_host}:{self.pgbouncer_port}/"
+            )
+        return self.database_url
 
     @property
-    def DATABASE_URL_SYNC(self) -> str:
-        """Synchronous database URL for migrations and scripts."""
-        return self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-
-    @property
-    def database_url_async(self) -> str:
-        """Async database URL."""
-        return self.DATABASE_URL
-
-    def get_database_config(self) -> dict:
-        """Get database connection pool configuration."""
-        return {
-            "pool_size": self.DB_POOL_SIZE,
-            "max_overflow": self.DB_MAX_OVERFLOW,
-            "pool_timeout": self.DB_POOL_TIMEOUT,
-            "pool_recycle": self.DB_POOL_RECYCLE,
-        }
+    def async_database_url(self) -> str:
+        """Ensure asyncpg driver is used."""
+        url = self.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif "asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
 
 
 @lru_cache
