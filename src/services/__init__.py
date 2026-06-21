@@ -1,11 +1,11 @@
 // src/services/__init__.py
-"""Business logic services package."""
-from app.services.match_service import MatchService
-from app.services.balance_service import BalanceService
-from app.services.document_service import DocumentService
+"""Business logic services."""
+from src.services.auth import AuthService
+from src.services.balance import BalanceService
+from src.services.matching import MatchingService
 
 __all__ = [
-    "MatchService",
+    "AuthService",
     "BalanceService",
-    "DocumentService",
+    "MatchingService",
 ]

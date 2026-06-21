@@ -1,152 +1,114 @@
 // src/schemas/delivery_note.py
-"""
-FinaRo AP Automation Core Engine
-Delivery Note Pydantic Schemas
-"""
+"""Delivery Note schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 
-from app.schemas.base import BaseSchema
+from src.schemas.common import BaseSchema, UUIDMixin
 
 
-class DeliveryNoteLineBase(BaseSchema):
-    """Base schema for Delivery Note Line."""
-    line_number: int = Field(..., ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    quantity_delivered: Decimal = Field(..., ge=Decimal('0'))
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quality_status: str = Field(default="PENDING")
+class DeliveryNoteLineBase(BaseModel):
+    """Base schema for delivery note line items."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str
+    quantity: Decimal
+    uom: str = "EA"
+    po_line_id: Optional[UUID] = None
+    metadata: Optional[dict] = None
 
 
 class DeliveryNoteLineCreate(DeliveryNoteLineBase):
-    """Schema for creating a Delivery Note Line."""
+    """Schema for creating delivery note line items."""
     pass
 
 
-class DeliveryNoteLineUpdate(BaseSchema):
-    """Schema for updating a Delivery Note Line."""
-    line_number: Optional[int] = Field(None, ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: Optional[str] = Field(None, min_length=1, max_length=255)
+class DeliveryNoteLineUpdate(BaseModel):
+    """Schema for updating delivery note line items."""
+    sku: Optional[str] = None
     description: Optional[str] = None
-    quantity_delivered: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_received: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_rejected: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_returned: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quality_status: Optional[str] = None
-    quantity_matched: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    status: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    uom: Optional[str] = None
+    po_line_id: Optional[UUID] = None
+    metadata: Optional[dict] = None
 
 
-class DeliveryNoteLineResponse(DeliveryNoteLineBase):
-    """Schema for Delivery Note Line response."""
-    id: UUID
-    dn_id: UUID
-    quantity_received: Decimal
-    quantity_rejected: Decimal
-    quantity_returned: Decimal
-    quantity_matched: Decimal
-    quantity_unmatched: Decimal
-    line_total: Optional[Decimal]
-    quality_status: str
-    status: str
+class DeliveryNoteLineResponse(UUIDMixin, BaseSchema):
+    """Response schema for delivery note line items."""
+    delivery_note_id: UUID
+    line_number: int
+    sku: Optional[str]
+    description: str
+    quantity: Decimal
+    uom: str
+    po_line_id: Optional[UUID]
+    metadata: Optional[dict]
     created_at: datetime
     updated_at: datetime
 
 
-class DeliveryNoteBase(BaseSchema):
-    """Base schema for Delivery Note."""
-    dn_number: str = Field(..., min_length=1, max_length=50)
-    supplier_id: UUID
-    supplier_name: str = Field(..., min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    po_id: Optional[UUID] = None
-    supplier_dn_number: Optional[str] = None
-    dn_date: date
-    received_date: Optional[date] = None
-    goods_receipt_date: Optional[date] = None
-    currency: str = Field(default="USD", max_length=3)
-    total_amount: Decimal = Field(default=Decimal('0'))
-    carrier_name: Optional[str] = None
-    tracking_number: Optional[str] = None
-    vehicle_number: Optional[str] = None
-    notes: Optional[str] = None
-    inspection_notes: Optional[str] = None
-    department: Optional[str] = None
+class DeliveryNoteBase(BaseModel):
+    """Base schema for delivery notes."""
+    dn_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
+    delivery_date: date
     received_by: Optional[str] = None
-    warehouse_location: Optional[str] = None
+    total_quantity: Decimal = Decimal("0")
+    status: str = "RECEIVED"
+    notes: Optional[str] = None
+    metadata: Optional[dict] = None
+    purchase_order_id: Optional[UUID] = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """Schema for creating a Delivery Note."""
-    lines: List[DeliveryNoteLineCreate] = Field(default_factory=list)
+    """Schema for creating a delivery note."""
+    lines: list[DeliveryNoteLineCreate] = Field(default_factory=list)
 
 
-class DeliveryNoteUpdate(BaseSchema):
-    """Schema for updating a Delivery Note."""
-    dn_number: Optional[str] = Field(None, min_length=1, max_length=50)
-    supplier_id: Optional[UUID] = None
-    supplier_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    po_id: Optional[UUID] = None
-    supplier_dn_number: Optional[str] = None
-    dn_date: Optional[date] = None
-    received_date: Optional[date] = None
-    goods_receipt_date: Optional[date] = None
-    status: Optional[str] = None
-    currency: Optional[str] = Field(None, max_length=3)
-    total_amount: Optional[Decimal] = None
-    carrier_name: Optional[str] = None
-    tracking_number: Optional[str] = None
-    vehicle_number: Optional[str] = None
-    notes: Optional[str] = None
-    inspection_notes: Optional[str] = None
-    department: Optional[str] = None
+class DeliveryNoteUpdate(BaseModel):
+    """Schema for updating a delivery note."""
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
+    delivery_date: Optional[date] = None
     received_by: Optional[str] = None
-    warehouse_location: Optional[str] = None
+    total_quantity: Optional[Decimal] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    metadata: Optional[dict] = None
+    purchase_order_id: Optional[UUID] = None
 
 
-class DeliveryNoteResponse(DeliveryNoteBase):
-    """Schema for Delivery Note response."""
-    id: UUID
+class DeliveryNoteResponse(UUIDMixin, BaseSchema):
+    """Response schema for delivery notes."""
+    dn_number: str
+    supplier_id: str
+    supplier_name: str
+    supplier_reference: Optional[str]
+    delivery_date: date
+    received_by: Optional[str]
+    total_quantity: Decimal
     status: str
-    is_received: bool
-    lines: List[DeliveryNoteLineResponse]
+    notes: Optional[str]
+    metadata: Optional[dict]
+    purchase_order_id: Optional[UUID]
     created_at: datetime
     updated_at: datetime
-    
-    @field_validator('lines', mode='before')
-    @classmethod
-    def validate_lines(cls, v):
-        if v is None:
-            return []
-        return v
+    is_deleted: bool
 
 
 class DeliveryNoteListResponse(BaseSchema):
-    """Schema for Delivery Note list item response."""
+    """Response schema for listing delivery notes."""
     id: UUID
     dn_number: str
-    supplier_id: UUID
+    supplier_id: str
     supplier_name: str
-    dn_date: date
-    received_date: Optional[date]
+    delivery_date: date
+    total_quantity: Decimal
     status: str
-    total_amount: Decimal
-    carrier_name: Optional[str]
-    tracking_number: Optional[str]
-    department: Optional[str]
     created_at: datetime

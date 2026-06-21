@@ -1,2 +1,2 @@
 // src/app/__init__.py
-"""FinaRo AP Automation Core Engine package."""
+"""FinaRo AP Automation Core Engine."""

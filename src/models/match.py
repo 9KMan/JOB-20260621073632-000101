@@ -1,283 +1,197 @@
 // src/models/match.py
-"""
-FinaRo AP Automation Core Engine
-Matching Models
-"""
+"""Match model for 3-way matching results."""
+import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
-from typing import Optional, TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, String, DateTime, Numeric, ForeignKey, Text, Integer, JSON
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import BaseModel
+from src.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.purchase_order import PurchaseOrder
-    from app.models.invoice import Invoice
-    from app.models.delivery_note import DeliveryNote
+    from src.models.delivery_note import DeliveryNote
+    from src.models.invoice import Invoice
+    from src.models.purchase_order import PurchaseOrder
 
 
-class MatchStatus(str, Enum):
-    """Match status enumeration."""
+class MatchStatus(str, enum.Enum):
+    """Match decision status."""
+    CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
-    MATCHED = "MATCHED"
-    PARTIAL = "PARTIAL"
-    UNMATCHED = "UNMATCHED"
-
-
-class MatchDecision(str, Enum):
-    """Match decision enumeration for routing."""
+    REJECTED = "REJECTED"
     AUTO_APPROVED = "AUTO_APPROVED"
     HUMAN_REVIEW = "HUMAN_REVIEW"
-    REJECTED = "REJECTED"
     DISPUTE = "DISPUTE"
 
 
-class MatchType(str, Enum):
-    """Type of match being performed."""
+class MatchType(str, enum.Enum):
+    """Type of match performed."""
     PO_INVOICE = "PO_INVOICE"
-    PO_DN = "PO_DN"
-    INVOICE_DN = "INVOICE_DN"
+    PO_DELIVERY = "PO_DELIVERY"
+    INVOICE_DELIVERY = "INVOICE_DELIVERY"
     THREE_WAY = "THREE_WAY"
 
 
 class Match(BaseModel):
-    """
-    Match model representing matches between documents.
-    Supports 2-way (PO↔Invoice, PO↔DN, Invoice↔DN) and 3-way matches.
-    """
+    """Match record for 3-way matching results."""
+
     __tablename__ = "matches"
-    
-    # Match Identification
-    match_number = Column(String(50), unique=True, nullable=False, index=True)
-    match_type = Column(
-        String(20),
+
+    match_type: Mapped[MatchType] = mapped_column(
+        Enum(MatchType),
+        nullable=False,
+        index=True
+    )
+    status: Mapped[MatchStatus] = mapped_column(
+        Enum(MatchStatus),
+        default=MatchStatus.PENDING,
         nullable=False,
         index=True
     )
     
-    # Document References
-    po_id = Column(
+    # Match scores
+    total_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    line_level_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    amount_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    date_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    
+    # Matched amounts
+    matched_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    variance_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    
+    # Variance details
+    quantity_variance: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 4),
+        nullable=True
+    )
+    price_variance: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 4),
+        nullable=True
+    )
+    date_variance_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
+    
+    # Related documents
+    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )
-    invoice_id = Column(
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )
-    dn_id = Column(
+    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )
     
-    # Match Status
-    status = Column(
-        String(20),
-        default=MatchStatus.PENDING.value,
-        nullable=False,
-        index=True
+    # Resolution
+    resolved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
     )
-    decision = Column(
-        String(20),
-        default=MatchDecision.HUMAN_REVIEW.value,
-        nullable=False,
-        index=True
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    resolution_notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
     )
     
-    # Scoring
-    total_score = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    line_score = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    amount_score = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    date_score = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    
-    # Amount Analysis
-    po_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    invoice_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    dn_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    variance_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    
-    # Quantity Analysis
-    quantity_po = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    quantity_invoice = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    quantity_dn = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    variance_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    
-    # Matched Line Details (JSON for flexibility)
-    matched_lines = Column(JSON, nullable=True)
-    
-    # Variance Details
-    variance_reason = Column(Text, nullable=True)
-    variance_notes = Column(Text, nullable=True)
-    
-    # Approval Information
-    approved_by = Column(UUID(as_uuid=True), nullable=True)
-    approved_at = Column(DateTime, nullable=True)
-    approval_comments = Column(Text, nullable=True)
-    
-    # Human Review
-    reviewed_by = Column(UUID(as_uuid=True), nullable=True)
-    reviewed_at = Column(DateTime, nullable=True)
-    review_comments = Column(Text, nullable=True)
-    
-    # Dispute Information
-    disputed_by = Column(UUID(as_uuid=True), nullable=True)
-    disputed_at = Column(DateTime, nullable=True)
-    dispute_reason = Column(Text, nullable=True)
-    dispute_resolution = Column(Text, nullable=True)
-    resolved_by = Column(UUID(as_uuid=True), nullable=True)
-    resolved_at = Column(DateTime, nullable=True)
+    # Detailed line matching data
+    line_matches: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=list
+    )
     
     # Relationships
-    po: Mapped[Optional["PurchaseOrder"]] = relationship(
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
         "PurchaseOrder",
-        foreign_keys=[po_id],
-        back_populates="matches_as_anchor",
-        lazy="selectin"
+        back_populates="matches"
     )
     invoice: Mapped[Optional["Invoice"]] = relationship(
         "Invoice",
-        foreign_keys=[invoice_id],
-        back_populates="matches",
-        lazy="selectin"
+        back_populates="matches"
     )
     delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
         "DeliveryNote",
-        foreign_keys=[dn_id],
-        back_populates="matches",
-        lazy="selectin"
+        back_populates="matches"
     )
-    results: Mapped[List["MatchResult"]] = relationship(
-        "MatchResult",
-        back_populates="match",
-        cascade="all, delete-orphan",
-        lazy="selectin"
-    )
-    
+
     def __repr__(self) -> str:
-        return f"<Match(id={self.id}, match_number='{self.match_number}', status='{self.status}')>"
-    
-    def determine_decision(self, auto_approve_threshold: float = 0.95) -> MatchDecision:
-        """
-        Determine the match decision based on scores.
-        
-        Args:
-            auto_approve_threshold: Score threshold for automatic approval
-            
-        Returns:
-            MatchDecision based on the match score
-        """
-        if float(self.total_score) >= auto_approve_threshold:
-            return MatchDecision.AUTO_APPROVED
-        elif float(self.total_score) >= 0.70:
-            return MatchDecision.HUMAN_REVIEW
-        else:
-            return MatchDecision.REJECTED
-    
+        return f"<Match {self.id}: {self.match_type.value} - {self.status.value}>"
+
     @property
     def is_confirmed(self) -> bool:
-        """Check if match is confirmed (auto-approved or approved by human)."""
-        return self.decision in (
-            MatchDecision.AUTO_APPROVED.value,
-            MatchDecision.HUMAN_REVIEW.value
-        ) and self.status == MatchStatus.MATCHED.value
-    
+        """Check if match is confirmed."""
+        return self.status in (MatchStatus.CONFIRMED, MatchStatus.AUTO_APPROVED)
+
     @property
-    def is_pending(self) -> bool:
-        """Check if match is pending review."""
-        return self.status == MatchStatus.PENDING.value and self.decision == MatchDecision.HUMAN_REVIEW.value
-    
-    @property
-    def is_rejected(self) -> bool:
-        """Check if match is rejected."""
-        return self.decision == MatchDecision.REJECTED.value
+    def needs_review(self) -> bool:
+        """Check if match needs human review."""
+        return self.status == MatchStatus.HUMAN_REVIEW
+
+    def approve(self, resolved_by: Optional[uuid.UUID] = None, notes: Optional[str] = None) -> None:
+        """Approve the match."""
+        self.status = MatchStatus.CONFIRMED
+        self.resolved_by = resolved_by
+        self.resolved_at = datetime.utcnow()
+        if notes:
+            self.resolution_notes = notes
+
+    def reject(self, reason: str, resolved_by: Optional[uuid.UUID] = None) -> None:
+        """Reject the match."""
+        self.status = MatchStatus.REJECTED
+        self.resolved_by = resolved_by
+        self.resolved_at = datetime.utcnow()
+        self.resolution_notes = reason
 
 
-class MatchResult(BaseModel):
-    """
-    Match Result model for detailed line-level matching results.
-    Provides detailed breakdown of matches at the line item level.
-    """
-    __tablename__ = "match_results"
-    
-    # Foreign Key
-    match_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("matches.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    
-    # Line References (flexible mapping)
-    po_line_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    invoice_line_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    dn_line_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    
-    # Line Product Information
-    product_code = Column(String(50), nullable=True)
-    product_name = Column(String(255), nullable=True)
-    
-    # Match Status at Line Level
-    status = Column(
-        String(20),
-        default=MatchStatus.PENDING.value,
-        nullable=False,
-        index=True
-    )
-    
-    # Quantity Analysis
-    po_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    invoice_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    dn_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    matched_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    variance_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    
-    # Amount Analysis
-    po_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    invoice_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    dn_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    matched_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    variance_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    
-    # Match Score
-    score = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    
-    # Match Type for this line
-    match_type = Column(String(20), nullable=True)
-    
-    # Variance Details
-    variance_reason = Column(Text, nullable=True)
-    variance_tolerance = Column(Numeric(5, 4), default=Decimal('0.0000'), nullable=False)
-    
-    # Notes
-    notes = Column(Text, nullable=True)
-    
-    # Relationship
-    match: Mapped["Match"] = relationship(
-        "Match",
-        back_populates="results"
-    )
-    
-    def __repr__(self) -> str:
-        return f"<MatchResult(id={self.id}, match_id={self.match_id}, status='{self.status}')>"
-    
-    @property
-    def match_percentage(self) -> Decimal:
-        """Calculate match percentage for this line."""
-        if self.po_amount > 0:
-            return (self.matched_amount / self.po_amount) * 100
-        return Decimal('0.00')
-    
-    @property
-    def is_within_tolerance(self) -> bool:
-        """Check if variance is within tolerance."""
-        return abs(self.variance_amount) <= self.variance_tolerance * self.po_amount
+# Association table for Invoice-DeliveryNote many-to-many (additional to matches)
+match_invoice_delivery_notes = Table(
+    "match_invoice_delivery_notes",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    Column("invoice_id", UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE")),
+    Column("delivery_note_id", UUID(as_uuid=True), ForeignKey("delivery_notes.id", ondelete="CASCADE")),
+    Column("created_at", DateTime(timezone=True), default=datetime.utcnow),
+    Column("is_deleted", Boolean, default=False, nullable=False)
+)

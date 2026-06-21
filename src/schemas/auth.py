@@ -2,51 +2,44 @@
 """Authentication schemas."""
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from src.schemas.common import BaseSchema, UUIDMixin
+
 
 class Token(BaseModel):
-    """JWT token response."""
+    """JWT Token response."""
     access_token: str
     token_type: str = "bearer"
 
 
-class TokenData(BaseModel):
-    """Token payload data."""
-    user_id: Optional[str] = None
-    email: Optional[str] = None
+class TokenPayload(BaseModel):
+    """JWT Token payload."""
+    sub: Optional[str] = None
+    exp: Optional[datetime] = None
 
 
-class UserBase(BaseModel):
-    """Base user schema."""
+class UserCreate(BaseModel):
+    """Schema for creating a new user."""
     email: EmailStr
-    full_name: str = Field(..., min_length=1, max_length=255)
-
-
-class UserCreate(UserBase):
-    """User creation schema."""
-    password: str = Field(..., min_length=8, max_length=100)
-
-
-class UserLogin(BaseModel):
-    """User login schema."""
-    email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
+    full_name: str = Field(min_length=1, max_length=255)
 
 
 class UserUpdate(BaseModel):
-    """User update schema."""
-    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
+    """Schema for updating a user."""
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    password: Optional[str] = Field(default=None, min_length=8)
     is_active: Optional[bool] = None
 
 
-class UserResponse(UserBase):
+class UserResponse(UUIDMixin, BaseSchema):
     """User response schema."""
-    model_config = ConfigDict(from_attributes=True)
-    
-    id: str
+    email: str
+    full_name: str
     is_active: bool
     is_superuser: bool
     created_at: datetime

@@ -1,144 +1,127 @@
 // src/schemas/purchase_order.py
-"""
-FinaRo AP Automation Core Engine
-Purchase Order Pydantic Schemas
-"""
+"""Purchase Order schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 
-from app.schemas.base import BaseSchema
+from src.schemas.common import BaseSchema, UUIDMixin
 
 
-class PurchaseOrderLineBase(BaseSchema):
-    """Base schema for Purchase Order Line."""
-    line_number: int = Field(..., ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    quantity_ordered: Decimal = Field(..., ge=Decimal('0'))
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=Decimal('0'))
-    tax_rate: Decimal = Field(default=Decimal('0'), ge=Decimal('0'))
-    expected_delivery_date: Optional[date] = None
+class PurchaseOrderLineBase(BaseModel):
+    """Base schema for PO line items."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    tax_amount: Decimal = Decimal("0")
+    total_amount: Decimal
+    uom: str = "EA"
+    metadata: Optional[dict] = None
 
 
 class PurchaseOrderLineCreate(PurchaseOrderLineBase):
-    """Schema for creating a Purchase Order Line."""
+    """Schema for creating PO line items."""
     pass
 
 
-class PurchaseOrderLineUpdate(BaseSchema):
-    """Schema for updating a Purchase Order Line."""
-    line_number: Optional[int] = Field(None, ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: Optional[str] = Field(None, min_length=1, max_length=255)
+class PurchaseOrderLineUpdate(BaseModel):
+    """Schema for updating PO line items."""
+    sku: Optional[str] = None
     description: Optional[str] = None
-    quantity_ordered: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_received: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_invoiced: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    tax_rate: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    expected_delivery_date: Optional[date] = None
-    status: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    unit_price: Optional[Decimal] = None
+    tax_amount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
+    uom: Optional[str] = None
+    metadata: Optional[dict] = None
 
 
-class PurchaseOrderLineResponse(PurchaseOrderLineBase):
-    """Schema for Purchase Order Line response."""
-    id: UUID
-    po_id: UUID
-    quantity_received: Decimal
-    quantity_invoiced: Decimal
-    line_total: Decimal
+class PurchaseOrderLineResponse(UUIDMixin, BaseSchema):
+    """Response schema for PO line items."""
+    purchase_order_id: UUID
+    line_number: int
+    sku: Optional[str]
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
     tax_amount: Decimal
-    status: str
-    quantity_remaining: Decimal
+    total_amount: Decimal
+    uom: str
+    metadata: Optional[dict]
     created_at: datetime
     updated_at: datetime
 
 
-class PurchaseOrderBase(BaseSchema):
-    """Base schema for Purchase Order."""
-    po_number: str = Field(..., min_length=1, max_length=50)
-    supplier_id: UUID
-    supplier_name: str = Field(..., min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    company_id: UUID
-    company_name: str = Field(..., min_length=1, max_length=255)
-    po_date: date
+class PurchaseOrderBase(BaseModel):
+    """Base schema for purchase orders."""
+    po_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
+    order_date: date
     expected_delivery_date: Optional[date] = None
-    latest_delivery_date: Optional[date] = None
+    subtotal: Decimal = Decimal("0")
+    tax_amount: Decimal = Decimal("0")
+    total_amount: Decimal = Decimal("0")
     currency: str = Field(default="USD", max_length=3)
-    payment_terms: Optional[str] = None
-    delivery_terms: Optional[str] = None
+    status: str = "OPEN"
     notes: Optional[str] = None
-    internal_notes: Optional[str] = None
-    department: Optional[str] = None
-    cost_center: Optional[str] = None
+    metadata: Optional[dict] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for creating a Purchase Order."""
-    lines: List[PurchaseOrderLineCreate] = Field(default_factory=list)
+    """Schema for creating a purchase order."""
+    lines: list[PurchaseOrderLineCreate] = Field(default_factory=list)
 
 
-class PurchaseOrderUpdate(BaseSchema):
-    """Schema for updating a Purchase Order."""
-    po_number: Optional[str] = Field(None, min_length=1, max_length=50)
-    supplier_id: Optional[UUID] = None
-    supplier_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    po_date: Optional[date] = None
+class PurchaseOrderUpdate(BaseModel):
+    """Schema for updating a purchase order."""
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
     expected_delivery_date: Optional[date] = None
-    latest_delivery_date: Optional[date] = None
+    subtotal: Optional[Decimal] = None
+    tax_amount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
+    currency: Optional[str] = None
     status: Optional[str] = None
-    currency: Optional[str] = Field(None, max_length=3)
-    payment_terms: Optional[str] = None
-    delivery_terms: Optional[str] = None
     notes: Optional[str] = None
-    internal_notes: Optional[str] = None
-    department: Optional[str] = None
-    cost_center: Optional[str] = None
+    metadata: Optional[dict] = None
 
 
-class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for Purchase Order response."""
-    id: UUID
-    status: str
+class PurchaseOrderResponse(UUIDMixin, BaseSchema):
+    """Response schema for purchase orders."""
+    po_number: str
+    supplier_id: str
+    supplier_name: str
+    supplier_reference: Optional[str]
+    order_date: date
+    expected_delivery_date: Optional[date]
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    open_amount: Decimal
-    is_open: bool
-    lines: List[PurchaseOrderLineResponse]
+    currency: str
+    status: str
+    notes: Optional[str]
+    metadata: Optional[dict]
+    created_by: Optional[UUID]
     created_at: datetime
     updated_at: datetime
-    
-    @field_validator('lines', mode='before')
-    @classmethod
-    def validate_lines(cls, v):
-        if v is None:
-            return []
-        return v
+    is_deleted: bool
 
 
 class PurchaseOrderListResponse(BaseSchema):
-    """Schema for Purchase Order list item response."""
+    """Response schema for listing purchase orders."""
     id: UUID
     po_number: str
-    supplier_id: UUID
+    supplier_id: str
     supplier_name: str
-    po_date: date
-    status: str
+    order_date: date
     total_amount: Decimal
     currency: str
-    department: Optional[str]
+    status: str
     created_at: datetime

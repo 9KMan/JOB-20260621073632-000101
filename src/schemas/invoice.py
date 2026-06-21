@@ -1,151 +1,137 @@
 // src/schemas/invoice.py
-"""
-FinaRo AP Automation Core Engine
-Invoice Pydantic Schemas
-"""
+"""Invoice schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 
-from app.schemas.base import BaseSchema
+from src.schemas.common import BaseSchema, UUIDMixin
 
 
-class InvoiceLineBase(BaseSchema):
-    """Base schema for Invoice Line."""
-    line_number: int = Field(..., ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    quantity_invoiced: Decimal = Field(..., ge=Decimal('0'))
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(..., ge=Decimal('0'))
-    tax_rate: Decimal = Field(default=Decimal('0'), ge=Decimal('0'))
+class InvoiceLineBase(BaseModel):
+    """Base schema for invoice line items."""
+    line_number: int
+    sku: Optional[str] = None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    tax_amount: Decimal = Decimal("0")
+    total_amount: Decimal
+    uom: str = "EA"
+    po_line_id: Optional[UUID] = None
+    metadata: Optional[dict] = None
 
 
 class InvoiceLineCreate(InvoiceLineBase):
-    """Schema for creating an Invoice Line."""
+    """Schema for creating invoice line items."""
     pass
 
 
-class InvoiceLineUpdate(BaseSchema):
-    """Schema for updating an Invoice Line."""
-    line_number: Optional[int] = Field(None, ge=1)
-    internal_reference: Optional[str] = None
-    product_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: Optional[str] = Field(None, min_length=1, max_length=255)
+class InvoiceLineUpdate(BaseModel):
+    """Schema for updating invoice line items."""
+    sku: Optional[str] = None
     description: Optional[str] = None
-    quantity_invoiced: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    unit_of_measure: Optional[str] = Field(None, max_length=20)
-    unit_price: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    tax_rate: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    quantity_matched: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    status: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    unit_price: Optional[Decimal] = None
+    tax_amount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
+    uom: Optional[str] = None
+    po_line_id: Optional[UUID] = None
+    metadata: Optional[dict] = None
 
 
-class InvoiceLineResponse(InvoiceLineBase):
-    """Schema for Invoice Line response."""
-    id: UUID
+class InvoiceLineResponse(UUIDMixin, BaseSchema):
+    """Response schema for invoice line items."""
     invoice_id: UUID
-    line_total: Decimal
+    line_number: int
+    sku: Optional[str]
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
     tax_amount: Decimal
-    quantity_matched: Decimal
-    quantity_unmatched: Decimal
-    status: str
+    total_amount: Decimal
+    uom: str
+    po_line_id: Optional[UUID]
+    metadata: Optional[dict]
     created_at: datetime
     updated_at: datetime
 
 
-class InvoiceBase(BaseSchema):
-    """Base schema for Invoice."""
-    invoice_number: str = Field(..., min_length=1, max_length=50)
-    supplier_id: UUID
-    supplier_name: str = Field(..., min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    po_id: Optional[UUID] = None
-    supplier_invoice_number: Optional[str] = None
+class InvoiceBase(BaseModel):
+    """Base schema for invoices."""
+    invoice_number: str = Field(max_length=50)
+    supplier_id: str = Field(max_length=100)
+    supplier_name: str = Field(max_length=255)
+    supplier_reference: Optional[str] = None
     invoice_date: date
     due_date: Optional[date] = None
-    received_date: Optional[date] = None
+    subtotal: Decimal = Decimal("0")
+    tax_amount: Decimal = Decimal("0")
+    total_amount: Decimal = Decimal("0")
     currency: str = Field(default="USD", max_length=3)
-    subtotal: Decimal = Field(default=Decimal('0'))
-    tax_amount: Decimal = Field(default=Decimal('0'))
-    total_amount: Decimal = Field(default=Decimal('0'))
-    tax_id: Optional[str] = None
-    tax_rate: Decimal = Field(default=Decimal('0'), ge=Decimal('0'))
-    payment_terms: Optional[str] = None
-    payment_method: Optional[str] = None
+    status: str = "RECEIVED"
+    payment_status: str = "UNPAID"
     notes: Optional[str] = None
-    department: Optional[str] = None
-    raw_ocr_data: Optional[str] = None
-    confidence_score: Optional[Decimal] = None
+    metadata: Optional[dict] = None
+    purchase_order_id: Optional[UUID] = None
 
 
 class InvoiceCreate(InvoiceBase):
-    """Schema for creating an Invoice."""
-    lines: List[InvoiceLineCreate] = Field(default_factory=list)
+    """Schema for creating an invoice."""
+    lines: list[InvoiceLineCreate] = Field(default_factory=list)
 
 
-class InvoiceUpdate(BaseSchema):
-    """Schema for updating an Invoice."""
-    invoice_number: Optional[str] = Field(None, min_length=1, max_length=50)
-    supplier_id: Optional[UUID] = None
-    supplier_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    supplier_code: Optional[str] = None
-    po_id: Optional[UUID] = None
-    supplier_invoice_number: Optional[str] = None
+class InvoiceUpdate(BaseModel):
+    """Schema for updating an invoice."""
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_reference: Optional[str] = None
     invoice_date: Optional[date] = None
     due_date: Optional[date] = None
-    currency: Optional[str] = Field(None, max_length=3)
     subtotal: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
     total_amount: Optional[Decimal] = None
-    tax_id: Optional[str] = None
-    tax_rate: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    payment_terms: Optional[str] = None
-    payment_method: Optional[str] = None
-    notes: Optional[str] = None
+    currency: Optional[str] = None
     status: Optional[str] = None
-    department: Optional[str] = None
-    amount_paid: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    rejection_reason: Optional[str] = None
+    payment_status: Optional[str] = None
+    notes: Optional[str] = None
+    metadata: Optional[dict] = None
+    purchase_order_id: Optional[UUID] = None
 
 
-class InvoiceResponse(InvoiceBase):
-    """Schema for Invoice response."""
-    id: UUID
+class InvoiceResponse(UUIDMixin, BaseSchema):
+    """Response schema for invoices."""
+    invoice_number: str
+    supplier_id: str
+    supplier_name: str
+    supplier_reference: Optional[str]
+    invoice_date: date
+    due_date: Optional[date]
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+    currency: str
     status: str
-    amount_paid: Decimal
-    balance_due: Decimal
-    is_paid: bool
-    lines: List[InvoiceLineResponse]
+    payment_status: str
+    notes: Optional[str]
+    metadata: Optional[dict]
+    purchase_order_id: Optional[UUID]
     created_at: datetime
     updated_at: datetime
-    
-    @field_validator('lines', mode='before')
-    @classmethod
-    def validate_lines(cls, v):
-        if v is None:
-            return []
-        return v
+    is_deleted: bool
 
 
 class InvoiceListResponse(BaseSchema):
-    """Schema for Invoice list item response."""
+    """Response schema for listing invoices."""
     id: UUID
     invoice_number: str
-    supplier_id: UUID
+    supplier_id: str
     supplier_name: str
     invoice_date: date
-    due_date: Optional[date]
-    status: str
     total_amount: Decimal
-    balance_due: Decimal
     currency: str
-    department: Optional[str]
+    status: str
+    payment_status: str
     created_at: datetime

@@ -1,24 +1,21 @@
 // src/models/__init__.py
-"""Database models package."""
-from app.models.base import BaseModel
-from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from app.models.invoice import Invoice, InvoiceLine
-from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from app.models.match import Match, MatchResult, MatchStatus, MatchDecision
-from app.models.balance import BalanceLedger, BalanceType
+"""SQLAlchemy models for FinaRo."""
+from src.models.balance import Balance
+from src.models.base import BaseModel
+from src.models.delivery_note import DeliveryNote
+from src.models.invoice import Invoice
+from src.models.match import Match, MatchStatus, MatchType
+from src.models.purchase_order import PurchaseOrder
+from src.models.user import User
 
 __all__ = [
+    "Balance",
     "BaseModel",
-    "PurchaseOrder",
-    "PurchaseOrderLine",
-    "Invoice",
-    "InvoiceLine",
     "DeliveryNote",
-    "DeliveryNoteLine",
+    "Invoice",
     "Match",
-    "MatchResult",
     "MatchStatus",
-    "MatchDecision",
-    "BalanceLedger",
-    "BalanceType",
+    "MatchType",
+    "PurchaseOrder",
+    "User",
 ]

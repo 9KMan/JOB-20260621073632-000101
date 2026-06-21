@@ -1,149 +1,80 @@
 // src/schemas/match.py
-"""
-FinaRo AP Automation Core Engine
-Match Pydantic Schemas
-"""
-from datetime import date, datetime
+"""Match schemas."""
+from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field
 
-from app.schemas.base import BaseSchema
-
-
-class MatchResultBase(BaseSchema):
-    """Base schema for Match Result."""
-    po_line_id: Optional[UUID] = None
-    invoice_line_id: Optional[UUID] = None
-    dn_line_id: Optional[UUID] = None
-    product_code: Optional[str] = None
-    product_name: Optional[str] = None
-    po_quantity: Decimal = Field(default=Decimal('0'))
-    invoice_quantity: Decimal = Field(default=Decimal('0'))
-    dn_quantity: Decimal = Field(default=Decimal('0'))
-    matched_quantity: Decimal = Field(default=Decimal('0'))
-    variance_quantity: Decimal = Field(default=Decimal('0'))
-    po_amount: Decimal = Field(default=Decimal('0'))
-    invoice_amount: Decimal = Field(default=Decimal('0'))
-    dn_amount: Decimal = Field(default=Decimal('0'))
-    matched_amount: Decimal = Field(default=Decimal('0'))
-    variance_amount: Decimal = Field(default=Decimal('0'))
-    score: Decimal = Field(default=Decimal('0'))
-    match_type: Optional[str] = None
-    variance_reason: Optional[str] = None
-    variance_tolerance: Decimal = Field(default=Decimal('0'))
-    notes: Optional[str] = None
+from src.models.match import MatchStatus, MatchType
+from src.schemas.common import BaseSchema, UUIDMixin
 
 
-class MatchResultCreate(MatchResultBase):
-    """Schema for creating a Match Result."""
-    pass
-
-
-class MatchResultUpdate(BaseSchema):
-    """Schema for updating a Match Result."""
-    status: Optional[str] = None
-    matched_quantity: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    matched_amount: Optional[Decimal] = Field(None, ge=Decimal('0'))
-    variance_reason: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class MatchResultResponse(MatchResultBase):
-    """Schema for Match Result response."""
-    id: UUID
-    match_id: UUID
-    status: str
-    match_percentage: Decimal
-    is_within_tolerance: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class MatchBase(BaseSchema):
-    """Base schema for Match."""
-    po_id: Optional[UUID] = None
+class MatchCreate(BaseModel):
+    """Schema for creating a match record."""
+    match_type: MatchType
+    purchase_order_id: Optional[UUID] = None
     invoice_id: Optional[UUID] = None
-    dn_id: Optional[UUID] = None
-    match_type: str
-    matched_lines: Optional[List[dict]] = None
-    variance_reason: Optional[str] = None
-    variance_notes: Optional[str] = None
+    delivery_note_id: Optional[UUID] = None
 
 
-class MatchCreate(MatchBase):
-    """Schema for creating a Match."""
-    results: List[MatchResultCreate] = Field(default_factory=list)
+class MatchUpdate(BaseModel):
+    """Schema for updating a match record."""
+    status: Optional[MatchStatus] = None
+    resolution_notes: Optional[str] = None
 
 
-class MatchUpdate(BaseSchema):
-    """Schema for updating a Match."""
-    status: Optional[str] = None
-    decision: Optional[str] = None
-    variance_reason: Optional[str] = None
-    variance_notes: Optional[str] = None
-    approval_comments: Optional[str] = None
-    review_comments: Optional[str] = None
+class MatchDecision(BaseModel):
+    """Schema for making a match decision."""
+    decision: MatchStatus = Field(
+        description="Decision: CONFIRMED, REJECTED, or HUMAN_REVIEW"
+    )
+    notes: Optional[str] = None
 
 
-class MatchDecisionRequest(BaseSchema):
-    """Schema for match decision request."""
-    decision: str = Field(..., pattern="^(AUTO_APPROVED|HUMAN_REVIEW|REJECTED|DISPUTE)$")
-    comments: Optional[str] = None
-    dispute_reason: Optional[str] = None
-
-
-class MatchResponse(MatchBase):
-    """Schema for Match response."""
-    id: UUID
-    match_number: str
-    status: str
-    decision: str
+class MatchResponse(UUIDMixin, BaseSchema):
+    """Response schema for match records."""
+    match_type: MatchType
+    status: MatchStatus
     total_score: Decimal
-    line_score: Decimal
+    line_level_score: Decimal
     amount_score: Decimal
     date_score: Decimal
-    po_amount: Decimal
-    invoice_amount: Decimal
-    dn_amount: Decimal
+    matched_amount: Decimal
     variance_amount: Decimal
-    quantity_po: Decimal
-    quantity_invoice: Decimal
-    quantity_dn: Decimal
-    variance_quantity: Decimal
-    approved_by: Optional[UUID] = None
-    approved_at: Optional[datetime] = None
-    reviewed_by: Optional[UUID] = None
-    reviewed_at: Optional[datetime] = None
-    is_confirmed: bool
-    is_pending: bool
-    is_rejected: bool
-    results: List[MatchResultResponse]
+    quantity_variance: Optional[Decimal]
+    price_variance: Optional[Decimal]
+    date_variance_days: Optional[int]
+    purchase_order_id: Optional[UUID]
+    invoice_id: Optional[UUID]
+    delivery_note_id: Optional[UUID]
+    resolved_by: Optional[UUID]
+    resolved_at: Optional[datetime]
+    resolution_notes: Optional[str]
+    line_matches: Optional[dict]
     created_at: datetime
     updated_at: datetime
-    
-    @field_validator('results', mode='before')
-    @classmethod
-    def validate_results(cls, v):
-        if v is None:
-            return []
-        return v
 
 
-class MatchListResponse(BaseSchema):
-    """Schema for Match list item response."""
+class MatchSummaryResponse(BaseSchema):
+    """Summary response for match listings."""
     id: UUID
-    match_number: str
-    match_type: str
-    po_id: Optional[UUID]
-    invoice_id: Optional[UUID]
-    dn_id: Optional[UUID]
-    status: str
-    decision: str
+    match_type: MatchType
+    status: MatchStatus
     total_score: Decimal
-    variance_amount: Decimal
-    is_confirmed: bool
-    is_pending: bool
+    matched_amount: Decimal
+    purchase_order_id: Optional[UUID]
+    invoice_id: Optional[UUID]
+    delivery_note_id: Optional[UUID]
     created_at: datetime
+
+
+class MatchResultResponse(BaseModel):
+    """Response schema for match results with full details."""
+    match: MatchResponse
+    invoice_number: Optional[str] = None
+    po_number: Optional[str] = None
+    dn_number: Optional[str] = None
+    decision: str
+    message: str

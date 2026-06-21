@@ -1,169 +1,154 @@
 // src/models/balance.py
-// src/models/balance.py
-"""
-FinaRo AP Automation Core Engine
-Balance Ledger Models for Tracking Partial Matches
-"""
+"""Balance ledger model for tracking partial matches and balances."""
+import enum
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from enum import Enum
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, String, Date, Numeric, ForeignKey, Text, Enum as SQLEnum
+from sqlalchemy import Date, Enum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import BaseModel
+from src.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-    from app.models.invoice import Invoice, InvoiceLine
-    from app.models.delivery_note import DeliveryNote, DeliveryNoteLine
+    from src.models.delivery_note import DeliveryNote
+    from src.models.invoice import Invoice
+    from src.models.purchase_order import PurchaseOrder
 
 
-class BalanceType(str, Enum):
-    """Balance type enumeration."""
-    PO_OPEN = "PO_OPEN"
-    INVOICE_OPEN = "INVOICE_OPEN"
-    DN_OPEN = "DN_OPEN"
-    VARIANCE = "VARIANCE"
-    CREDIT = "CREDIT"
+class BalanceType(str, enum.Enum):
+    """Type of balance being tracked."""
+    PURCHASE_ORDER = "PURCHASE_ORDER"
+    INVOICE = "INVOICE"
+    DELIVERY_NOTE = "DELIVERY_NOTE"
 
 
-class BalanceDirection(str, Enum):
-    """Balance direction enumeration."""
-    DEBIT = "DEBIT"
-    CREDIT = "CREDIT"
+class BalanceDirection(str, enum.Enum):
+    """Direction of the balance."""
+    POSITIVE = "POSITIVE"  # Amount owed/received
+    NEGATIVE = "NEGATIVE"  # Overpayment/overdelivery
 
 
-class BalanceLedger(BaseModel):
-    """
-    Balance Ledger model for tracking balances across documents.
-    Enables handling of partial shipments, split invoices, and multi-delivery scenarios.
-    """
-    __tablename__ = "balance_ledger"
-    
-    # Ledger Identification
-    ledger_number = Column(String(50), nullable=False, index=True)
-    
-    # Document References
-    document_type = Column(String(20), nullable=False, index=True)  # PO, Invoice, DN
-    document_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    document_number = Column(String(50), nullable=False, index=True)
-    
-    # Line References (nullable for header-level balances)
-    line_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    line_number = Column(String(10), nullable=True)
-    
-    # Balance Type
-    balance_type = Column(
-        String(20),
-        default=BalanceType.PO_OPEN.value,
+class Balance(BaseModel):
+    """Balance ledger for tracking partial matches across documents."""
+
+    __tablename__ = "balances"
+
+    balance_type: Mapped[BalanceType] = mapped_column(
+        Enum(BalanceType),
         nullable=False,
         index=True
     )
-    direction = Column(
-        String(10),
-        default=BalanceDirection.DEBIT.value,
+    direction: Mapped[BalanceDirection] = mapped_column(
+        Enum(BalanceDirection),
         nullable=False
     )
     
-    # Product Information
-    product_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    product_code = Column(String(50), nullable=True)
-    product_name = Column(String(255), nullable=True)
+    # Original amount
+    original_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False
+    )
     
-    # Quantities
-    original_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    matched_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
-    remaining_quantity = Column(Numeric(15, 3), default=Decimal('0.000'), nullable=False)
+    # Balance tracking
+    matched_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        default=Decimal("0"),
+        nullable=False
+    )
+    remaining_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False
+    )
     
-    # Amounts
-    original_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    matched_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
-    remaining_amount = Column(Numeric(15, 2), default=Decimal('0.00'), nullable=False)
+    # Reference dates
+    document_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False
+    )
+    due_date: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True
+    )
     
     # Status
-    status = Column(
-        String(20),
-        default='OPEN',
+    is_settled: Mapped[bool] = mapped_column(
+        default=False,
         nullable=False,
         index=True
     )
+    settled_at: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True
+    )
     
-    # Reference to related balance (for credits, reversals, etc.)
-    related_balance_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    
-    # Match Reference
-    match_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    # References to source documents
+    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
     
     # Currency
-    currency = Column(String(3), default='USD', nullable=False)
-    
-    # Effective Date
-    effective_date = Column(Date, nullable=False, index=True)
-    maturity_date = Column(Date, nullable=True)
-    
-    # Notes
-    notes = Column(Text, nullable=True)
-    
-    # Resolution
-    resolved_by = Column(UUID(as_uuid=True), nullable=True)
-    resolved_at = Column(DateTime, nullable=True)
-    resolution_notes = Column(Text, nullable=True)
-    
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="USD",
+        nullable=False
+    )
+
+    # Relationships
+    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        back_populates="balances"
+    )
+    invoice: Mapped[Optional["Invoice"]] = relationship(
+        "Invoice",
+        back_populates="balances"
+    )
+    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
+        "DeliveryNote",
+        back_populates="balances"
+    )
+
     def __repr__(self) -> str:
-        return f"<BalanceLedger(id={self.id}, ledger_number='{self.ledger_number}', remaining_amount={self.remaining_amount})>"
-    
-    def update_balance(self, matched_qty: Decimal, matched_amt: Decimal) -> None:
-        """
-        Update the balance after a match.
-        
-        Args:
-            matched_qty: Quantity being matched
-            matched_amt: Amount being matched
-        """
-        self.matched_quantity += matched_qty
-        self.matched_amount += matched_amt
-        self.remaining_quantity = self.original_quantity - self.matched_quantity
+        return f"<Balance {self.id}: {self.balance_type.value} - {self.remaining_amount}>"
+
+    def apply_match(self, amount: Decimal) -> Decimal:
+        """Apply a match amount and return the new remaining balance."""
+        self.matched_amount += amount
         self.remaining_amount = self.original_amount - self.matched_amount
         
-        # Update status based on remaining balance
-        if self.remaining_amount <= Decimal('0.00'):
-            self.status = 'CLOSED'
-        elif self.remaining_amount < self.original_amount:
-            self.status = 'PARTIAL'
-    
-    def reverse_balance(self, qty: Decimal, amt: Decimal, notes: str) -> None:
-        """
-        Create a reversal entry for this balance.
+        if self.remaining_amount <= Decimal("0.01"):  # Tolerance for rounding
+            self.is_settled = True
+            self.remaining_amount = Decimal("0")
         
-        Args:
-            qty: Quantity to reverse
-            amt: Amount to reverse
-            notes: Reason for reversal
-        """
-        # This would typically create a new balance entry with opposite direction
-        # For simplicity, we just update the current record
-        self.matched_quantity -= qty
-        self.matched_amount -= amt
-        self.remaining_quantity = self.original_quantity - self.matched_quantity
+        return self.remaining_amount
+
+    def reverse_match(self, amount: Decimal) -> Decimal:
+        """Reverse a previously applied match amount."""
+        self.matched_amount -= amount
         self.remaining_amount = self.original_amount - self.matched_amount
-        
-        if self.remaining_amount > Decimal('0.00'):
-            self.status = 'OPEN'
-        
-        self.notes = f"{self.notes or ''}\nReversal: {notes}"
-    
+        self.is_settled = False
+        return self.remaining_amount
+
     @property
-    def is_closed(self) -> bool:
-        """Check if balance is fully closed."""
-        return self.status == 'CLOSED' and self.remaining_amount <= Decimal('0.00')
-    
-    @property
-    def utilization_percentage(self) -> Decimal:
-        """Calculate how much of the balance has been utilized."""
-        if self.original_amount > 0:
-            return (self.matched_amount / self.original_amount) * 100
-        return Decimal('0.00')
+    def balance_percentage(self) -> Decimal:
+        """Get percentage of balance remaining."""
+        if self.original_amount == 0:
+            return Decimal("0")
+        return (self.remaining_amount / self.original_amount) * Decimal("100")

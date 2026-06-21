@@ -1,75 +1,51 @@
 // src/models/base.py
-"""
-FinaRo AP Automation Core Engine
-Base Model with Common Fields
-"""
+"""Base model with common fields for all entities."""
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import Mapped, mapped_column
 
-Base = declarative_base()
+from app.database import Base
 
 
 class BaseModel(Base):
-    """
-    Abstract base model with common fields for all entities.
-    Uses UUID as primary key and includes audit timestamps.
-    """
+    """Base model with UUID primary key and timestamps."""
+
     __abstract__ = True
-    
-    id = Column(
+
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
-        nullable=False
-    )
-    
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        nullable=False,
         index=True
     )
-    
-    updated_at = Column(
-        DateTime,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
         nullable=False
     )
-    
-    created_by = Column(
-        UUID(as_uuid=True),
-        nullable=True,
-        index=True
-    )
-    
-    updated_by = Column(
-        UUID(as_uuid=True),
-        nullable=True
-    )
-    
-    is_deleted = Column(
-        "is_deleted",
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
         default=False,
         nullable=False,
         index=True
     )
-    
+
     def soft_delete(self) -> None:
-        """Mark the record as soft deleted."""
+        """Mark entity as deleted."""
         self.is_deleted = True
         self.updated_at = datetime.utcnow()
-    
-    @classmethod
-    def get_by_id(cls, session, record_id: uuid.UUID):
-        """Get a record by its ID."""
-        return session.query(cls).filter(
-            cls.id == record_id,
-            cls.is_deleted == False
-        ).first()
+
+    def restore(self) -> None:
+        """Restore deleted entity."""
+        self.is_deleted = False
+        self.updated_at = datetime.utcnow()
