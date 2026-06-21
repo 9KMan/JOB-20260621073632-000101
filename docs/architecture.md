@@ -1,36 +1,45 @@
 // docs/architecture.md
 # FinaRo — AP Automation Core Engine Architecture
 
-## Document Information
+## 1. Project Identity
 
 | Field | Value |
 |---|---|
-| Project | FinaRo — AP Automation Core Engine |
+| Project Name | FinaRo — AP Automation Core Engine |
 | Client | Finaro |
-| Version | 1.0.0 |
-| Status | Phase 1 — Project Overview |
+| Type | 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order) |
+| Tier | PREMIUM |
+| Budget | $14,250–$21,375 (150–225 hrs @ $95/hr) |
+| Timeline | 4–8 weeks |
+| Rate | $95/hr |
+
+### Core Problem Statement
+
+Accounts Payable (AP) departments face significant challenges when reconciling incoming invoices against purchase orders (POs) and delivery notes. Manual 3-way matching is time-consuming, error-prone, and creates bottlenecks in the procurement-to-payment cycle.
+
+FinaRo automates this process by implementing an intelligent 3-way matching engine that:
+- Anchors all documents against their corresponding Purchase Orders
+- Performs cascade matching across all document types
+- Tracks and resolves partial matches through a balances ledger
+- Routes exceptions to appropriate resolution workflows
 
 ---
 
-## 1. System Overview
+## 2. Technical Stack
 
-FinaRo is an automated 3-Way Matching Engine designed for accounts payable (AP) automation. The system performs intelligent matching between three core document types:
-
-1. **Purchase Orders (PO)** — Authoritative source of procurement intent
-2. **Invoices** — Supplier billing documents requesting payment
-3. **Delivery Notes (DN)** — Proof of goods/services received
-
-The engine determines whether payments should be automatically approved, held for human review, or flagged for dispute based on configurable matching rules and exception handling workflows.
+| Component | Technology |
+|---|---|
+| Backend | Python 3.11+, FastAPI |
+| Database | PostgreSQL 15+ |
+| ORM | SQLAlchemy 2.0+ |
+| Migrations | Alembic |
+| Authentication | JWT (HS256) |
+| Testing | pytest |
+| Containerization | Docker, Docker Compose |
 
 ---
 
-## 2. Architecture Layers
+## 3. System Architecture
 
-The matching engine operates through three distinct layers, each building upon the previous to create a robust and transparent matching process.
-
-### 2.1 Layer 1 — Anchoring
-
-**Purpose:** Establish deterministic anchors for all downstream matching operations.
-
-**Logic:**
+### 3.1 High-Level Architecture
 
