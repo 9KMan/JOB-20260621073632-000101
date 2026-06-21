@@ -1,97 +1,95 @@
 # models/enums.py
-"""Enumeration types for the AP Automation Engine."""
+"""SQLAlchemy-enum types and Pydantic-compatible Python enums."""
 
+import uuid
 from enum import Enum
+
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy.types import TypeDecorator
+
+
+# ── Python Enums (Pydantic-compatible) ───────────────────────────────────────
 
 
 class InvoiceStatus(str, Enum):
-    """Invoice status values."""
+    """Lifecycle status of an invoice."""
 
-    DRAFT = "DRAFT"
-    PENDING = "PENDING"
-    MATCHING = "MATCHING"
-    MATCHED = "MATCHED"
-    APPROVED = "APPROVED"
-    REVIEW = "REVIEW"
-    EXCEPTION = "EXCEPTION"
-    REJECTED = "REJECTED"
-    PAID = "PAID"
-    CANCELLED = "CANCELLED"
+    DRAFT = "draft"
+    RECEIVED = "received"
+    MATCHING = "matching"
+    MATCHED = "matched"
+    APPROVED = "approved"
+    EXCEPTION = "exception"
+    REJECTED = "rejected"
+    PAID = "paid"
 
 
-class PurchaseOrderStatus(str, Enum):
-    """Purchase order status values."""
+class POStatus(str, Enum):
+    """Lifecycle status of a purchase order."""
 
-    DRAFT = "DRAFT"
-    ACTIVE = "ACTIVE"
-    CLOSED = "CLOSED"
-    CANCELLED = "CANCELLED"
-    COMPLETED = "COMPLETED"
+    DRAFT = "draft"
+    SENT = "sent"
+    PARTIALLY_RECEIVED = "partially_received"
+    FULLY_RECEIVED = "fully_received"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
 
 
 class DeliveryNoteStatus(str, Enum):
-    """Delivery note status values."""
+    """Lifecycle status of a delivery note."""
 
-    DRAFT = "DRAFT"
-    ISSUED = "ISSUED"
-    RECEIVED = "RECEIVED"
-    INVOICED = "INVOICED"
-    CANCELLED = "CANCELLED"
+    RECEIVED = "received"
+    PARTIALLY_MATCHED = "partially_matched"
+    FULLY_MATCHED = "fully_matched"
+    CLOSED = "closed"
+    DISPUTED = "disputed"
 
 
 class MatchDecision(str, Enum):
-    """Matching decision outcomes."""
+    """Decision output of the matching engine."""
 
-    APPROVED = "APPROVED"
-    REVIEW = "REVIEW"
-    EXCEPTION = "EXCEPTION"
-    REJECTED = "REJECTED"
+    AUTO_APPROVED = "auto_approved"
+    REVIEW = "review"
+    EXCEPTION = "exception"
+    REJECTED = "rejected"
 
 
 class ExceptionType(str, Enum):
-    """Types of matching exceptions."""
+    """Types of matching exceptions requiring human review."""
 
-    PRICE_VARIANCE = "PRICE_VARIANCE"
-    QUANTITY_VARIANCE = "QUANTITY_VARIANCE"
-    MISSING_PO = "MISSING_PO"
-    MISSING_INVOICE = "MISSING_INVOICE"
-    MULTIPLE_MATCHES = "MULTIPLE_MATCHES"
-    DUPLICATE_INVOICE = "DUPLICATE_INVOICE"
-    DUPLICATE_PO = "DUPLICATE_PO"
-    PARTIAL_MATCH = "PARTIAL_MATCH"
-    OVER_DELIVERY = "OVER_DELIVERY"
-    UNDER_DELIVERY = "UNDER_DELIVERY"
-    CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
-    DATE_VARIANCE = "DATE_VARIANCE"
-    VENDOR_MISMATCH = "VENDOR_MISMATCH"
-    UNEXPECTED_CHARGE = "UNEXPECTED_CHARGE"
-    OTHER = "OTHER"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DESCRIPTION_MISMATCH = "description_mismatch"
+    PARTIAL_MATCH = "partial_match"
+    MULTIPLE_POTENTIAL_MATCHES = "multiple_potential_matches"
+    CROSS_COMPANY = "cross_company"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    TAX_MISMATCH = "tax_mismatch"
 
 
 class ExceptionStatus(str, Enum):
-    """Exception resolution status."""
+    """Resolution status of an exception."""
 
-    OPEN = "OPEN"
-    IN_REVIEW = "IN_REVIEW"
-    RESOLVED = "RESOLVED"
-    DISMISSED = "DISMISSED"
-    ESCALATED = "ESCALATED"
-
-
-class MatchConfidence(str, Enum):
-    """Match confidence levels."""
-
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
-    NONE = "NONE"
+    OPEN = "open"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+    ESCALATED = "escalated"
 
 
-class LearningStatus(str, Enum):
-    """Cross-reference learning status."""
+# ── SQLAlchemy Enum Types ────────────────────────────────────────────────────
 
-    PENDING = "PENDING"
-    ACTIVE = "ACTIVE"
-    PROMOTED = "PROMOTED"
-    DEMOTED = "DEMOTED"
-    ARCHIVED = "ARCHIVED"
+
+def _sa_enum(name: str, enum_cls: type[Enum]) -> SAEnum:
+    """Create a SQLAlchemy Enum type with the given Python enum class."""
+    return SAEnum(enum_cls, name=name, create_constraint=True, native_enum=True)
+
+
+# These types are used in model column definitions
+InvoiceStatusType = _sa_enum("invoice_status", InvoiceStatus)
+POStatusType = _sa_enum("po_status", POStatus)
+DeliveryNoteStatusType = _sa_enum("delivery_note_status", DeliveryNoteStatus)
+MatchDecisionType = _sa_enum("match_decision", MatchDecision)
+ExceptionTypeType = _sa_enum("exception_type", ExceptionType)
+ExceptionStatusType = _sa_enum("exception_status", ExceptionStatus)

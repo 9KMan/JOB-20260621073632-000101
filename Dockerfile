@@ -1,61 +1,54 @@
 # Dockerfile
-FROM python:3.11-slim as base
+# Production-ready Python 3.11 container for AP Automation Core Engine
 
-WORKDIR /app
+FROM python:3.11-slim AS builder
 
+WORKDIR /build
+
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir uv==0.1.18
-
-FROM base as builder
-
-COPY --from=base /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=base /usr/local/lib/python3.11/site-packages /site-packages
-
-ENV UV_LINK_MODE=copy
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Install Python dependencies in a virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml ./
-RUN uv sync --frozen --no-install-project
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip install --no-cache-dir -e ".[dev]" || \
+    pip install --no-cache-dir .
 
-FROM base as production
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV UV_LINK_MODE=copy
+# Production stage
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /site-packages /usr/local/lib/python3.11/site-packages
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /app
+# Copy application source
+COPY --chown=1000:1000 . .
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
 USER appuser
 
+# Expose port
 EXPOSE 8000
 
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uv", "run", "uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-FROM base as dev
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /site-packages /usr/local/lib/python3.11/site-packages
-
-COPY . .
-
-CMD ["uv", "run", "uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Run with uvicorn
+CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

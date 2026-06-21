@@ -1,22 +1,21 @@
 # api/v1/purchase_orders.py
-"""Purchase order ingestion and list/get endpoints."""
+"""Purchase Order ingestion and list/get endpoints."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import (
-    PaginatedResponse,
-    PageParams,
     PurchaseOrderCreate,
-    PurchaseOrderListResponse,
     PurchaseOrderResponse,
+    PaginatedResponse,
+    SuccessResponse,
 )
 from core.database import get_db
-from core.security import get_current_user_id
-from models import BalanceLedger, BalanceLedgerLine, PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus
+from models import PurchaseOrder, POLine
 
 router = APIRouter()
 
@@ -29,112 +28,96 @@ router = APIRouter()
 )
 async def ingest_purchase_order(
     payload: PurchaseOrderCreate,
-    db: AsyncSession = Depends(get_db),
-    _: str = Depends(get_current_user_id),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PurchaseOrderResponse:
-    """Ingest a new purchase order with its line items and seed balance ledger."""
-    # Check for duplicate PO number
+    """Ingest a new purchase order from ERP with line items."""
+    # Check for duplicate
     existing = await db.execute(
-        select(PurchaseOrder.id).where(PurchaseOrder.po_number == payload.po_number)
+        select(PurchaseOrder).where(
+            PurchaseOrder.vendor_code == payload.vendor_code,
+            PurchaseOrder.po_number == payload.po_number,
+        )
     )
-    if existing.scalar_one_or_none() is not None:
+    if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"PO number '{payload.po_number}' already exists",
+            detail=f"PO {payload.po_number} already exists for vendor {payload.vendor_code}",
         )
 
     po = PurchaseOrder(
+        po_number=payload.po_number,
         vendor_code=payload.vendor_code,
         vendor_name=payload.vendor_name,
-        po_number=payload.po_number,
-        po_date=payload.po_date,
-        delivery_date=payload.delivery_date,
+        vendor_tax_id=payload.vendor_tax_id,
         currency=payload.currency,
+        subtotal=payload.subtotal,
+        tax_amount=payload.tax_amount,
         total_amount=payload.total_amount,
-        status=PurchaseOrderStatus.ACTIVE,
-        erp_po_id=payload.erp_po_id,
+        po_date=payload.po_date,
+        expected_delivery_date=payload.expected_delivery_date,
+        notes=payload.notes,
     )
-    db.add(po)
-    await db.flush()
 
     for line_payload in payload.lines:
-        line = PurchaseOrderLine(
-            po_id=po.id,
+        line = POLine(
             line_number=line_payload.line_number,
             description=line_payload.description,
-            product_code=line_payload.product_code,
-            product_name=line_payload.product_name,
             quantity_ordered=line_payload.quantity_ordered,
-            unit_of_measure=line_payload.unit_of_measure,
             unit_price=line_payload.unit_price,
             line_amount=line_payload.line_amount,
         )
-        db.add(line)
+        po.lines.append(line)
 
-    # Seed balance ledger at PO level and per line
-    ledger = BalanceLedger(
-        po_id=po.id,
-        currency=payload.currency,
-        total_open_amount=payload.total_amount,
-    )
-    db.add(ledger)
+    db.add(po)
     await db.flush()
-
-    for line in payload.lines:
-        ledger_line = BalanceLedgerLine(
-            ledger_id=ledger.id,
-            po_line_id=line.id,  # resolved after flush
-            qty_ordered=line.quantity_ordered,
-            qty_pending=line.quantity_ordered,
-            amount_ordered=line.line_amount,
-            amount_pending=line.line_amount,
-        )
-        db.add(ledger_line)
-
-    await db.commit()
     await db.refresh(po)
     return PurchaseOrderResponse.model_validate(po)
 
 
-@router.get("/", response_model=PaginatedResponse)
+@router.get(
+    "/",
+    response_model=PaginatedResponse[PurchaseOrderResponse],
+    summary="List purchase orders",
+)
 async def list_purchase_orders(
-    params: PageParams = Depends(),
-    status_filter: PurchaseOrderStatus | None = Query(None, alias="status"),
-    vendor_code: str | None = None,
-    db: AsyncSession = Depends(get_db),
-    _: str = Depends(get_current_user_id),
-) -> PaginatedResponse:
+    db: Annotated[AsyncSession, Depends(get_db)],
+    vendor_code: str | None = Query(None, description="Filter by vendor code"),
+    status_filter: str | None = Query(None, alias="status", description="Filter by status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse[PurchaseOrderResponse]:
     """List all purchase orders with optional filtering and pagination."""
-    stmt = select(PurchaseOrder)
-    count_stmt = select(func.count(PurchaseOrder.id))
+    query = select(PurchaseOrder).where(PurchaseOrder.is_active == True)  # noqa: E712
 
-    if status_filter:
-        stmt = stmt.where(PurchaseOrder.status == status_filter)
-        count_stmt = count_stmt.where(PurchaseOrder.status == status_filter)
     if vendor_code:
-        stmt = stmt.where(PurchaseOrder.vendor_code == vendor_code)
-        count_stmt = count_stmt.where(PurchaseOrder.vendor_code == vendor_code)
+        query = query.where(PurchaseOrder.vendor_code == vendor_code)
+    if status_filter:
+        query = query.where(PurchaseOrder.status == status_filter)
 
-    total = (await db.execute(count_stmt)).scalar_one()
-    stmt = stmt.order_by(PurchaseOrder.created_at.desc()).offset(params.offset).limit(params.page_size)
-    rows = (await db.execute(stmt)).scalars().all()
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar_one()
 
-    items = [PurchaseOrderListResponse.model_validate(r) for r in rows]
-    return PaginatedResponse.create(items, total, params)
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    pos = result.scalars().all()
+
+    items = [PurchaseOrderResponse.model_validate(po) for po in pos]
+    return PaginatedResponse.create(items, total, page, page_size)
 
 
-@router.get("/{po_id}", response_model=PurchaseOrderResponse)
+@router.get(
+    "/{po_id}",
+    response_model=PurchaseOrderResponse,
+    summary="Get a single purchase order",
+)
 async def get_purchase_order(
     po_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    _: str = Depends(get_current_user_id),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PurchaseOrderResponse:
-    """Retrieve a single purchase order with its line items."""
-    result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == po_id)
-    )
+    """Retrieve a single purchase order by ID."""
+    result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))
     po = result.scalar_one_or_none()
-    if po is None:
+    if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase order {po_id} not found",
