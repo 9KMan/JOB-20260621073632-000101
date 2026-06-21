@@ -1,2 +1,2 @@
-// src/services/__init__.py
-"""Services package."""
+# src/services/__init__.py
+"""Business logic services."""

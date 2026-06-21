@@ -1,66 +1,65 @@
-// src/core/config.py
-"""
-Application configuration using Pydantic Settings
-All configuration is loaded from environment variables
-"""
-from pydantic_settings import BaseSettings
-from pydantic import Field
+# src/core/config.py
+"""Application configuration using pydantic-settings."""
+
+import os
+from functools import lru_cache
 from typing import List
-import secrets
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
-    
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     # Application
-    APP_NAME: str = "FinaRo AP Automation Core Engine"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False, env="DEBUG")
-    
+    APP_NAME: str = "FinaRo AP Automation"
+    DEBUG: bool = False
+    API_V1_PREFIX: str = "/api/v1"
+
     # Database
-    DATABASE_URL: str = Field(
-        default="postgresql://finaro:finaro123@localhost:5432/finaro_db",
-        env="DATABASE_URL"
-    )
-    DB_POOL_SIZE: int = Field(default=10, env="DB_POOL_SIZE")
-    DB_MAX_OVERFLOW: int = Field(default=20, env="DB_MAX_OVERFLOW")
-    
+    DATABASE_URL: str = "postgresql+asyncpg://finaro:finaro_secret@localhost:5432/finaro"
+    DATABASE_URL_SYNC: str = "postgresql://finaro:finaro_secret@localhost:5432/finaro"
+
     # Security
-    SECRET_KEY: str = Field(
-        default=secrets.token_urlsafe(32),
-        env="SECRET_KEY"
-    )
-    ALGORITHM: str = Field(default="HS256", env="ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=30,
-        env="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
-    
+    SECRET_KEY: str = "supersecretkeychangeinproduction123456"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     # CORS
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
-        env="CORS_ORIGINS"
-    )
-    
-    # Matching Engine Weights
-    MATCHING_LINE_WEIGHT: float = Field(default=0.70, env="MATCHING_LINE_WEIGHT")
-    MATCHING_AMOUNT_WEIGHT: float = Field(default=0.20, env="MATCHING_AMOUNT_WEIGHT")
-    MATCHING_DATE_WEIGHT: float = Field(default=0.10, env="MATCHING_DATE_WEIGHT")
-    
+    CORS_ORIGINS: List[str] = ["*"]
+
+    # Matching Engine Weights (Layer 2)
+    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
+    MATCH_WEIGHT_AMOUNT: float = 0.20
+    MATCH_WEIGHT_DATE: float = 0.10
+
     # Matching Thresholds
-    MATCHING_CONFIRM_THRESHOLD: float = Field(
-        default=0.90,
-        env="MATCHING_CONFIRM_THRESHOLD"
-    )
-    MATCHING_PENDING_THRESHOLD: float = Field(
-        default=0.70,
-        env="MATCHING_PENDING_THRESHOLD"
-    )
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
+    MATCH_THRESHOLD_PENDING_REVIEW: float = 0.70
+
+    @property
+    def database_url(self) -> str:
+        """Get async database URL."""
+        return self.DATABASE_URL
+
+    @property
+    def database_url_sync(self) -> str:
+        """Get sync database URL."""
+        return self.DATABASE_URL_SYNC
 
 
-# Global settings instance
-settings = Settings()
+@lru_cache()
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()
+
+
+settings = get_settings()

@@ -1,56 +1,54 @@
-// src/models/base.py
-"""
-Base model classes with common fields
-"""
+# src/models/base.py
+"""Base model with common fields."""
+
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, Boolean
+
+from sqlalchemy import DateTime, String
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declared_attr
 
 from src.core.database import Base
 
 
-class UUIDModel(Base):
-    """Base model with UUID primary key"""
+class BaseModel(Base):
+    """Base model with common fields for all entities."""
+
     __abstract__ = True
-    
-    id = Column(
+
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        index=True
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
 
 class TimestampMixin:
-    """Mixin to add created_at and updated_at timestamps"""
-    
-    @declared_attr
-    def created_at(cls):
-        return Column(
-            DateTime(timezone=True),
-            default=lambda: datetime.now(timezone.utc),
-            nullable=False
-        )
-    
-    @declared_attr
-    def updated_at(cls):
-        return Column(
-            DateTime(timezone=True),
-            default=lambda: datetime.now(timezone.utc),
-            onupdate=lambda: datetime.now(timezone.utc),
-            nullable=False
-        )
+    """Mixin for timestamp fields."""
 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
-class SoftDeleteMixin:
-    """Mixin for soft delete functionality"""
-    
-    @declared_attr
-    def deleted_at(cls):
-        return Column(DateTime(timezone=True), nullable=True)
-    
-    @declared_attr
-    def is_deleted(cls):
-        return Column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

@@ -1,45 +1,65 @@
-// src/models/user.py
-"""
-User model for authentication
-"""
-from sqlalchemy import Column, String, Boolean
-from sqlalchemy.orm import relationship
+# src/models/user.py
+"""User model for authentication."""
 
-from src.models.base import UUIDModel, TimestampModel, SoftDeleteModel
+from typing import TYPE_CHECKING
+import uuid
+
+from sqlalchemy import Boolean, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import BaseModel
+
+if TYPE_CHECKING:
+    from src.models.match import Match
 
 
-class User(UUIDModel, TimestampModel, SoftDeleteModel):
-    """User model for authentication and authorization"""
+class User(BaseModel):
+    """User model for authentication and authorization."""
+
     __tablename__ = "users"
-    
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    username = Column(String(100), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_superuser = Column(Boolean, default=False, nullable=False)
-    
+
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+
+    hashed_password: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    full_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    is_superuser: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
     # Relationships
-    created_purchase_orders = relationship(
-        "PurchaseOrder",
-        back_populates="created_by_user",
-        foreign_keys="PurchaseOrder.created_by"
+    matches: Mapped[list["Match"]] = relationship(
+        "Match",
+        back_populates="reviewed_by_user",
+        foreign_keys="Match.reviewed_by",
     )
-    created_invoices = relationship(
-        "Invoice",
-        back_populates="created_by_user",
-        foreign_keys="Invoice.created_by"
-    )
-    created_delivery_notes = relationship(
-        "DeliveryNote",
-        back_populates="created_by_user",
-        foreign_keys="DeliveryNote.created_by"
-    )
-    confirmed_matches = relationship(
-        "MatchRecord",
-        back_populates="confirmed_by_user",
-        foreign_keys="MatchRecord.confirmed_by"
-    )
-    
-    def __repr__(self):
-        return f"<User {self.email}>"
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email={self.email})>"

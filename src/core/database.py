@@ -1,33 +1,23 @@
-// src/core/database.py
-"""
-Database connection and session management
-Uses SQLAlchemy 2.0 with async support
-"""
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
-from contextlib import asynccontextmanager
+# src/core/database.py
+"""Database configuration and session management."""
+
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
 
-
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models"""
-    pass
-
-
-# Create async engine with connection pooling
+# Create async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    poolclass=AsyncAdaptedQueuePool,
     pool_pre_ping=True,
-    pool_recycle=3600,
+    pool_size=10,
+    max_overflow=20,
 )
 
-# Async session factory
+# Create async session factory
 async_session_factory = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -36,23 +26,12 @@ async_session_factory = async_sessionmaker(
     autoflush=False,
 )
 
-
-async def get_db() -> AsyncSession:
-    """Dependency to get database session"""
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+# Base class for models
+Base = declarative_base()
 
 
-@asynccontextmanager
-async def get_db_context() -> AsyncSession:
-    """Context manager for database session"""
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for getting async database session."""
     async with async_session_factory() as session:
         try:
             yield session
