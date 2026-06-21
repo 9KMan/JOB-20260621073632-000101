@@ -1,131 +1,127 @@
 // src/app/services/base.py
-"""
-Base Service Class
-Provides common CRUD operations for all services.
-"""
-from typing import Generic, TypeVar, Type, Optional, List, Any
+"""Base service class with common CRUD operations."""
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, func, update, delete
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.exceptions import DuplicateException, NotFoundException
 from app.models.base import BaseModel
-from app.core.database import get_db_context
 
-T = TypeVar("T", bound=BaseModel)
+ModelType = TypeVar("ModelType", bound=BaseModel)
+CreateSchemaType = TypeVar("CreateSchemaType")
+UpdateSchemaType = TypeVar("UpdateSchemaType")
 
 
-class BaseService(Generic[T]):
+class BaseService(Generic[ModelType]):
     """Base service with common CRUD operations."""
-    
-    def __init__(self, model: Type[T], session: Optional[AsyncSession] = None):
+
+    def __init__(self, model: type[ModelType], session: AsyncSession):
+        """Initialize the service with model and session."""
         self.model = model
-        self._session = session
-    
-    async def _get_session(self) -> AsyncSession:
-        """Get database session."""
-        if self._session:
-            return self._session
-        async with get_db_context() as session:
-            return session
-    
-    async def get_by_id(self, id: UUID) -> Optional[T]:
-        """Get entity by ID."""
-        session = await self._get_session()
-        result = await session.execute(
-            select(self.model).where(self.model.id == id)
-        )
-        return result.scalar_one_or_none()
-    
+        self.session = session
+
+    async def get_by_id(self, id: UUID, load_relations: list[str] | None = None) -> ModelType:
+        """Get a record by ID."""
+        query = select(self.model).where(self.model.id == id)
+
+        if load_relations:
+            for relation in load_relations:
+                query = query.options(selectinload(getattr(self.model, relation)))
+
+        result = await self.session.execute(query)
+        record = result.scalar_one_or_none()
+
+        if record is None:
+            raise NotFoundException(self.model.__tablename__, str(id))
+
+        return record
+
     async def get_all(
         self,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[dict] = None,
-        order_by: Optional[str] = None,
-    ) -> List[T]:
-        """Get all entities with pagination and filters."""
-        session = await self._get_session()
+        filters: dict[str, Any] | None = None,
+        order_by: str | None = None,
+        load_relations: list[str] | None = None,
+    ) -> tuple[list[ModelType], int]:
+        """Get all records with pagination."""
         query = select(self.model)
-        
+
         if filters:
             for key, value in filters.items():
                 if hasattr(self.model, key):
                     query = query.where(getattr(self.model, key) == value)
-        
-        if order_by:
-            if order_by.startswith("-"):
-                attr = getattr(self.model, order_by[1:], None)
-                if attr:
-                    query = query.order_by(attr.desc())
-            else:
-                attr = getattr(self.model, order_by, None)
-                if attr:
-                    query = query.order_by(attr)
-        
-        query = query.offset(skip).limit(limit)
-        result = await session.execute(query)
-        return list(result.scalars().all())
-    
-    async def count(self, filters: Optional[dict] = None) -> int:
-        """Count entities."""
-        session = await self._get_session()
-        query = select(func.count(self.model.id))
-        
+
+        # Get total count
+        count_query = select(func.count()).select_from(self.model)
         if filters:
             for key, value in filters.items():
                 if hasattr(self.model, key):
-                    query = query.where(getattr(self.model, key) == value)
-        
-        result = await session.execute(query)
-        return result.scalar_one()
-    
-    async def create(self, data: dict) -> T:
-        """Create new entity."""
-        session = await self._get_session()
-        entity = self.model(**data)
-        session.add(entity)
-        await session.flush()
-        await session.refresh(entity)
-        return entity
-    
-    async def update(self, id: UUID, data: dict) -> Optional[T]:
-        """Update entity."""
-        session = await self._get_session()
-        
-        update_data = {k: v for k, v in data.items() if v is not None}
-        if not update_data:
-            return await self.get_by_id(id)
-        
-        await session.execute(
-            update(self.model).where(self.model.id == id).values(**update_data)
-        )
-        await session.flush()
-        return await self.get_by_id(id)
-    
-    async def delete(self, id: UUID, soft: bool = True) -> bool:
-        """Delete entity (soft delete by default)."""
-        session = await self._get_session()
-        
-        if soft and hasattr(self.model, "is_deleted"):
-            await session.execute(
-                update(self.model)
-                .where(self.model.id == id)
-                .values(is_deleted=True)
-            )
+                    count_query = count_query.where(getattr(self.model, key) == value)
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar() or 0
+
+        # Apply ordering
+        if order_by and hasattr(self.model, order_by):
+            query = query.order_by(getattr(self.model, order_by))
         else:
-            await session.execute(
-                delete(self.model).where(self.model.id == id)
-            )
-        
-        await session.flush()
+            query = query.order_by(self.model.created_at.desc())
+
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+
+        # Load relations if specified
+        if load_relations:
+            for relation in load_relations:
+                if hasattr(self.model, relation):
+                    query = query.options(selectinload(getattr(self.model, relation)))
+
+        result = await self.session.execute(query)
+        records = list(result.scalars().all())
+
+        return records, total
+
+    async def create(self, data: dict[str, Any]) -> ModelType:
+        """Create a new record."""
+        record = self.model(**data)
+        self.session.add(record)
+        await self.session.flush()
+        await self.session.refresh(record)
+        return record
+
+    async def update(self, id: UUID, data: dict[str, Any]) -> ModelType:
+        """Update an existing record."""
+        record = await self.get_by_id(id)
+        for key, value in data.items():
+            if hasattr(record, key) and value is not None:
+                setattr(record, key, value)
+        await self.session.flush()
+        await self.session.refresh(record)
+        return record
+
+    async def delete(self, id: UUID, soft: bool = True) -> bool:
+        """Delete a record (soft delete by default)."""
+        record = await self.get_by_id(id)
+        if soft:
+            record.is_deleted = True
+            record.deleted_at = func.now()
+        else:
+            await self.session.delete(record)
+        await self.session.flush()
         return True
-    
-    async def exists(self, id: UUID) -> bool:
-        """Check if entity exists."""
-        session = await self._get_session()
-        result = await session.execute(
-            select(func.count(self.model.id)).where(self.model.id == id)
-        )
-        return result.scalar_one() > 0
+
+    async def check_unique_field(
+        self,
+        field: str,
+        value: str,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        """Check if a field value is unique."""
+        query = select(self.model).where(getattr(self.model, field) == value)
+        if exclude_id:
+            query = query.where(self.model.id != exclude_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none() is None

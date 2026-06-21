@@ -2,132 +2,113 @@
 """Purchase Order schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Self
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PurchaseOrderLineBase(BaseModel):
-    """Base schema for PO line items."""
+    """Base PO line schema."""
 
-    line_number: int = Field(ge=1)
-    item_code: str = Field(min_length=1, max_length=100)
-    description: str = Field(min_length=1, max_length=500)
-    quantity: Decimal = Field(gt=0, decimal_places=3)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Decimal = Field(ge=0, decimal_places=2)
-    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0, decimal_places=2)
-    expected_delivery_date: date | None = None
-    notes: str | None = None
-
-    @field_validator("quantity", mode="before")
-    @classmethod
-    def validate_quantity(cls, v: Decimal | float | int) -> Decimal:
-        if isinstance(v, (int, float)):
-            return Decimal(str(v))
-        return v
-
-    @property
-    def line_amount(self) -> Decimal:
-        """Calculate line amount."""
-        return (self.quantity * self.unit_price) + self.tax_amount
+    line_number: int = Field(..., ge=1)
+    description: str = Field(..., min_length=1, max_length=500)
+    sku: Optional[str] = Field(None, max_length=100)
+    quantity: Decimal = Field(..., ge=0)
+    unit_price: Decimal = Field(..., ge=0)
+    line_total: Decimal = Field(..., ge=0)
+    uom: str = Field(default="EA", max_length=20)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0)
 
 
 class PurchaseOrderLineCreate(PurchaseOrderLineBase):
-    """Schema for creating PO line items."""
+    """Schema for creating a PO line."""
 
     pass
 
 
+class PurchaseOrderLineUpdate(BaseModel):
+    """Schema for updating a PO line."""
+
+    line_number: Optional[int] = Field(None, ge=1)
+    description: Optional[str] = Field(None, min_length=1, max_length=500)
+    sku: Optional[str] = Field(None, max_length=100)
+    quantity: Optional[Decimal] = Field(None, ge=0)
+    unit_price: Optional[Decimal] = Field(None, ge=0)
+    line_total: Optional[Decimal] = Field(None, ge=0)
+    uom: Optional[str] = Field(None, max_length=20)
+    tax_rate: Optional[Decimal] = Field(None, ge=0)
+
+
 class PurchaseOrderLineResponse(PurchaseOrderLineBase):
-    """Schema for PO line item response."""
+    """PO line response schema."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    po_id: UUID
-    line_amount: Decimal
+    purchase_order_id: UUID
     created_at: datetime
     updated_at: datetime
 
 
 class PurchaseOrderBase(BaseModel):
-    """Base schema for purchase orders."""
+    """Base purchase order schema."""
 
-    po_number: str = Field(min_length=1, max_length=50)
-    supplier_id: str = Field(min_length=1, max_length=50)
-    supplier_name: str = Field(min_length=1, max_length=255)
+    po_number: str = Field(..., min_length=1, max_length=100)
+    supplier_id: UUID
     order_date: date
-    expected_delivery_date: date | None = None
+    expected_delivery_date: Optional[date] = None
+    status: str = Field(default="DRAFT", max_length=50)
+    total_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
     currency: str = Field(default="USD", max_length=3)
-    notes: str | None = None
+    notes: Optional[str] = None
+    terms: Optional[str] = Field(None, max_length=255)
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
     """Schema for creating a purchase order."""
 
-    lines: list[PurchaseOrderLineCreate] = Field(min_length=1)
-    created_by: UUID | None = None
-
-    @model_validator(mode="after")
-    def calculate_totals(self) -> Self:
-        """Calculate total amounts from lines."""
-        subtotal = sum(line.quantity * line.unit_price for line in self.lines)
-        tax_total = sum(line.tax_amount for line in self.lines)
-        self._subtotal = subtotal
-        self._tax_total = tax_total
-        return self
+    lines: list[PurchaseOrderLineCreate] = []
 
 
 class PurchaseOrderUpdate(BaseModel):
     """Schema for updating a purchase order."""
 
-    supplier_id: str | None = Field(default=None, max_length=50)
-    supplier_name: str | None = Field(default=None, max_length=255)
-    expected_delivery_date: date | None = None
-    status: str | None = None
-    notes: str | None = None
-    lines: list[PurchaseOrderLineCreate] | None = None
+    po_number: Optional[str] = Field(None, min_length=1, max_length=100)
+    supplier_id: Optional[UUID] = None
+    order_date: Optional[date] = None
+    expected_delivery_date: Optional[date] = None
+    status: Optional[str] = Field(None, max_length=50)
+    total_amount: Optional[Decimal] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, max_length=3)
+    notes: Optional[str] = None
+    terms: Optional[str] = Field(None, max_length=255)
+    lines: Optional[list[PurchaseOrderLineCreate]] = None
 
 
 class PurchaseOrderResponse(PurchaseOrderBase):
-    """Schema for purchase order response."""
+    """Purchase order response schema."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    total_amount: Decimal
-    status: str
-    created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
-    lines: list[PurchaseOrderLineResponse] = []
 
-    @field_validator("total_amount", mode="before")
-    @classmethod
-    def validate_total(cls, v: Decimal | None) -> Decimal:
-        return v or Decimal("0.00")
+
+class PurchaseOrderDetailResponse(PurchaseOrderResponse):
+    """Purchase order detail response with lines."""
+
+    lines: list[PurchaseOrderLineResponse] = []
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
 
 
 class PurchaseOrderListResponse(BaseModel):
-    """Schema for paginated PO list."""
+    """Schema for PO list response."""
 
-    items: list[PurchaseOrderResponse]
+    items: list[PurchaseOrderDetailResponse]
     total: int
-    skip: int
-    limit: int
-
-
-class PurchaseOrderSummary(BaseModel):
-    """Schema for PO summary in matching."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    po_number: str
-    supplier_id: str
-    supplier_name: str
-    total_amount: Decimal
-    open_amount: Decimal
-    status: str
+    page: int
+    page_size: int
+    total_pages: int

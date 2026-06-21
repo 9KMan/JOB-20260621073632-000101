@@ -1,184 +1,155 @@
 // src/app/schemas/match.py
-"""Match Result schemas."""
+"""Match schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class MatchResultBase(BaseModel):
-    """Base schema for match results."""
+class MatchLineDetailBase(BaseModel):
+    """Base match line detail schema."""
 
-    match_type: str = Field(default="THREE_WAY")
-    match_details: dict | None = None
-
-
-class MatchResultCreate(MatchResultBase):
-    """Schema for creating a match result."""
-
-    invoice_id: UUID
-    delivery_note_id: UUID | None = None
-    po_id: UUID | None = None
-
-
-class MatchResultUpdate(BaseModel):
-    """Schema for updating a match result."""
-
-    match_status: str | None = None
-    decision_reason: str | None = None
-    routing_decision: str | None = None
-    confirmed_by: UUID | None = None
+    invoice_line_id: Optional[UUID] = None
+    po_line_id: Optional[UUID] = None
+    dn_line_id: Optional[UUID] = None
+    line_match_type: str = Field(default="SKU_MATCH", max_length=50)
+    quantity_match: Decimal = Field(default=Decimal("0"))
+    quantity_variance: Decimal = Field(default=Decimal("0"))
+    amount_match: Decimal = Field(default=Decimal("0"))
+    amount_variance: Decimal = Field(default=Decimal("0"))
+    match_score: Decimal = Field(default=Decimal("0"))
+    notes: Optional[str] = None
 
 
-class MatchScore(BaseModel):
-    """Schema for match scoring breakdown."""
-
-    line_level_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
-    amount_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
-    date_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
-    overall_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
-
-    @property
-    def weights(self) -> dict[str, Decimal]:
-        """Return the weights used for scoring."""
-        return {
-            "line_level": Decimal("0.70"),
-            "amount": Decimal("0.20"),
-            "date": Decimal("0.10"),
-        }
-
-
-class MatchVariance(BaseModel):
-    """Schema for match variance tracking."""
-
-    quantity_variance: Decimal
-    amount_variance: Decimal
-    quantity_variance_percent: Decimal | None = None
-    amount_variance_percent: Decimal | None = None
-
-
-class MatchResultResponse(MatchResultBase):
-    """Schema for match result response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    invoice_id: UUID
-    delivery_note_id: UUID | None = None
-    po_id: UUID | None = None
-    line_level_score: Decimal
-    amount_score: Decimal
-    date_score: Decimal
-    overall_score: Decimal
-    match_status: str
-    decision_reason: str | None = None
-    routing_decision: str
-    quantity_variance: Decimal
-    amount_variance: Decimal
-    is_confirmed: bool
-    confirmed_by: UUID | None = None
-    confirmed_at: date | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    @field_validator(
-        "line_level_score", "amount_score", "date_score", "overall_score",
-        "quantity_variance", "amount_variance",
-        mode="before"
-    )
-    @classmethod
-    def validate_decimals(cls, v: Decimal | None) -> Decimal:
-        return v or Decimal("0.00")
-
-
-class MatchResultWithDocuments(MatchResultResponse):
-    """Schema for match result with related documents."""
-
-    invoice_number: str | None = None
-    po_number: str | None = None
-    dn_number: str | None = None
-    invoice_amount: Decimal | None = None
-    po_amount: Decimal | None = None
-    dn_amount: Decimal | None = None
-
-
-class MatchConfirmationCreate(BaseModel):
-    """Schema for creating a match confirmation."""
-
-    confirmation_action: str = Field(pattern="^(APPROVE|REJECT|ADJUST)$")
-    comments: str | None = None
-    adjusted_score: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"))
-
-
-class MatchConfirmationResponse(BaseModel):
-    """Schema for match confirmation response."""
+class MatchLineDetailResponse(MatchLineDetailBase):
+    """Match line detail response schema."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     match_id: UUID
-    confirmed_by: UUID
-    confirmation_action: str
-    comments: str | None = None
-    previous_score: Decimal | None = None
-    adjusted_score: Decimal | None = None
     created_at: datetime
+    updated_at: datetime
 
 
-class MatchResultListResponse(BaseModel):
-    """Schema for paginated match result list."""
+class MatchConfirmationBase(BaseModel):
+    """Base match confirmation schema."""
 
-    items: list[MatchResultResponse]
+    original_decision: str = Field(..., max_length=50)
+    confirmed_decision: str = Field(..., max_length=50)
+    original_score: Decimal
+    override_reason: str
+    is_approval: bool = True
+
+
+class MatchConfirmationCreate(MatchConfirmationBase):
+    """Schema for creating a match confirmation."""
+
+    pass
+
+
+class MatchConfirmationResponse(MatchConfirmationBase):
+    """Match confirmation response schema."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    match_id: UUID
+    confirmed_by_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    confirmed_by_email: Optional[str] = None
+    confirmed_by_name: Optional[str] = None
+
+
+class MatchBase(BaseModel):
+    """Base match schema."""
+
+    invoice_id: UUID
+    delivery_note_id: Optional[UUID] = None
+    purchase_order_id: UUID
+    match_type: str = Field(..., max_length=50)
+    status: str = Field(default="PENDING", max_length=50)
+    decision: Optional[str] = Field(None, max_length=50)
+    line_score: Decimal = Field(default=Decimal("0"))
+    amount_score: Decimal = Field(default=Decimal("0"))
+    date_score: Decimal = Field(default=Decimal("0"))
+    total_score: Decimal = Field(default=Decimal("0"))
+    po_amount: Decimal = Field(default=Decimal("0.00"))
+    invoice_amount: Decimal = Field(default=Decimal("0.00"))
+    dn_amount: Decimal = Field(default=Decimal("0.00"))
+    variance_amount: Decimal = Field(default=Decimal("0.00"))
+    notes: Optional[str] = None
+
+
+class MatchCreate(MatchBase):
+    """Schema for creating a match."""
+
+    line_details: list[MatchLineDetailBase] = []
+
+
+class MatchUpdate(BaseModel):
+    """Schema for updating a match."""
+
+    status: Optional[str] = Field(None, max_length=50)
+    decision: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = None
+
+
+class MatchResolve(BaseModel):
+    """Schema for resolving a match."""
+
+    decision: str = Field(..., max_length=50)
+    notes: Optional[str] = None
+
+
+class MatchResponse(MatchBase):
+    """Match response schema."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    resolved_at: Optional[datetime] = None
+    resolved_by_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MatchDetailResponse(MatchResponse):
+    """Match detail response with line details."""
+
+    line_details: list[MatchLineDetailResponse] = []
+    invoice_number: Optional[str] = None
+    invoice_date: Optional[date] = None
+    dn_number: Optional[str] = None
+    delivery_date: Optional[date] = None
+    po_number: Optional[str] = None
+    order_date: Optional[date] = None
+    supplier_name: Optional[str] = None
+    confirmations: list[MatchConfirmationResponse] = []
+
+
+class MatchListResponse(BaseModel):
+    """Schema for match list response."""
+
+    items: list[MatchDetailResponse]
     total: int
-    skip: int
-    limit: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
-class MatchSummary(BaseModel):
-    """Schema for matching summary statistics."""
+class MatchScoreSummary(BaseModel):
+    """Summary of match scores for dashboard."""
 
     total_matches: int
     auto_approved: int
     pending_review: int
-    rejected: int
+    in_dispute: int
     average_score: Decimal
-    match_rate: Decimal
-
-
-class MatchDecisionRequest(BaseModel):
-    """Request for match decision."""
-
-    match_id: UUID
-    decision: str = Field(pattern="^(APPROVE|REJECT|ESCALATE)$")
-    reason: str | None = None
-    notes: str | None = None
-
-
-class MatchDecisionResponse(BaseModel):
-    """Response for match decision."""
-
-    match_id: UUID
-    previous_status: str
-    new_status: str
-    routing_decision: str
-    message: str
-
-
-class CascadeMatchRequest(BaseModel):
-    """Request for cascade matching."""
-
-    invoice_id: UUID
-    delivery_note_id: UUID | None = None
-    po_id: UUID | None = None
-    run_cascade: bool = True
-
-
-class CascadeMatchResponse(BaseModel):
-    """Response for cascade matching."""
-
-    primary_match: MatchResultWithDocuments | None
-    secondary_matches: list[MatchResultWithDocuments] = []
-    balance_updates: list[dict] = []
-    routing_decisions: list[dict] = []
+    average_line_score: Decimal
+    average_amount_score: Decimal
+    average_date_score: Decimal
+    total_variance: Decimal

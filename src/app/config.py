@@ -1,49 +1,79 @@
 // src/app/config.py
-"""Application configuration using environment variables."""
-
+"""Application configuration management."""
+import os
 from functools import lru_cache
-from typing import List
+from typing import Optional
 
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     # Application
-    APP_NAME: str = "FinaRo AP Automation Engine"
-    DEBUG: bool = False
-    API_V1_PREFIX: str = "/api/v1"
+    app_name: str = "FinaRo AP Automation"
+    app_version: str = "1.0.0"
+    debug: bool = Field(default=False, validation_alias="DEBUG")
+    environment: str = Field(default="development", validation_alias="ENVIRONMENT")
+
+    # API
+    api_v1_prefix: str = "/api/v1"
+    api_key_header: str = "X-API-Key"
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://finaro:finaro@localhost:5432/finaro"
-    DATABASE_POOL_SIZE: int = 20
-    DATABASE_MAX_OVERFLOW: int = 10
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro",
+        validation_alias="DATABASE_URL",
+    )
+    database_pool_size: int = Field(default=20, validation_alias="DB_POOL_SIZE")
+    database_max_overflow: int = Field(default=10, validation_alias="DB_MAX_OVERFLOW")
+    database_pool_timeout: int = Field(default=30, validation_alias="DB_POOL_TIMEOUT")
 
-    # JWT Authentication
-    JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Authentication
+    jwt_secret_key: str = Field(
+        default="your-super-secret-key-change-in-production",
+        validation_alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = Field(
+        default=30, validation_alias="JWT_EXPIRE_MINUTES"
+    )
+    jwt_refresh_token_expire_days: int = Field(
+        default=7, validation_alias="JWT_REFRESH_DAYS"
+    )
 
-    # Password hashing
-    BCRYPT_ROUNDS: int = 12
+    # Password
+    bcrypt_rounds: int = Field(default=12, validation_alias="BCRYPT_ROUNDS")
 
     # CORS
-    CORS_ORIGINS: List[str] = ["*"]
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8000"],
+        validation_alias="CORS_ORIGINS",
+    )
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = ["*"]
+    cors_allow_headers: list[str] = ["*"]
 
     # Matching Engine Weights
-    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
-    MATCH_WEIGHT_AMOUNT: float = 0.20
-    MATCH_WEIGHT_DATE: float = 0.10
+    matching_line_weight: float = 0.70
+    matching_amount_weight: float = 0.20
+    matching_date_weight: float = 0.10
 
-    # Decision Thresholds
-    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
-    MATCH_THRESHOLD_PENDING_REVIEW: float = 0.70
+    # Auto-approval threshold
+    auto_approve_threshold: float = 0.95
+    pending_review_threshold: float = 0.70
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # Pagination
+    default_page_size: int = 20
+    max_page_size: int = 100
 
 
 @lru_cache()

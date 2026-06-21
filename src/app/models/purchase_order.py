@@ -1,46 +1,50 @@
 // src/app/models/purchase_order.py
 """Purchase Order model."""
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Numeric, String, Text, Integer
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.models.base import BaseModel
+from app.models.base import BaseModel, SoftDeleteMixin
 
 if TYPE_CHECKING:
-    from src.app.models.invoice import Invoice
-    from src.app.models.delivery_note import DeliveryNote
-    from src.app.models.user import User
+    from app.models.supplier import Supplier
+    from app.models.invoice import Invoice
+    from app.models.delivery_note import DeliveryNote
+    from app.models.transaction import Transaction
 
 
-class PurchaseOrder(BaseModel):
+class PurchaseOrder(BaseModel, SoftDeleteMixin):
     """Purchase Order model - the anchor for 3-way matching."""
 
     __tablename__ = "purchase_orders"
 
     po_number: Mapped[str] = mapped_column(
-        String(50),
+        String(100),
         unique=True,
         nullable=False,
         index=True,
     )
-    supplier_id: Mapped[str] = mapped_column(
-        String(50),
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
-    supplier_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-    order_date: Mapped["date"] = mapped_column(
-        type_=Date,
-        nullable=False,
-    )
-    expected_delivery_date: Mapped["date | None"] = mapped_column(
-        type_=Date,
+    order_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    expected_delivery_date: Mapped[date | None] = mapped_column(
+        Date,
         nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="DRAFT",
+        index=True,
     )
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
@@ -52,104 +56,74 @@ class PurchaseOrder(BaseModel):
         nullable=False,
         default="USD",
     )
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="OPEN",
-        index=True,
-    )
-    notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    terms: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Relationships
-    created_by_user: Mapped["User | None"] = relationship(
-        back_populates="purchase_orders",
-        foreign_keys=[created_by],
-    )
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="purchase_orders")
     lines: Mapped[list["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
     )
     invoices: Mapped[list["Invoice"]] = relationship(
+        "Invoice",
         back_populates="purchase_order",
-        foreign_keys="Invoice.po_id",
     )
     delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
+        "DeliveryNote",
+        back_populates="purchase_order",
+    )
+    transactions: Mapped[list["Transaction"]] = relationship(
+        "Transaction",
         back_populates="purchase_order",
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number}>"
+        return f"<PurchaseOrder(id={self.id}, po_number={self.po_number})>"
 
 
 class PurchaseOrderLine(BaseModel):
-    """Purchase Order Line Item."""
+    """Purchase Order Line Item model."""
 
     __tablename__ = "purchase_order_lines"
 
-    po_id: Mapped[uuid.UUID] = mapped_column(
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    line_number: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-    )
-    item_code: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-    )
-    description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
+        Numeric(12, 3),
         nullable=False,
-    )
-    unit_of_measure: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="EA",
+        default=Decimal("0"),
     )
     unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+        Numeric(15, 4),
         nullable=False,
+        default=Decimal("0"),
     )
-    line_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    tax_amount: Mapped[Decimal] = mapped_column(
+    line_total: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
         default=Decimal("0.00"),
     )
-    expected_delivery_date: Mapped["date | None"] = mapped_column(
-        type_=Date,
-        nullable=True,
-    )
-    notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+    uom: Mapped[str] = mapped_column(String(20), nullable=False, default="EA")
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0"),
     )
 
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
         back_populates="lines",
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseOrderLine {self.line_number}>"
-
-
-# Import Date and uuid at module level
-from datetime import date
-import uuid
+        return f"<PurchaseOrderLine(id={self.id}, line_number={self.line_number})>"

@@ -1,66 +1,86 @@
 // src/app/schemas/auth.py
 """Authentication schemas."""
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class UserBase(BaseModel):
+    """Base user schema."""
+
+    email: EmailStr
+    full_name: str = Field(..., min_length=1, max_length=255)
+
+
+class UserCreate(UserBase):
+    """Schema for creating a user."""
+
+    password: str = Field(..., min_length=8, max_length=100)
+
+
+class UserUpdate(BaseModel):
+    """Schema for updating a user."""
+
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    password: Optional[str] = Field(None, min_length=8, max_length=100)
+    is_active: Optional[bool] = None
+
+
+class UserInDB(UserBase):
+    """User schema as stored in database."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    hashed_password: str
+    is_active: bool
+    is_superuser: bool
+    is_verified: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserResponse(UserBase):
+    """User response schema."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    is_active: bool
+    is_superuser: bool
+    is_verified: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class Token(BaseModel):
-    """JWT token response."""
+    """JWT token schema."""
 
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
-class TokenData(BaseModel):
-    """Token payload data."""
+class TokenPayload(BaseModel):
+    """JWT token payload schema."""
 
-    sub: str | None = None
-    exp: datetime | None = None
-    iat: datetime | None = None
-    type: str = "access"
+    sub: str
+    exp: datetime
+    type: str  # "access" or "refresh"
 
 
 class LoginRequest(BaseModel):
     """Login request schema."""
 
-    username: str = Field(min_length=1, max_length=100)
-    password: str = Field(min_length=1)
-
-
-class LoginResponse(BaseModel):
-    """Login response schema."""
-
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user: dict
+    email: EmailStr
+    password: str
 
 
 class RefreshTokenRequest(BaseModel):
-    """Refresh token request."""
+    """Refresh token request schema."""
 
     refresh_token: str
-
-
-class ChangePasswordRequest(BaseModel):
-    """Change password request."""
-
-    current_password: str
-    new_password: str = Field(min_length=8, max_length=100)
-    confirm_password: str
-
-
-class PasswordResetRequest(BaseModel):
-    """Password reset request."""
-
-    email: EmailStr
-
-
-class PasswordResetConfirm(BaseModel):
-    """Password reset confirmation."""
-
-    token: str
-    new_password: str = Field(min_length=8, max_length=100)
