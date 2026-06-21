@@ -1,85 +1,68 @@
-# docker-compose.yml
-version: "3.9"
+# Local development stack for AP Automation Core Engine.
+# Brings up Postgres, an optional PGBouncer sidecar, and the API.
 
 services:
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: ap_automation_postgres
+    container_name: ap_db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apautomation}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apautomation_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+      POSTGRES_DB: ${POSTGRES_DB:-ap_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-ap_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ap_password}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ap_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apautomation} -d ${POSTGRES_DB:-apautomation}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ap_user} -d ${POSTGRES_DB:-ap_automation}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - ap_automation_network
 
   pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap_automation_pgbouncer
-    environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_dev}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: "transaction"
-      MAX_CLIENT_CONN: "100"
-      DEFAULT_POOL_SIZE: "20"
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+    image: bitnami/pgbouncer:1.22.1
+    container_name: ap_pgbouncer
+    restart: unless-stopped
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-    networks:
-      - ap_automation_network
+    environment:
+      PGBOUNCER_DATABASE: ${POSTGRES_DB:-ap_automation}
+      PGBOUNCER_USERNAME: ${POSTGRES_USER:-ap_user}
+      PGBOUNCER_PASSWORD: ${POSTGRES_PASSWORD:-ap_password}
+      PGBOUNCER_AUTH_TYPE: scram-sha-256
+      PGBOUNCER_AUTH_FILE: /etc/pgbouncer/userlist.txt
+      PGBOUNCER_LISTEN_ADDR: 0.0.0.0
+      PGBOUNCER_LISTEN_PORT: 6432
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./docker/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./docker/userlist.txt:/etc/pgbouncer/userlist.txt:ro
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap_automation_api
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apautomation}:${POSTGRES_PASSWORD:-apautomation_dev}@pgbouncer:5432/${POSTGRES_DB:-apautomation}"
-      DATABASE_HOST: "pgbouncer"
-      DATABASE_PORT: "5432"
-      DATABASE_NAME: "${POSTGRES_DB:-apautomation}"
-      DATABASE_USER: "${POSTGRES_USER:-apautomation}"
-      DATABASE_PASSWORD: "${POSTGRES_PASSWORD:-apautomation_dev}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-secret-key-change-in-production}"
-      JWT_ALGORITHM: "HS256"
-      THRESHOLD_HIGH: "${THRESHOLD_HIGH:-95}"
-      THRESHOLD_MID: "${THRESHOLD_MID:-70}"
-      THRESHOLD_LOW: "${THRESHOLD_LOW:-40}"
-      TOLERANCE_PRICE: "${TOLERANCE_PRICE:-5}"
-      TOLERANCE_QTY: "${TOLERANCE_QTY:-10}"
-    ports:
-      - "${API_PORT:-8000}:8000"
+    container_name: ap_api
+    restart: unless-stopped
     depends_on:
+      db:
+        condition: service_healthy
       pgbouncer:
         condition: service_started
-    command: >
-      sh -c "
-        alembic upgrade head &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-      "
-    volumes:
-      - .:/app
-    networks:
-      - ap_automation_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ap_user}:${POSTGRES_PASSWORD:-ap_password}@pgbouncer:6432/${POSTGRES_DB:-ap_automation}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ap_user}:${POSTGRES_PASSWORD:-ap_password}@db:5432/${POSTGRES_DB:-ap_automation}
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
-  postgres_data:
+  ap_pgdata:
     driver: local
-
-networks:
-  ap_automation_network:
-    driver: bridge

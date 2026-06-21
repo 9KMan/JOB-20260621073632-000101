@@ -1,3 +1,0 @@
-# Backward-compat patch to add missing relationships added in other models
-from models.balance_ledger import BalanceLedger, BalanceLedgerLine  # noqa: F401, E402
-from models.delivery_note import DeliveryNote, DeliveryNoteLine  # noqa: F401, E402

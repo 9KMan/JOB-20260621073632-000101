@@ -1,12 +1,3 @@
-# core/__init__.py
-"""Core module for AP Automation Core Engine."""
+"""AP Automation Core Engine."""
 
-from core.config import settings
-from core.database import get_db, AsyncSessionLocal, engine
-
-__all__ = [
-    "settings",
-    "get_db",
-    "AsyncSessionLocal",
-    "engine",
-]
+__version__ = "0.1.0"

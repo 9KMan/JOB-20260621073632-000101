@@ -1,55 +1,69 @@
-# Dockerfile
-FROM python:3.11-slim as base
+# syntax=docker/dockerfile:1.6
 
-# Set environment variables
+# ----- Build stage -----
+FROM python:3.11-slim AS builder
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-WORKDIR /app
+WORKDIR /build
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    gcc \
-    libpq-dev \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
-FROM base as builder
+COPY pyproject.toml ./
+RUN pip install --upgrade pip \
+    && pip wheel --wheel-dir /wheels \
+        "fastapi>=0.110" \
+        "uvicorn[standard]>=0.29" \
+        "sqlalchemy[asyncio]>=2.0.27" \
+        "asyncpg>=0.29" \
+        "alembic>=1.13" \
+        "pydantic>=2.6" \
+        "pydantic-settings>=2.2" \
+        "python-jose[cryptography]>=3.3" \
+        "passlib[bcrypt]>=1.7" \
+        "python-multipart>=0.0.9" \
+        "python-dotenv>=1.0" \
+        "httpx>=0.27" \
+        "tenacity>=8.2"
 
-COPY --from=python:3.11-slim /requirements.txt /requirements.txt
+# ----- Runtime stage -----
+FROM python:3.11-slim AS runtime
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --prefix=/install -r /requirements.txt
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    APP_HOME=/app \
+    PORT=8000
 
-# Production image
-FROM base
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 curl tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app \
+    && useradd --system --gid app --home $APP_HOME app
 
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
+WORKDIR $APP_HOME
 
-# Copy project files
-COPY . /app
+COPY --from=builder /wheels /wheels
+RUN pip install --no-index --find-links=/wheels \
+    fastapi uvicorn[standard] sqlalchemy[asyncio] asyncpg alembic \
+    pydantic pydantic-settings "python-jose[cryptography]" "passlib[bcrypt]" \
+    python-multipart python-dotenv httpx tenacity \
+    && rm -rf /wheels
 
-# Create non-root user
-RUN addgroup --system --gid 1001 apautomation && \
-    adduser --system --uid 1001 --ingroup apautomation --shell /bin/bash apautomation
+COPY --chown=app:app . $APP_HOME
 
-# Set ownership
-RUN chown -R apautomation:apautomation /app
+USER app
 
-# Switch to non-root user
-USER apautomation
-
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT}/health" || exit 1
 
-# Default command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

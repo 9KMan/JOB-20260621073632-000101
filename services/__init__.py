@@ -1,4 +1,1 @@
-# services/__init__.py
-"""Business logic services package."""
-
-__all__ = []
+"""Business-logic services (matching engine, ledger, learning loop)."""

@@ -1,60 +1,52 @@
-# src/schemas/match.py
+"""Match schemas."""
+
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.schemas.common import TimestampMixinSchema, UUIDMixinSchema
-
-
-class MatchBase(BaseModel):
-    """Base schema for Matches."""
-    match_type: str
-    status: str = "PENDING"
-    confidence_score: Decimal = Field(ge=0, le=1)
-    line_score: Decimal = Field(ge=0, le=1)
-    amount_score: Decimal = Field(ge=0, le=1)
-    date_score: Decimal = Field(ge=0, le=1)
+from src.models.match import MatchDecision, MatchStatus
 
 
-class MatchCreate(MatchBase):
-    """Schema for creating Matches."""
-    purchase_order_id: Optional[str] = None
-    invoice_id: Optional[str] = None
-    delivery_note_id: Optional[str] = None
-    po_amount: Optional[Decimal] = None
-    invoice_amount: Optional[Decimal] = None
-    delivery_amount: Optional[Decimal] = None
-    variance_amount: Optional[Decimal] = None
+class MatchScoreRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    line_score: Decimal
+    amount_score: Decimal
+    date_score: Decimal
+    composite_score: Decimal
+    matched_skus: list[str] = Field(default_factory=list)
+    unmatched_skus: list[str] = Field(default_factory=list)
+    notes: str | None = None
 
 
-class MatchUpdate(BaseModel):
-    """Schema for updating Matches."""
-    status: Optional[str] = None
-    decision: Optional[str] = None
-    review_notes: Optional[str] = None
+class MatchRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    invoice_id: UUID
+    purchase_order_id: UUID
+    delivery_note_id: UUID | None
+    status: MatchStatus
+    decision: MatchDecision
+    human_confirmed: bool
+    human_decision: MatchDecision | None
+    feedback_notes: str | None
+    reviewed_by_id: UUID | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    score: MatchScoreRead | None = None
 
 
-class MatchReviewRequest(BaseModel):
-    """Schema for reviewing a Match."""
-    status: str = Field(description="CONFIRMED or REJECTED")
-    review_notes: Optional[str] = None
+class MatchDecisionRequest(BaseModel):
+    """Human reviewer input for a pending match."""
 
-
-class MatchResponse(MatchBase, UUIDMixinSchema, TimestampMixinSchema):
-    """Schema for Match response."""
-    purchase_order_id: Optional[str]
-    invoice_id: Optional[str]
-    delivery_note_id: Optional[str]
-    po_amount: Optional[Decimal]
-    invoice_amount: Optional[Decimal]
-    delivery_amount: Optional[Decimal]
-    variance_amount: Optional[Decimal]
-    reviewed_by: Optional[str]
-    reviewed_at: Optional[datetime]
-    review_notes: Optional[str]
-    decision: Optional[str]
-    auto_approved: bool
-    
-    model_config = {"from_attributes": True}
+    decision: MatchDecision = Field(
+        description="Reviewer decision. Must be APPROVED, REJECTED, or DISPUTE."
+    )
+    feedback_notes: str | None = Field(default=None, max_length=2048)

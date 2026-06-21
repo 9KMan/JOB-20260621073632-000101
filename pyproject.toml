@@ -1,99 +1,72 @@
-# pyproject.toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ap-automation-core"
 version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+description = "AP Automation Core Engine - matching, anchoring, and ledger services for FinaRo"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Proprietary" }
 authors = [
-    { name = "FinaRo", email = "dev@finaro.com" }
+    { name = "FinaRo Engineering" }
 ]
-keywords = ["ap-automation", "invoice-matching", "fastapi", "postgresql"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Framework :: FastAPI",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
+keywords = ["ap-automation", "invoice-matching", "fastapi", "postgres"]
 
 dependencies = [
-    "fastapi>=0.110.0",
-    "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.0",
-    "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
-    "pydantic>=2.6.0",
-    "pydantic-settings>=2.2.0",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "sqlalchemy[asyncio]>=2.0.27",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
-    "greenlet>=3.0.0",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    "tenacity>=8.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.1.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.1.0",
-    "httpx>=0.27.0",
-    "ruff>=0.3.0",
-    "mypy>=1.9.0",
-    "types-python-jose>=3.3.0",
-    "types-passlib>=1.7.0",
+    "pytest>=8.1",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "mypy>=1.10",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "api*", "models*", "services*", "workers*"]
+exclude = ["tests*", "alembic*", "migrations*", "docs*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
 
 [tool.ruff]
-target-version = "py311"
 line-length = 100
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # Pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
-]
-ignore = [
-    "E501",  # line too long (handled by formatter)
-]
+target-version = "py311"
 
-[tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
-ignore_missing_imports = true
-warn_return_any = true
+strict_optional = true
 warn_unused_ignores = true
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
-
-[tool.coverage.run]
-source = ["api", "core", "models", "services"]
-omit = ["*/tests/*", "*/migrations/*"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-]
+disallow_untyped_defs = false
+ignore_missing_imports = true

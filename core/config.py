@@ -1,15 +1,21 @@
-# core/config.py
-"""Application configuration using pydantic-settings."""
+"""Application settings loaded from environment variables.
+
+All configuration is sourced from environment variables (or a `.env` file in
+development). Hardcoded secrets are never accepted; missing required values
+raise at startup so the operator gets immediate feedback.
+"""
+
+from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import List, Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Strongly-typed application settings."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -18,103 +24,78 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Application settings
-    APP_NAME: str = "AP Automation Core Engine"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = False
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    # --- Application ---
+    app_env: Literal["development", "staging", "production", "test"] = "development"
+    app_name: str = "AP Automation Core Engine"
+    log_level: str = "INFO"
+    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
-    # Database settings
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://apautomation:apautomation_dev@localhost:5432/apautomation",
-        description="Async PostgreSQL connection string",
+    # --- Database (async driver) ---
+    database_url: str = Field(
+        default="postgresql+asyncpg://ap_user:ap_password@localhost:5432/ap_automation",
+        description="Async SQLAlchemy DSN. asyncpg driver is required.",
     )
-    DATABASE_HOST: str = "localhost"
-    DATABASE_PORT: int = 5432
-    DATABASE_NAME: str = "apautomation"
-    DATABASE_USER: str = "apautomation"
-    DATABASE_PASSWORD: str = "apautomation_dev"
-
-    # Database pool settings
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 40
-    DB_POOL_TIMEOUT: int = 30
-    DB_POOL_RECYCLE: int = 3600
-    DB_ECHO: bool = False
-
-    # JWT settings
-    JWT_SECRET_KEY: str = Field(
-        default="dev-secret-key-change-in-production-minimum-32-chars",
-        description="Secret key for JWT signing",
+    database_url_sync: str = Field(
+        default="postgresql://ap_user:ap_password@localhost:5432/ap_automation",
+        description="Sync DSN used by Alembic migrations.",
     )
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_echo: bool = False
 
-    # Matching thresholds (percentages)
-    THRESHOLD_HIGH: int = Field(
-        default=95,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold percentage",
-    )
-    THRESHOLD_MID: int = Field(
-        default=70,
-        ge=0,
-        le=100,
-        description="1-click review threshold percentage",
-    )
-    THRESHOLD_LOW: int = Field(
-        default=40,
-        ge=0,
-        le=100,
-        description="Exception threshold percentage",
-    )
+    # --- PGBouncer (optional sidecar) ---
+    pgbouncer_host: str = "localhost"
+    pgbouncer_port: int = 6432
 
-    # Matching tolerances
-    TOLERANCE_PRICE: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        description="Price match tolerance percentage",
-    )
-    TOLERANCE_QTY: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        description="Quantity match tolerance percentage",
-    )
+    # --- Auth ---
+    jwt_secret_key: SecretStr = Field(..., min_length=16)
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+    bcrypt_rounds: int = 12
 
-    # CORS settings
-    CORS_ORIGINS: list[str] = ["*"]
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list[str] = ["*"]
-    CORS_ALLOW_HEADERS: list[str] = ["*"]
+    # --- Matching thresholds ---
+    threshold_high: float = Field(95.0, ge=0.0, le=100.0)
+    threshold_mid: float = Field(80.0, ge=0.0, le=100.0)
+    threshold_low: float = Field(60.0, ge=0.0, le=100.0)
 
-    # API settings
-    API_V1_PREFIX: str = "/api/v1"
-    API_TITLE: str = "AP Automation API"
-    API_DESCRIPTION: str = "Accounts Payable Automation Core Engine API"
-    API_DEBUG: bool = False
+    # --- Tolerances ---
+    tolerance_price: float = Field(0.02, ge=0.0, le=1.0)
+    tolerance_qty: float = Field(0.01, ge=0.0, le=1.0)
 
-    @property
-    def database_url_sync(self) -> str:
-        """Get synchronous database URL for Alembic migrations."""
-        return self.DATABASE_URL.replace(
-            "postgresql+asyncpg://", "postgresql://"
-        )
+    # --- Learning loop ---
+    cross_ref_min_confirmations: int = Field(3, ge=1)
+    cross_ref_promotion_threshold: float = Field(0.85, ge=0.0, le=1.0)
 
-    @property
-    def database_dsn(self) -> str:
-        """Get database DSN for logging/debugging."""
-        return f"postgresql://{self.DATABASE_USER}:***@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors(cls, value: object) -> object:
+        if isinstance(value, str) and value:
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return value
+
+    @field_validator("threshold_low", "threshold_mid", "threshold_high")
+    @classmethod
+    def _thresholds_ordered(cls, value: float, info) -> float:
+        data = info.data
+        low = data.get("threshold_low")
+        mid = data.get("threshold_mid")
+        high = data.get("threshold_high")
+        if low is not None and mid is not None and high is not None:
+            if not (low <= mid <= high):
+                raise ValueError(
+                    f"Thresholds must satisfy low <= mid <= high; "
+                    f"got low={low}, mid={mid}, high={high}"
+                )
+        return value
 
 
-@lru_cache
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+    """Return a memoized Settings instance.
 
-
-# Global settings instance
-settings = get_settings()
+    Using lru_cache prevents re-parsing the environment for every dependency
+    injection while still allowing tests to call ``Settings.model_validate`` with
+    explicit overrides.
+    """
+    return Settings()  # type: ignore[call-arg]

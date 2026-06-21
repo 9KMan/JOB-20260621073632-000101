@@ -1,17 +1,22 @@
-# models/base.py
-"""SQLAlchemy declarative base for all models."""
+"""Declarative base + shared mixins.
+
+We pin UUID primary keys (per spec) and enforce ``created_at``/``updated_at``
+on every table. Soft-delete is opt-in via :class:`SoftDeleteMixin` so models
+that need it (e.g. exceptions) can include it explicitly.
+"""
+
+from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, MetaData, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, MetaData
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
-
-# PostgreSQL naming convention for indexes and constraints
-convention = {
+# Stable naming convention keeps Alembic diffs minimal.
+NAMING_CONVENTION: dict[str, Any] = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
@@ -20,61 +25,62 @@ convention = {
 }
 
 
-metadata = MetaData(naming_convention=convention)
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (database column expects tz-aware datetimes)."""
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
+    """Project-wide declarative base."""
 
-    metadata = metadata
-
-    @classmethod
-    def __tablename__(cls) -> str:
-        """Generate table name from class name."""
-        return cls.__name__.lower()
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    type_annotation_map = {uuid.UUID: PG_UUID(as_uuid=True)}
 
 
-class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps."""
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-
-class UUIDMixin:
-    """Mixin for UUID primary key."""
+class UUIDPrimaryKeyMixin:
+    """UUID primary key with database-side default."""
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        PG_UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
         nullable=False,
     )
 
 
+class TimestampMixin:
+    """Adds ``created_at`` / ``updated_at`` columns maintained on the server."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utcnow,
+        nullable=False,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
+    )
+
+
 class SoftDeleteMixin:
-    """Mixin for soft delete functionality."""
+    """Opt-in soft delete. ``deleted_at`` is null when the row is active."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,
-    )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
+        index=True,
     )
 
+    @declared_attr
+    def __mapper_args__(cls) -> dict[str, Any]:  # noqa: N805
+        return {"eager_defaults": True}
 
-def utcnow() -> datetime:
-    """Return current UTC datetime."""
-    return datetime.now(timezone.utc)
+    def soft_delete(self) -> None:
+        self.deleted_at = _utcnow()
+
+    def restore(self) -> None:
+        self.deleted_at = None

@@ -1,160 +1,93 @@
-# core/security.py
-"""JWT and password hashing security utilities."""
+"""Authentication helpers: JWT issuance/verification and bcrypt password hashing."""
+
+from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Dict, Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from core.config import settings
+from core.config import get_settings
+
+_pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=get_settings().bcrypt_rounds,
+)
 
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password using bcrypt."""
+    if not plain:
+        raise ValueError("password must not be empty")
+    return _pwd_context.hash(plain)
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify a plain password against a hashed password.
-    
-    Args:
-        plain_password: The plain text password
-        hashed_password: The hashed password to verify against
-        
-    Returns:
-        True if password matches, False otherwise
-    """
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def hash_password(password: str) -> str:
-    """
-    Hash a password using bcrypt.
-    
-    Args:
-        password: The plain text password to hash
-        
-    Returns:
-        The hashed password
-    """
-    return pwd_context.hash(password)
+def verify_password(plain: str, hashed: str) -> bool:
+    """Constant-time verify of a plaintext password against a stored hash."""
+    if not plain or not hashed:
+        return False
+    try:
+        return _pwd_context.verify(plain, hashed)
+    except ValueError:
+        return False
 
 
 def create_access_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
+    subject: str,
+    extra_claims: Optional[Dict[str, Any]] = None,
+    expires_minutes: Optional[int] = None,
 ) -> str:
-    """
-    Create a JWT access token.
-    
-    Args:
-        data: The payload data to encode
-        expires_delta: Optional expiration time delta
-        
-    Returns:
-        Encoded JWT token string
-    """
-    to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-        )
-    
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
+    """Issue a short-lived access token signed with HS256."""
+    settings = get_settings()
+    minutes = expires_minutes or settings.access_token_expire_minutes
+    now = datetime.now(timezone.utc)
+    payload: Dict[str, Any] = {
+        "sub": subject,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=minutes)).timestamp()),
         "type": "access",
-    })
-    
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
-    
-    return encoded_jwt
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+    return jwt.encode(payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm)
 
 
 def create_refresh_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
+    subject: str,
+    extra_claims: Optional[Dict[str, Any]] = None,
+    expires_days: Optional[int] = None,
 ) -> str:
-    """
-    Create a JWT refresh token.
-    
-    Args:
-        data: The payload data to encode
-        expires_delta: Optional expiration time delta
-        
-    Returns:
-        Encoded JWT refresh token string
-    """
-    to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
-        )
-    
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
+    """Issue a longer-lived refresh token signed with HS256."""
+    settings = get_settings()
+    days = expires_days or settings.refresh_token_expire_days
+    now = datetime.now(timezone.utc)
+    payload: Dict[str, Any] = {
+        "sub": subject,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=days)).timestamp()),
         "type": "refresh",
-    })
-    
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
-    
-    return encoded_jwt
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+    return jwt.encode(payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm)
 
 
-def decode_token(token: str) -> dict[str, Any] | None:
+def decode_token(token: str, *, expected_type: Optional[str] = None) -> Dict[str, Any]:
+    """Decode and validate a JWT, optionally enforcing token type.
+
+    Raises ``jose.JWTError`` on invalid signature, expiration, or wrong type.
     """
-    Decode and verify a JWT token.
-    
-    Args:
-        token: The JWT token string to decode
-        
-    Returns:
-        The decoded payload dictionary or None if invalid
-    """
+    settings = get_settings()
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
+            settings.jwt_secret_key.get_secret_value(),
+            algorithms=[settings.jwt_algorithm],
         )
-        return payload
     except JWTError:
-        return None
-
-
-def verify_token(token: str, expected_type: str = "access") -> dict[str, Any] | None:
-    """
-    Verify a JWT token and check its type.
-    
-    Args:
-        token: The JWT token string to verify
-        expected_type: Expected token type ('access' or 'refresh')
-        
-    Returns:
-        The decoded payload if valid, None otherwise
-    """
-    payload = decode_token(token)
-    
-    if payload is None:
-        return None
-    
-    if payload.get("type") != expected_type:
-        return None
-    
+        raise
+    if expected_type and payload.get("type") != expected_type:
+        raise JWTError(f"expected token type '{expected_type}', got '{payload.get('type')}'")
     return payload

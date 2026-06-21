@@ -1,107 +1,54 @@
-# models/enums.py
-"""SQLAlchemy and Pydantic enums for the application."""
+"""Enumerations shared across models, schemas, and services."""
 
-import enum
-from typing import Literal
+from __future__ import annotations
 
-from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.orm import Mapped, mapped_column
+from enum import StrEnum
 
 
-class InvoiceStatus(str, enum.Enum):
-    """Status of an invoice in the system."""
+class DocumentStatus(StrEnum):
+    """Lifecycle states for source documents (Invoice, PO, DN)."""
 
-    DRAFT = "draft"
     PENDING = "pending"
-    UNDER_REVIEW = "under_review"
+    INGESTED = "ingested"
+    PROCESSING = "processing"
     MATCHED = "matched"
     APPROVED = "approved"
-    EXCEPTION = "exception"
+    POSTED = "posted"
     REJECTED = "rejected"
-    PAID = "paid"
     CANCELLED = "cancelled"
+    ERROR = "error"
 
 
-class PurchaseOrderStatus(str, enum.Enum):
-    """Status of a purchase order."""
+class MatchLayer(StrEnum):
+    """Which matching layer produced a decision."""
 
-    DRAFT = "draft"
-    ACTIVE = "active"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
-    CLOSED = "closed"
-    CANCELLED = "cancelled"
-
-
-class DeliveryNoteStatus(str, enum.Enum):
-    """Status of a delivery note."""
-
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    RECEIVED = "received"
-    CANCELLED = "cancelled"
+    NONE = "none"
+    ANCHOR = "anchor"  # Layer 1: PO anchoring
+    CASCADE = "cascade"  # Layer 2: line matching cascade
+    LEARNING = "learning"  # Layer 3: cross-ref promotion
+    MANUAL = "manual"
 
 
-class MatchingDecision(str, enum.Enum):
-    """Decision from the matching engine."""
+class DecisionType(StrEnum):
+    """Routing decision the engine produced for a line."""
 
-    AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVED = "one_click_approved"
-    MANUAL_REVIEW = "manual_review"
-    EXCEPTION = "exception"
+    AUTO_APPROVE = "auto_approve"  # score >= THRESHOLD_HIGH
+    ONE_CLICK_REVIEW = "one_click_review"  # score >= THRESHOLD_MID
+    EXCEPTION = "exception"  # below THRESHOLD_LOW or no candidate
+    NEEDS_REVIEW = "needs_review"  # between LOW and MID
     REJECTED = "rejected"
-    PENDING = "pending"
 
 
-class MatchStatus(str, enum.Enum):
-    """Status of a match record."""
-
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    DISMISSED = "dismissed"
+class ExceptionSeverity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
-class ExceptionType(str, enum.Enum):
-    """Types of exceptions in the matching process."""
-
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MULTIPLE_MATCHES = "multiple_matches"
-    NO_MATCH = "no_match"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    DUPLICATE_PO = "duplicate_po"
-    DATE_VARIANCE = "date_variance"
-    SUPPLIER_MISMATCH = "supplier_mismatch"
-    OTHER = "other"
-
-
-class ExceptionStatus(str, enum.Enum):
-    """Status of an exception."""
-
+class ExceptionStatus(StrEnum):
     OPEN = "open"
+    IN_REVIEW = "in_review"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
     ESCALATED = "escalated"
-
-
-class MatchConfidence(str, enum.Enum):
-    """Confidence level of a match."""
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
-
-
-# SQLAlchemy enum columns
-def create_enum_column(
-    enum_class: type[enum.Enum],
-    **kwargs,
-) -> Mapped[enum.Enum]:
-    """Helper to create a mapped column for an enum."""
-    return mapped_column(
-        SQLEnum(enum_class, native_enum=False, create_constraint=True),
-        **kwargs,
-    )

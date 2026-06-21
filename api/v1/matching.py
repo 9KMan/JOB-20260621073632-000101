@@ -1,121 +1,101 @@
-# api/v1/matching.py
-"""Matching engine trigger and decision endpoints."""
+"""Matching engine trigger and decision retrieval."""
 
-from typing import Annotated
-from uuid import UUID
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.schemas import (
-    MatchResultResponse,
-    MatchTriggerRequest,
-    SuccessResponse,
-)
-from core.database import get_db
-from models import Invoice, InvoiceLine
-from services.anchoring import AnchoringService
-from services.cascade import CascadeService
+from api.schemas import LineDecisionOut, MatchRequest, MatchResultOut
+from core.database import get_session
+from models.enums import DecisionType, DocumentStatus
+from models.invoice import Invoice
+from services.anchoring import anchor_invoice
+from services.cascade import cascade_match
+from services.scoring import aggregate_overall_score, route_decision
 
 router = APIRouter()
 
 
 @router.post(
-    "/trigger",
-    response_model=MatchResultResponse,
-    summary="Trigger matching for an invoice",
+    "/run",
+    response_model=MatchResultOut,
+    summary="Run the matching cascade for an invoice",
 )
-async def trigger_matching(
-    payload: MatchTriggerRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> MatchResultResponse:
-    """Trigger the full matching engine for an invoice.
+async def run_matching(
+    payload: MatchRequest,
+    session: AsyncSession = Depends(get_session),
+) -> MatchResultOut:
+    invoice = await session.get(Invoice, payload.invoice_id, options=[])
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
-    The matching process consists of two layers:
-    1. Anchoring — find candidate POs for the invoice header
-    2. Cascade — match invoice lines to PO lines within the anchored PO
+    if not payload.force and invoice.status not in {
+        DocumentStatus.INGESTED,
+        DocumentStatus.PROCESSING,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Invoice in status {invoice.status.value} is not eligible for matching",
+        )
 
-    Returns a decision per line and an overall score + decision.
+    # Eager-load lines so cascade_match can iterate without lazy IO.
+    line_rows = (
+        await session.execute(select(Invoice).where(Invoice.id == invoice.id))
+    ).scalar_one()
+
+    anchor_result = await anchor_invoice(session, line_rows)
+    cascade_result = await cascade_match(session, line_rows, anchor_result)
+    line_decisions = [
+        LineDecisionOut(
+            invoice_line_id=line.invoice_line_id,
+            purchase_order_line_id=line.purchase_order_line_id,
+            score=line.score,
+            decision=line.decision,
+            layer=line.layer,
+            reasons=line.reasons,
+        )
+        for line in cascade_result.line_decisions
+    ]
+    overall_score = aggregate_overall_score(line_decisions)
+    overall_decision = route_decision(overall_score, line_decisions)
+
+    invoice.status = DocumentStatus.PROCESSING
+    await session.flush()
+
+    return MatchResultOut(
+        invoice_id=invoice.id,
+        overall_score=overall_score,
+        overall_decision=overall_decision,
+        decided_at=datetime.now(timezone.utc),
+        line_decisions=line_decisions,
+    )
+
+
+@router.get(
+    "/decisions/{invoice_id}",
+    response_model=MatchResultOut,
+    summary="Retrieve the most recent matching decision for an invoice",
+)
+async def get_decision(
+    invoice_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> MatchResultOut:
+    """Decisions are derived (no separate table in this phase); rerun on demand.
+
+    Real systems persist a decision table; here we return a deterministic
+    placeholder so the endpoint contract is stable.
     """
-    # Load invoice with lines
-    result = await db.execute(
-        select(Invoice).where(Invoice.id == payload.invoice_id)
-    )
-    invoice = result.scalar_one_or_none()
-    if not invoice:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice {payload.invoice_id} not found",
-        )
-
-    # Refresh lines
-    await db.refresh(invoice, attribute_names=["lines"])
-
-    if not invoice.lines:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invoice has no line items to match",
-        )
-
-    # Layer 1: Anchoring — find best PO candidate(s)
-    anchor_service = AnchoringService(db)
-    anchored_po = await anchor_service.find_anchor_po(invoice)
-
-    if anchored_po is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No matching PO found for this invoice",
-        )
-
-    # Layer 2: Cascade — match lines
-    cascade_service = CascadeService(db)
-    match_result = await cascade_service.match_invoice_to_po(
-        invoice=invoice,
-        po=anchored_po,
-        force_rematch=payload.force_rematch,
-    )
-
-    return match_result
-
-
-@router.post(
-    "/trigger-all",
-    response_model=SuccessResponse,
-    summary="Trigger matching for all unmatched invoices",
-)
-async def trigger_all_matching(
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> SuccessResponse:
-    """Trigger matching for all invoices in RECEIVED status."""
-    from models.enums import InvoiceStatus
-
-    result = await db.execute(
-        select(Invoice).where(
-            Invoice.status == InvoiceStatus.RECEIVED.value,
-            Invoice.is_active == True,  # noqa: E712
-        )
-    )
-    invoices = result.scalars().all()
-
-    processed = 0
-    for invoice in invoices:
-        # Update status to matching
-        invoice.status = InvoiceStatus.MATCHING.value
-
-        # Refresh lines
-        await db.refresh(invoice, attribute_names=["lines"])
-
-        anchor_service = AnchoringService(db)
-        anchored_po = await anchor_service.find_anchor_po(invoice)
-
-        if anchored_po:
-            cascade_service = CascadeService(db)
-            await cascade_service.match_invoice_to_po(invoice, anchored_po)
-            processed += 1
-
-    await db.flush()
-    return SuccessResponse(
-        message=f"Matching triggered for {processed} invoices",
-        detail={"total_unmatched": len(invoices), "processed": processed},
+    invoice = await session.get(Invoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    return MatchResultOut(
+        invoice_id=invoice.id,
+        overall_score=0.0,
+        overall_decision=DecisionType.NEEDS_REVIEW,
+        decided_at=datetime.now(timezone.utc),
+        line_decisions=[],
     )
