@@ -1,40 +1,24 @@
-// src/models/base.py
-"""Base model with common fields."""
-import uuid
+# src/models/base.py
 from datetime import datetime
-from typing import Any
+from uuid import uuid4
+from sqlalchemy import Column, String, DateTime
+from sqlalchemy.orm import declarative_base
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
-from src.database import Base
+Base = declarative_base()
 
 
 class BaseModel(Base):
-    """Base model with UUID primary key and timestamps."""
+    """Base model with common fields for all entities."""
 
     __abstract__ = True
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        index=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict:
         """Convert model to dictionary."""
         return {
             column.name: getattr(self, column.name)

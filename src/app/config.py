@@ -1,63 +1,49 @@
-// src/app/config.py
-"""Application configuration from environment variables."""
-
-import os
+# src/app/config.py
+from pydantic_settings import BaseSettings
 from functools import lru_cache
-from typing import List
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    # Application
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
 
     # Database
-    database_url: str = "postgresql+asyncpg://finaro:password@localhost:5432/finaro_ap"
-    database_url_sync: str = "postgresql://finaro:password@localhost:5432/finaro_ap"
+    DATABASE_URL: str = "postgresql://finaro:finaro123@localhost:5432/finaro_db"
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 3600
 
-    # JWT Authentication
-    secret_key: str = "change-me-in-production-use-strong-secret-key"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    # Security
+    SECRET_KEY: str = "changeme12345678901234567890123456789012345678901234567890"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    # Application
-    app_name: str = "FinaRo AP Automation"
-    app_version: str = "0.1.0"
-    debug: bool = False
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+    # API
+    API_V1_PREFIX: str = "/api/v1"
 
-    # Matching Weights (Layer 2 - Cascade Matching)
-    match_weight_line_level: float = 0.70
-    match_weight_amount: float = 0.20
-    match_weight_date: float = 0.10
+    # CORS
+    CORS_ORIGINS: list[str] = ["*"]
 
-    # Decision Thresholds
-    threshold_auto_approve: float = 0.95
-    threshold_human_review: float = 0.70
+    # Matching Engine Weights
+    MATCHING_WEIGHT_LINE_LEVEL: float = 0.70
+    MATCHING_WEIGHT_AMOUNT: float = 0.20
+    MATCHING_WEIGHT_DATE: float = 0.10
 
-    @property
-    def matching_weights(self) -> dict:
-        """Get normalized matching weights."""
-        total = (
-            self.match_weight_line_level
-            + self.match_weight_amount
-            + self.match_weight_date
-        )
-        return {
-            "line_level": self.match_weight_line_level / total,
-            "amount": self.match_weight_amount / total,
-            "date": self.match_weight_date / total,
-        }
+    # Threshold for auto-approval
+    AUTO_APPROVE_THRESHOLD: float = 0.95
+    HUMAN_REVIEW_THRESHOLD: float = 0.70
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
-@lru_cache
+@lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()

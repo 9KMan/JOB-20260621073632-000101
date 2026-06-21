@@ -1,23 +1,23 @@
-// src/models/__init__.py
-"""Database models package."""
+# src/models/__init__.py
 from src.models.base import BaseModel
+from src.models.user import User
 from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from src.models.invoice import Invoice, InvoiceLine
 from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from src.models.match import Match, MatchLine
-from src.models.balance import Balance
-from src.models.audit_log import AuditLog
+from src.models.matching import MatchingResult, MatchDecision, BalanceLedger
+from src.models.audit import AuditLog
 
 __all__ = [
     "BaseModel",
+    "User",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "Invoice",
     "InvoiceLine",
     "DeliveryNote",
     "DeliveryNoteLine",
-    "Match",
-    "MatchLine",
-    "Balance",
+    "MatchingResult",
+    "MatchDecision",
+    "BalanceLedger",
     "AuditLog",
 ]

@@ -1,184 +1,101 @@
-// src/models/matching.py
-"""Matching models for 3-way matching engine."""
-import uuid
-from datetime import datetime
-from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
-
-from sqlalchemy import String, Numeric, DateTime, ForeignKey, Text, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+# src/models/matching.py
+from sqlalchemy import Column, String, Numeric, ForeignKey, DateTime, Enum as SQLEnum, Text
+from sqlalchemy.orm import relationship
+import enum
 
 from src.models.base import BaseModel
 
-if TYPE_CHECKING:
-    from src.models.user import User
-    from src.models.purchase_order import PurchaseOrder
-    from src.models.invoice import Invoice
-    from src.models.delivery_note import DeliveryNote
+
+class MatchStatus(str, enum.Enum):
+    """Match status enumeration."""
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    AUTO_APPROVED = "auto_approved"
+    HUMAN_REVIEW = "human_review"
+    REJECTED = "rejected"
+    DISPUTED = "disputed"
 
 
-class MatchRecord(BaseModel):
-    """
-    Match Record - Captures a match between documents in 3-way matching.
-    
-    Match Types:
-    - PO_INVOICE: Match between Purchase Order and Invoice
-    - PO_DELIVERY: Match between Purchase Order and Delivery Note
-    - INVOICE_DELIVERY: Match between Invoice and Delivery Note
-    - THREE_WAY: Complete match across all three documents
-    
-    Decisions:
-    - PENDING: Awaiting decision
-    - CONFIRMED: Match confirmed, auto-approved
-    - REJECTED: Match rejected, flagged for dispute
-    """
-    
-    __tablename__ = "match_records"
-    
-    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
-    )
-    
-    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
-    )
-    
-    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
-    )
-    
-    match_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False
-    )
-    
-    match_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False
-    )
-    
-    line_level_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        default=Decimal("0")
-    )
-    
-    amount_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        default=Decimal("0")
-    )
-    
-    date_score: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        default=Decimal("0")
-    )
-    
-    decision: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        default="PENDING"
-    )
-    
-    decided_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True
-    )
-    
-    decided_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True
-    )
-    
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True
-    )
-    
+class MatchDecisionType(str, enum.Enum):
+    """Match decision types."""
+    AUTO_APPROVE = "auto_approve"
+    HUMAN_REVIEW = "human_review"
+    REJECT = "reject"
+    CONFIRM = "confirm"
+
+
+class MatchingResult(BaseModel):
+    """Matching Result model - stores results of 3-way matching."""
+
+    __tablename__ = "matching_results"
+
+    # Document references
+    invoice_id = Column(String(36), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True, index=True)
+    dn_id = Column(String(36), ForeignKey("delivery_notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    po_id = Column(String(36), ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Match scores
+    invoice_po_score = Column(Numeric(5, 4), nullable=True)  # 0.0000 to 1.0000
+    dn_po_score = Column(Numeric(5, 4), nullable=True)
+    invoice_dn_score = Column(Numeric(5, 4), nullable=True)
+    overall_score = Column(Numeric(5, 4), nullable=False, default=0)
+
+    # Amount comparisons
+    invoice_amount = Column(Numeric(15, 2), nullable=True)
+    po_amount = Column(Numeric(15, 2), nullable=True)
+    dn_amount = Column(Numeric(15, 2), nullable=True)
+    variance_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    variance_percentage = Column(Numeric(5, 2), default=0, nullable=False)
+
+    # Match status
+    status = Column(SQLEnum(MatchStatus), default=MatchStatus.PENDING, nullable=False, index=True)
+    match_type = Column(String(50), nullable=True)  # invoice_po, dn_po, invoice_dn, three_way
+    notes = Column(Text, nullable=True)
+
     # Relationships
-    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
-        "PurchaseOrder",
-        back_populates="match_records"
-    )
-    
-    invoice: Mapped[Optional["Invoice"]] = relationship(
-        "Invoice",
-        back_populates="match_records"
-    )
-    
-    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
-        "DeliveryNote",
-        back_populates="match_records"
-    )
-    
-    decider: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="decided_matches",
-        foreign_keys=[decided_by]
-    )
-    
-    decision_history: Mapped[list["MatchDecision"]] = relationship(
-        "MatchDecision",
-        back_populates="match_record",
-        cascade="all, delete-orphan"
-    )
-    
-    def __repr__(self) -> str:
-        return f"<MatchRecord {self.match_type}: {self.match_score}%>"
+    invoice = relationship("Invoice", back_populates="matching_results")
+    delivery_note = relationship("DeliveryNote", back_populates="matching_results")
+    purchase_order = relationship("PurchaseOrder", back_populates="matched_invoices")
+    decisions = relationship("MatchDecision", back_populates="matching_result", cascade="all, delete-orphan")
+    balance_entries = relationship("BalanceLedger", back_populates="matching_result")
 
 
 class MatchDecision(BaseModel):
-    """History of decisions made on match records."""
-    
+    """Match Decision model - human confirmations feed into learning loop."""
+
     __tablename__ = "match_decisions"
-    
-    match_record_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("match_records.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True
-    )
-    
-    previous_decision: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True
-    )
-    
-    new_decision: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False
-    )
-    
-    reason: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True
-    )
-    
+
+    matching_result_id = Column(String(36), ForeignKey("matching_results.id", ondelete="CASCADE"), nullable=False, index=True)
+    decided_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    decision_type = Column(SQLEnum(MatchDecisionType), nullable=False)
+    decision_notes = Column(Text, nullable=True)
+    previous_status = Column(String(50), nullable=True)
+    new_status = Column(String(50), nullable=False)
+
     # Relationships
-    match_record: Mapped["MatchRecord"] = relationship(
-        "MatchRecord",
-        back_populates="decision_history"
-    )
-    
-    user: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="decision_history"
-    )
-    
-    def __repr__(self) -> str:
-        return f"<MatchDecision {self.previous_decision} -> {self.new_decision}>"
+    matching_result = relationship("MatchingResult", back_populates="decisions")
+    user = relationship("User")
+
+
+class BalanceLedger(BaseModel):
+    """Balance Ledger model - tracks partial matches and balances."""
+
+    __tablename__ = "balance_ledger"
+
+    # Document references
+    invoice_id = Column(String(36), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True, index=True)
+    dn_id = Column(String(36), ForeignKey("delivery_notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    po_id = Column(String(36), ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    matching_result_id = Column(String(36), ForeignKey("matching_results.id", ondelete="SET NULL"), nullable=True)
+
+    # Balance tracking
+    document_type = Column(String(20), nullable=False)  # invoice, dn, po
+    document_number = Column(String(50), nullable=False)
+    original_amount = Column(Numeric(15, 2), nullable=False)
+    matched_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    remaining_balance = Column(Numeric(15, 2), nullable=False)
+    currency = Column(String(3), default="USD", nullable=False)
+    notes = Column(Text, nullable=True)
+
+    # Relationships
+    matching_result = relationship("MatchingResult", back_populates="balance_entries")

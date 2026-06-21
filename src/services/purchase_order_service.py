@@ -1,161 +1,164 @@
-// src/services/purchase_order_service.py
-"""Purchase Order service."""
-import uuid
-import decimal
-from datetime import date
+# src/services/purchase_order_service.py
 from typing import Optional, List
+from decimal import Decimal
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from sqlalchemy.orm import Session, joinedload
-
-from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from src.models.enums import DocumentStatus
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine, POStatus
 from src.schemas.purchase_order import PurchaseOrderCreate, PurchaseOrderUpdate
 
 
 class PurchaseOrderService:
     """Service for Purchase Order operations."""
 
-    @staticmethod
-    def calculate_totals(lines: List[dict]) -> decimal.Decimal:
-        """Calculate total amount from lines."""
-        return sum(
-            (decimal.Decimal(str(line.get("line_amount", 0))) for line in lines),
-            decimal.Decimal("0.00")
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_by_id(self, po_id: str) -> Optional[PurchaseOrder]:
+        """Get PO by ID with lines."""
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.lines))
+            .where(PurchaseOrder.id == po_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_number(self, po_number: str) -> Optional[PurchaseOrder]:
+        """Get PO by number."""
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.lines))
+            .where(PurchaseOrder.po_number == po_number)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all(
+        self, skip: int = 0, limit: int = 100, status: Optional[POStatus] = None
+    ) -> List[PurchaseOrder]:
+        """Get all POs with pagination and optional status filter."""
+        query = select(PurchaseOrder).options(selectinload(PurchaseOrder.lines))
+
+        if status:
+            query = query.where(PurchaseOrder.status == status)
+
+        result = await self.db.execute(
+            query.offset(skip).limit(limit).order_by(PurchaseOrder.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_supplier(
+        self, supplier_id: str, skip: int = 0, limit: int = 100
+    ) -> List[PurchaseOrder]:
+        """Get POs by supplier."""
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.lines))
+            .where(PurchaseOrder.supplier_id == supplier_id)
+            .offset(skip)
+            .limit(limit)
+            .order_by(PurchaseOrder.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_open_pos(self, supplier_id: Optional[str] = None) -> List[PurchaseOrder]:
+        """Get open POs for matching."""
+        query = (
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.lines))
+            .where(PurchaseOrder.status == POStatus.OPEN)
         )
 
-    @staticmethod
-    def create_purchase_order(db: Session, po_data: PurchaseOrderCreate) -> PurchaseOrder:
-        """Create a new Purchase Order with lines."""
-        total_amount = po_data.total_amount
-        if po_data.lines:
-            total_amount = PurchaseOrderService.calculate_totals(
-                [line.model_dump() for line in po_data.lines]
-            )
+        if supplier_id:
+            query = query.where(PurchaseOrder.supplier_id == supplier_id)
+
+        result = await self.db.execute(query.order_by(PurchaseOrder.order_date))
+        return list(result.scalars().all())
+
+    async def create(self, po_data: PurchaseOrderCreate) -> PurchaseOrder:
+        """Create a new PO with lines."""
+        # Calculate totals
+        total_amount = Decimal("0")
+        tax_amount = Decimal("0")
+
+        for line in po_data.lines:
+            line_amount = line.quantity * line.unit_price
+            line_tax = line_amount * line.tax_rate if line.tax_rate else Decimal("0")
+            total_amount += line_amount + line_tax
+            tax_amount += line_tax
 
         po = PurchaseOrder(
             po_number=po_data.po_number,
             supplier_id=po_data.supplier_id,
             supplier_name=po_data.supplier_name,
-            supplier_reference=po_data.supplier_reference,
+            supplier_code=po_data.supplier_code,
             order_date=po_data.order_date,
             expected_delivery_date=po_data.expected_delivery_date,
-            total_amount=total_amount,
             currency=po_data.currency,
-            status=po_data.status,
+            total_amount=total_amount,
+            tax_amount=tax_amount,
             notes=po_data.notes,
             metadata=po_data.metadata,
+            status=POStatus.OPEN,
         )
-        db.add(po)
-        db.flush()
+        self.db.add(po)
+        await self.db.flush()
 
+        # Create lines
         for line_data in po_data.lines:
-            line = PurchaseOrderLine(
+            line_amount = line_data.quantity * line_data.unit_price
+            line_tax = line_amount * (line_data.tax_rate or Decimal("0"))
+
+            po_line = PurchaseOrderLine(
                 purchase_order_id=po.id,
                 line_number=line_data.line_number,
                 product_code=line_data.product_code,
+                product_name=line_data.product_name,
                 description=line_data.description,
                 quantity=line_data.quantity,
                 unit_of_measure=line_data.unit_of_measure,
                 unit_price=line_data.unit_price,
-                line_amount=line_data.line_amount,
-                tax_rate=line_data.tax_rate,
-                tax_amount=line_data.tax_amount,
+                line_amount=line_amount,
+                tax_rate=line_data.tax_rate or Decimal("0"),
+                tax_amount=line_tax,
                 expected_delivery_date=line_data.expected_delivery_date,
                 notes=line_data.notes,
             )
-            db.add(line)
+            self.db.add(po_line)
 
-        db.commit()
-        db.refresh(po)
+        await self.db.flush()
+        await self.db.refresh(po)
         return po
 
-    @staticmethod
-    def get_purchase_order(db: Session, po_id: uuid.UUID) -> Optional[PurchaseOrder]:
-        """Get a Purchase Order by ID."""
-        return (
-            db.query(PurchaseOrder)
-            .options(joinedload(PurchaseOrder.lines))
-            .filter(PurchaseOrder.id == po_id)
-            .first()
-        )
+    async def update(self, po_id: str, po_data: PurchaseOrderUpdate) -> Optional[PurchaseOrder]:
+        """Update an existing PO."""
+        po = await self.get_by_id(po_id)
+        if not po:
+            return None
 
-    @staticmethod
-    def get_purchase_order_by_number(db: Session, po_number: str) -> Optional[PurchaseOrder]:
-        """Get a Purchase Order by PO number."""
-        return (
-            db.query(PurchaseOrder)
-            .options(joinedload(PurchaseOrder.lines))
-            .filter(PurchaseOrder.po_number == po_number)
-            .first()
-        )
-
-    @staticmethod
-    def get_purchase_orders(
-        db: Session,
-        skip: int = 0,
-        limit: int = 100,
-        supplier_id: Optional[str] = None,
-        status: Optional[DocumentStatus] = None,
-    ) -> List[PurchaseOrder]:
-        """Get a list of Purchase Orders with optional filtering."""
-        query = db.query(PurchaseOrder).options(joinedload(PurchaseOrder.lines))
-        
-        if supplier_id:
-            query = query.filter(PurchaseOrder.supplier_id == supplier_id)
-        if status:
-            query = query.filter(PurchaseOrder.status == status)
-        
-        return query.offset(skip).limit(limit).all()
-
-    @staticmethod
-    def update_purchase_order(
-        db: Session,
-        po: PurchaseOrder,
-        po_data: PurchaseOrderUpdate,
-    ) -> PurchaseOrder:
-        """Update a Purchase Order."""
         update_data = po_data.model_dump(exclude_unset=True)
-        
-        for key, value in update_data.items():
-            setattr(po, key, value)
-        
-        db.commit()
-        db.refresh(po)
+        for field, value in update_data.items():
+            setattr(po, field, value)
+
+        await self.db.flush()
+        await self.db.refresh(po)
         return po
 
-    @staticmethod
-    def delete_purchase_order(db: Session, po: PurchaseOrder) -> None:
-        """Soft delete a Purchase Order."""
-        po.is_deleted = True
-        po.deleted_at = date.today()
-        po.status = DocumentStatus.CANCELLED
-        db.commit()
-
-    @staticmethod
-    def update_status(db: Session, po: PurchaseOrder, status: DocumentStatus) -> PurchaseOrder:
-        """Update a Purchase Order status."""
+    async def update_status(self, po_id: str, status: POStatus) -> Optional[PurchaseOrder]:
+        """Update PO status."""
+        po = await self.get_by_id(po_id)
+        if not po:
+            return None
         po.status = status
-        db.commit()
-        db.refresh(po)
+        await self.db.flush()
+        await self.db.refresh(po)
         return po
 
-    @staticmethod
-    def get_open_pos_by_supplier(
-        db: Session,
-        supplier_id: str,
-    ) -> List[PurchaseOrder]:
-        """Get open (unmatched) POs for a supplier."""
-        return (
-            db.query(PurchaseOrder)
-            .options(joinedload(PurchaseOrder.lines))
-            .filter(
-                PurchaseOrder.supplier_id == supplier_id,
-                PurchaseOrder.is_deleted == False,
-                PurchaseOrder.status.in_([
-                    DocumentStatus.SUBMITTED,
-                    DocumentStatus.APPROVED,
-                    DocumentStatus.PARTIALLY_MATCHED,
-                ])
-            )
-            .all()
-        )
+    async def delete(self, po_id: str) -> bool:
+        """Delete a PO."""
+        po = await self.get_by_id(po_id)
+        if not po:
+            return False
+        await self.db.delete(po)
+        await self.db.flush()
+        return True
