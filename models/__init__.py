@@ -1,35 +1,33 @@
-// models/__init__.py
-"""
-Database models package.
+# models/__init__.py
+"""Data models package — SQLAlchemy models and Pydantic schemas."""
 
-This package exports all SQLAlchemy ORM models used in the application.
-Import models from this package to ensure proper initialization.
-"""
-
-from models.base import Base
-from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from models.delivery_note import DeliveryNote, DeliveryNoteLine
-from models.balance_ledger import BalanceLedger
-from models.cross_ref import CrossRef
+from models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
 from models.enums import (
     InvoiceStatus,
     PurchaseOrderStatus,
     DeliveryNoteStatus,
     MatchingDecision,
-    MatchConfidence,
+    ExceptionType,
     LineStatus,
 )
+from models.invoice import Invoice, InvoiceLine
+from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from models.delivery_note import DeliveryNote, DeliveryNoteLine
+from models.balance_ledger import BalanceLedger
+from models.cross_ref import CrossRef
 
 __all__ = [
-    # Base
+    # Base classes
     "Base",
+    "UUIDMixin",
+    "TimestampMixin",
+    "SoftDeleteMixin",
     # Enums
     "InvoiceStatus",
     "PurchaseOrderStatus",
     "DeliveryNoteStatus",
     "MatchingDecision",
-    "MatchConfidence",
+    "ExceptionType",
     "LineStatus",
     # Models
     "Invoice",

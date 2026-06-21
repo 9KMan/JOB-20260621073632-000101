@@ -1,26 +1,15 @@
-// models/enums.py
-"""
-Enumeration types used throughout the application.
+# models/enums.py
+"""Enumeration types used across the AP automation engine."""
 
-These enums define the allowed values for status fields, decision types,
-and other categorical data in the system.
-"""
-
-import uuid
-from enum import Enum
-from typing import Literal
-
-from sqlalchemy import String, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+import enum
 
 
-class InvoiceStatus(str, Enum):
-    """Status values for invoices."""
+class InvoiceStatus(str, enum.Enum):
+    """Lifecycle status of an invoice record."""
 
     DRAFT = "draft"
-    PENDING = "pending"
-    MATCHING = "matching"
+    RECEIVED = "received"
+    MATCHING_IN_PROGRESS = "matching_in_progress"
     MATCHED = "matched"
     EXCEPTION = "exception"
     APPROVED = "approved"
@@ -29,172 +18,90 @@ class InvoiceStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, Enum):
-    """Status values for purchase orders."""
+class PurchaseOrderStatus(str, enum.Enum):
+    """Lifecycle status of a purchase order."""
 
     DRAFT = "draft"
-    ACTIVE = "active"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
     CLOSED = "closed"
     CANCELLED = "cancelled"
-    COMPLETED = "completed"
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Status values for delivery notes."""
+class DeliveryNoteStatus(str, enum.Enum):
+    """Lifecycle status of a delivery note."""
 
     DRAFT = "draft"
+    ISSUED = "issued"
+    PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
-    PARTIAL = "partial"
-    COMPLETED = "completed"
     CANCELLED = "cancelled"
 
 
-class MatchingDecision(str, Enum):
+class MatchingDecision(str, enum.Enum):
     """
-    Decision outcomes from the matching engine.
-    
-    These decisions determine the next action for matched records.
+    Outcome of the matching engine for a given invoice / PO pair.
+
+    Values are ordered from most confident to least confident.
     """
 
     AUTO_APPROVED = "auto_approved"
-    """High confidence match - automatically approved for payment"""
+    """Score >= THRESHOLD_HIGH — fully confident, auto-approved."""
 
-    REVIEW_REQUIRED = "review_required"
-    """Medium confidence match - requires human review"""
+    ONE_CLICK_REVIEW = "one_click_review"
+    """Score between THRESHOLD_MID and THRESHOLD_HIGH — needs human confirmation."""
 
     EXCEPTION = "exception"
-    """Low confidence match or discrepancy - requires investigation"""
+    """Score between THRESHOLD_LOW and THRESHOLD_MID — flagged for exception handling."""
 
-    NO_MATCH = "no_match"
-    """No matching records found"""
-
-    PENDING = "pending"
-    """Matching in progress or awaiting processing"""
+    REJECTED = "rejected"
+    """Score < THRESHOLD_LOW — no viable match found."""
 
 
-class MatchConfidence(str, Enum):
-    """
-    Confidence levels for individual match scores.
-    
-    These are derived from the weighted scoring algorithm.
-    """
-
-    VERY_HIGH = "very_high"
-    """Confidence >= 95%"""
-
-    HIGH = "high"
-    """Confidence >= 85% and < 95%"""
-
-    MEDIUM = "medium"
-    """Confidence >= 70% and < 85%"""
-
-    LOW = "low"
-    """Confidence >= 50% and < 70%"""
-
-    VERY_LOW = "very_low"
-    """Confidence < 50%"""
-
-
-class LineStatus(str, Enum):
-    """Status values for invoice/POL/DN lines."""
-
-    OPEN = "open"
-    PARTIALLY_MATCHED = "partially_matched"
-    FULLY_MATCHED = "fully_matched"
-    OVER_DELIVERED = "over_delivered"
-    CLOSED = "closed"
-
-
-class ExceptionType(str, Enum):
-    """Types of matching exceptions."""
+class ExceptionType(str, enum.Enum):
+    """Categorises a matching exception for triage."""
 
     PRICE_MISMATCH = "price_mismatch"
-    """Unit price differs beyond tolerance"""
+    """Unit price differs beyond tolerance."""
 
     QUANTITY_MISMATCH = "quantity_mismatch"
-    """Quantity differs beyond tolerance"""
+    """Billed quantity differs beyond tolerance."""
 
     MISSING_PO = "missing_po"
-    """Invoice has no matching purchase order"""
+    """No PO anchor found for this invoice."""
 
-    MISSING_DN = "missing_dn"
-    """Invoice/POL has no matching delivery note"""
+    MISSING_DELIVERY = "missing_delivery"
+    """No delivery note found for this PO line."""
 
-    DUPLICATE = "duplicate"
-    """Potential duplicate invoice detected"""
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    """Potential duplicate of an existing invoice."""
 
-    OVER_DELIVERY = "over_delivery"
-    """Delivery exceeds ordered quantity"""
+    OVER_INVOICED = "over_invoiced"
+    """Invoice amount exceeds PO line value."""
 
-    EXPIRED = "expired"
-    """PO has expired or been cancelled"""
+    PARTIAL_DELIVERY = "partial_delivery"
+    """PO line quantity exceeds delivered quantity."""
 
-    SPLIT_MATCH = "split_match"
-    """Single invoice matches multiple POs/DNs"""
+    CROSS_REF_BLOCKED = "cross_ref_blocked"
+    """Cross-reference record conflicts with current match."""
 
 
-class ExceptionStatus(str, Enum):
-    """Status of matching exceptions."""
+class LineStatus(str, enum.Enum):
+    """Status of an individual line item within a document."""
 
     OPEN = "open"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
+    """Line has remaining quantity to be matched."""
 
+    PARTIALLY_MATCHED = "partially_matched"
+    """Line has been partially matched."""
 
-# SQLAlchemy enum columns (for use in model definitions)
-invoice_status_enum = SQLEnum(
-    InvoiceStatus,
-    name="invoice_status",
-    create_constraint=True,
-    validate_string=True,
-)
+    FULLY_MATCHED = "fully_matched"
+    """Line has been fully matched."""
 
-po_status_enum = SQLEnum(
-    PurchaseOrderStatus,
-    name="po_status",
-    create_constraint=True,
-    validate_string=True,
-)
+    OVER_DELIVERED = "over_delivered"
+    """Delivered quantity exceeds ordered quantity."""
 
-dn_status_enum = SQLEnum(
-    DeliveryNoteStatus,
-    name="dn_status",
-    create_constraint=True,
-    validate_string=True,
-)
+    OVER_INVOICED = "over_invoiced"
+    """Invoiced quantity exceeds delivered quantity."""
 
-matching_decision_enum = SQLEnum(
-    MatchingDecision,
-    name="matching_decision",
-    create_constraint=True,
-    validate_string=True,
-)
-
-match_confidence_enum = SQLEnum(
-    MatchConfidence,
-    name="match_confidence",
-    create_constraint=True,
-    validate_string=True,
-)
-
-line_status_enum = SQLEnum(
-    LineStatus,
-    name="line_status",
-    create_constraint=True,
-    validate_string=True,
-)
-
-exception_type_enum = SQLEnum(
-    ExceptionType,
-    name="exception_type",
-    create_constraint=True,
-    validate_string=True,
-)
-
-exception_status_enum = SQLEnum(
-    ExceptionStatus,
-    name="exception_status",
-    create_constraint=True,
-    validate_string=True,
-)
+    CANCELLED = "cancelled"

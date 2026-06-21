@@ -1,145 +1,180 @@
-// core/config.py
-"""
-Configuration management using pydantic-settings.
-
-All configuration is loaded from environment variables.
-Never hardcode secrets or configuration values.
-"""
+# core/config.py
+"""Application configuration loaded from environment variables via pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, PostgresDsn, RedisDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
-    """Database configuration settings."""
-
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
-        description="Async database connection URL for SQLAlchemy",
-    )
-    database_url_sync: str = Field(
-        default="postgresql://apuser:appassword@localhost:5432/apautomation",
-        description="Sync database connection URL for Alembic migrations",
-    )
-    pgbouncer_host: str = Field(
-        default="localhost",
-        description="PGBouncer host for connection pooling",
-    )
-    pool_size: int = Field(default=20, ge=1, le=100)
-    max_overflow: int = Field(default=10, ge=0, le=50)
-    pool_timeout: int = Field(default=30, ge=1)
-    pool_recycle: int = Field(default=3600, ge=0)
-    echo_sql: bool = Field(default=False)
+    """Database connection settings."""
 
     model_config = SettingsConfigDict(env_prefix="DATABASE_")
+
+    url: Annotated[
+        PostgresDsn,
+        Field(
+            description="Async database connection string (asyncpg driver)",
+            default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
+        ),
+    ]
+
+    url_sync: Annotated[
+        PostgresDsn,
+        Field(
+            description="Sync database connection string (used by Alembic migrations)",
+            default="postgresql://apuser:appassword@localhost:5432/apautomation",
+        ),
+    ]
+
+    echo: Annotated[
+        bool,
+        Field(
+            description="Echo SQL queries to stdout (useful for debugging)",
+            default=False,
+        ),
+    ]
+
+    pool_size: Annotated[int, Field(description="Connection pool size", default=20)]
+    max_overflow: Annotated[int, Field(description="Max overflow connections", default=10)]
+    pool_timeout: Annotated[int, Field(description="Pool timeout in seconds", default=30)]
+    pool_recycle: Annotated[int, Field(description="Connection recycle time in seconds", default=3600)]
+    pool_pre_ping: Annotated[bool, Field(description="Check connection health before use", default=True)]
 
 
 class JWTSettings(BaseSettings):
     """JWT authentication settings."""
 
-    jwt_secret_key: str = Field(
-        default="change-me-in-production",
-        description="Secret key for JWT signing (HS256)",
-    )
-    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = Field(default="HS256")
-    access_token_expire_minutes: int = Field(default=30, ge=1)
-    refresh_token_expire_days: int = Field(default=7, ge=1)
-
     model_config = SettingsConfigDict(env_prefix="JWT_")
 
+    secret_key: Annotated[
+        str,
+        Field(
+            description="Secret key for HS256 JWT signing",
+            default="dev-secret-key-change-in-production",
+        ),
+    ]
 
-class MatchingThresholds(BaseSettings):
-    """Matching threshold configuration for the decision engine."""
+    algorithm: Annotated[str, Field(description="JWT signing algorithm", default="HS256")]
 
-    threshold_high: float = Field(
-        default=95.0,
-        ge=0,
-        le=100,
-        description="Auto-approve threshold (percentage)",
-    )
-    threshold_mid: float = Field(
-        default=70.0,
-        ge=0,
-        le=100,
-        description="1-click review threshold (percentage)",
-    )
-    threshold_low: float = Field(
-        default=40.0,
-        ge=0,
-        le=100,
-        description="Exception threshold (percentage)",
-    )
-    tolerance_price: float = Field(
-        default=5.0,
-        ge=0,
-        le=100,
-        description="Price match tolerance percentage",
-    )
-    tolerance_qty: float = Field(
-        default=10.0,
-        ge=0,
-        le=100,
-        description="Quantity match tolerance percentage",
-    )
+    access_token_expire_minutes: Annotated[
+        int,
+        Field(description="Access token expiry in minutes", default=30),
+    ]
 
-    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
+    refresh_token_expire_days: Annotated[
+        int,
+        Field(description="Refresh token expiry in days", default=7),
+    ]
+
+
+class MatchingSettings(BaseSettings):
+    """AP matching engine threshold and tolerance settings."""
+
+    model_config = SettingsConfigDict(env_prefix="")
+
+    # Score thresholds (0.0 – 1.0)
+    threshold_high: Annotated[
+        float,
+        Field(
+            description="Auto-approve threshold: matches above this score auto-approve",
+            ge=0.0,
+            le=1.0,
+            default=0.95,
+        ),
+    ]
+
+    threshold_mid: Annotated[
+        float,
+        Field(
+            description="One-click review threshold: matches between mid and high go to review",
+            ge=0.0,
+            le=1.0,
+            default=0.70,
+        ),
+    ]
+
+    threshold_low: Annotated[
+        float,
+        Field(
+            description="Exception threshold: matches below this score become exceptions",
+            ge=0.0,
+            le=1.0,
+            default=0.40,
+        ),
+    ]
+
+    # Tolerance margins
+    tolerance_price: Annotated[
+        float,
+        Field(
+            description="Price match tolerance as decimal (0.02 = 2%)",
+            ge=0.0,
+            le=1.0,
+            default=0.02,
+        ),
+    ]
+
+    tolerance_qty: Annotated[
+        float,
+        Field(
+            description="Quantity match tolerance as decimal (0.05 = 5%)",
+            ge=0.0,
+            le=1.0,
+            default=0.05,
+        ),
+    ]
 
 
 class AppSettings(BaseSettings):
     """Application-level settings."""
 
-    app_name: str = Field(default="AP Automation Engine")
-    app_version: str = Field(default="0.1.0")
-    environment: Literal["development", "staging", "production", "testing"] = Field(
-        default="development"
-    )
-    debug: bool = Field(default=False)
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO"
-    )
-    api_v1_prefix: str = Field(default="/api/v1")
-    cors_origins: list[str] = Field(default=["*"])
-    docs_url: str = Field(default="/docs")
-    redoc_url: str = Field(default="/redoc")
-
-    model_config = SettingsConfigDict(
-        env_prefix="",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
-
-    @field_validator("environment")
-    @classmethod
-    def set_debug_mode(cls, v: str) -> str:
-        """Automatically set debug mode based on environment."""
-        return v
-
-
-class Settings(
-    DatabaseSettings,
-    JWTSettings,
-    MatchingThresholds,
-    AppSettings,
-):
-    """Combined settings class that inherits from all configuration sections."""
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",
     )
+
+    environment: Annotated[
+        str,
+        Field(description="Runtime environment", default="development"),
+    ]
+
+    log_level: Annotated[
+        str,
+        Field(description="Logging level", default="INFO"),
+    ]
+
+    api_v1_prefix: Annotated[str, Field(description="API v1 route prefix", default="/api/v1")]
+
+    app_name: Annotated[str, Field(description="Application name", default="AP Automation Engine")]
+
+    debug: Annotated[bool, Field(description="Debug mode", default=False)]
+
+    cors_origins: Annotated[
+        list[str],
+        Field(
+            description="Allowed CORS origins",
+            default=["http://localhost:3000", "http://localhost:8080"],
+        ),
+    ]
+
+
+class Settings(BaseSettings):
+    """Aggregated application settings."""
+
+    app: AppSettings = Field(default_factory=AppSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    matching: MatchingSettings = Field(default_factory=MatchingSettings)
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance (singleton pattern)."""
+    """Return cached application settings singleton."""
     return Settings()
 
 
-# Global settings instance
 settings = get_settings()

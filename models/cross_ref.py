@@ -1,259 +1,166 @@
-// models/cross_ref.py
-"""
-CrossRef (Cross-Reference) SQLAlchemy model.
-
-The cross-reference table implements the learning loop for the matching engine.
-It stores confirmed matches to improve future matching accuracy by learning
-from human decisions.
-"""
+# models/cross_ref.py
+"""CrossRef — learning loop / cross-reference table for confirmed matches."""
 
 import uuid
-from datetime import date
 from decimal import Decimal
+from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean,
-    Date,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
     Numeric,
     String,
     Text,
-    func,
+    Integer,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import (
-    Mapped,
-    mapped_column,
-    relationship,
-)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import MatchConfidence, match_confidence_enum
+from models.base import Base, UUIDMixin, TimestampMixin
 
 
 class CrossRef(Base, UUIDMixin, TimestampMixin):
     """
-    Cross-Reference (Learning Loop) table.
-    
-    Stores learned associations between invoices, POs, and DNs.
-    Used by the matching engine to improve accuracy based on
-    confirmed human decisions.
-    
-    Learning levels:
-    - 1: Initial/rule-based match
-    - 2: Human-confirmed match
-    - 3: Repeated confirmation (promoted)
+    Learning loop table — records confirmed matches between document entities
+    so that future matches can use this information to improve scoring.
+
+    When an invoice line is matched to a PO line (and confirmed by an
+    accountant or auto-approved), a CrossRef record is created. The matching
+    engine can later use these records as anchors for future matches, promoting
+    them when the confidence score crosses a promotion threshold.
+
+    Attributes
+    ----------
+    vendor_id : str
+        Vendor this cross-reference applies to.
+    invoice_sku : str | None
+        SKU from the invoice line (if available).
+    po_sku : str | None
+        SKU from the PO line (if available).
+    invoice_description : str | None
+        Partial description from the invoice line.
+    po_description : str | None
+        Partial description from the PO line.
+    invoice_uom : str | None
+        Unit of measure from the invoice line.
+    po_uom : str | None
+        Unit of measure from the PO line.
+    match_count : int
+        Number of times this cross-reference has been used in a successful match.
+    confirmation_count : int
+        Number of times this cross-reference has been manually confirmed.
+    is_promoted : bool
+        Whether this cross-reference has been promoted to a higher confidence tier.
+    promoted_at : datetime | None
+        Timestamp when this record was promoted.
+    is_active : bool
+        Whether this record is currently active (soft-disable for corrections).
+    source : str
+        How this record was created: 'manual', 'auto_approved', 'one_click'.
+    notes : str | None
+        Free-text notes.
     """
 
     __tablename__ = "cross_refs"
 
-    # Invoice reference
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    invoice_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="Denormalized invoice number for quick lookup",
-    )
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
+    vendor_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
-    # Purchase Order reference
-    purchase_order_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchaseorders.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    po_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="Denormalized PO number for quick lookup",
-    )
-    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchaseorder_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
-    # Delivery Note reference
-    delivery_note_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("deliverynotes.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    dn_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="Denormalized DN number for quick lookup",
-    )
-    dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("deliverynote_lines.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
-    # Product linkage
+    # SKU fields (partial match candidates)
     invoice_sku: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         index=True,
-        doc="Invoice line SKU",
     )
     po_sku: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         index=True,
-        doc="PO line SKU",
-    )
-    dn_sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
-        doc="DN line SKU",
     )
 
-    # Vendor linkage
-    invoice_vendor_code: Mapped[str | None] = mapped_column(
-        String(50),
+    # Description fields (partial / fuzzy match candidates)
+    invoice_description: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True,
-        index=True,
-        doc="Invoice vendor code",
     )
-    po_vendor_code: Mapped[str | None] = mapped_column(
-        String(50),
+    po_description: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True,
-        index=True,
-        doc="PO vendor code",
     )
 
-    # Matching metrics
-    match_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        doc="Match score at time of confirmation (0-100)",
-    )
-    confidence: Mapped[MatchConfidence] = mapped_column(
-        match_confidence_enum,
-        nullable=False,
-        doc="Confidence level",
-    )
+    # UoM fields
+    invoice_uom: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    po_uom: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    # Learning data
-    learning_level: Mapped[int] = mapped_column(
+    # Scoring / usage
+    match_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=1,
-        doc="Learning level: 1=rule, 2=confirmed, 3=promoted",
+        default=0,
     )
     confirmation_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
-        doc="Number of times this match was confirmed",
-    )
-    rejection_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        doc="Number of times this match was rejected",
     )
 
-    # Decision tracking
-    decision: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        doc="Matching decision: approved, rejected, etc.",
-    )
-    decided_by: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="User who made the decision",
-    )
-    decided_at: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
-        doc="Date of decision",
-    )
-
-    # Promotion tracking
+    # Promotion state
     is_promoted: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        doc="Whether this match has been promoted to higher learning level",
+        index=True,
     )
     promoted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        doc="Timestamp of promotion",
-    )
-    promoted_by: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="User who approved promotion",
     )
 
-    # Active status
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
         index=True,
-        doc="Whether this cross-reference is active",
-    )
-    deactivation_reason: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-        doc="Reason for deactivation if applicable",
     )
 
-    # JSON metadata for extensibility
-    metadata_: Mapped[dict | None] = mapped_column(
-        "metadata",
-        JSONB,
-        nullable=True,
-        default=dict,
-        doc="Additional match metadata",
-    )
-
-    # Weight for scoring algorithm
-    weight: Mapped[float] = mapped_column(
-        Numeric(5, 3),
+    source: Mapped[str] = mapped_column(
+        String(30),
         nullable=False,
-        default=1.0,
-        doc="Weight factor for scoring (1.0 default)",
+        default="auto_approved",
+    )
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Relationships ────────────────────────────────────────────────────────
+
+    # Foreign keys to the canonical records that generated this cross-ref
+    source_invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_po_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_delivery_note_line_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     __table_args__ = (
-        Index("ix_xref_invoice_vendor", "invoice_number", "invoice_vendor_code"),
-        Index("ix_xref_po_vendor", "po_number", "po_vendor_code"),
-        Index("ix_xref_sku_match", "invoice_sku", "po_sku"),
-        Index("ix_xref_learning", "learning_level", "is_active"),
-        Index("ix_xref_confidence", "confidence", "match_score"),
+        UniqueConstraint(
+            "vendor_id",
+            "invoice_sku",
+            "po_sku",
+            name="uq_cross_ref_vendor_skus",
+        ),
+        Index("ix_cross_refs_vendor_active", "vendor_id", "is_active"),
+        Index("ix_cross_refs_promoted", "is_promoted", "is_active"),
     )
-
-    def __repr__(self) -> str:
-        return (
-            f"<CrossRef(id={self.id}, "
-            f"invoice={self.invoice_number}, "
-            f"po={self.po_number}, "
-            f"level={self.learning_level})>"
-        )
