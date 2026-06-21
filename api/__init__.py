@@ -1,21 +1,57 @@
-# api/__init__.py
-"""API module for FastAPI routes and schemas.
+// api/__init__.py
+"""API package for AP Automation Engine.
 
-This module contains the API layer including:
-- Shared Pydantic schemas for request/response validation
-- Versioned API routes
+Contains route handlers, schemas, and API configuration.
 """
 
 from api.schemas import (
-    BaseResponse,
-    PaginatedResponse,
+    HealthResponse,
     ErrorResponse,
-    HealthCheckResponse,
+    PaginationParams,
+    InvoiceCreate,
+    InvoiceUpdate,
+    InvoiceResponse,
+    InvoiceListResponse,
+    PurchaseOrderCreate,
+    PurchaseOrderResponse,
+    PurchaseOrderListResponse,
+    DeliveryNoteCreate,
+    DeliveryNoteResponse,
+    DeliveryNoteListResponse,
+    MatchingRequest,
+    MatchingResponse,
+    MatchingDecisionResponse,
+    ExceptionCreate,
+    ExceptionResponse,
+    ExceptionListResponse,
+    ExceptionResolution,
+    BalanceLedgerResponse,
+    CrossRefResponse,
+    CrossRefListResponse,
 )
 
 __all__ = [
-    "BaseResponse",
-    "PaginatedResponse",
+    "HealthResponse",
     "ErrorResponse",
-    "HealthCheckResponse",
+    "PaginationParams",
+    "InvoiceCreate",
+    "InvoiceUpdate",
+    "InvoiceResponse",
+    "InvoiceListResponse",
+    "PurchaseOrderCreate",
+    "PurchaseOrderResponse",
+    "PurchaseOrderListResponse",
+    "DeliveryNoteCreate",
+    "DeliveryNoteResponse",
+    "DeliveryNoteListResponse",
+    "MatchingRequest",
+    "MatchingResponse",
+    "MatchingDecisionResponse",
+    "ExceptionCreate",
+    "ExceptionResponse",
+    "ExceptionListResponse",
+    "ExceptionResolution",
+    "BalanceLedgerResponse",
+    "CrossRefResponse",
+    "CrossRefListResponse",
 ]

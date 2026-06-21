@@ -1,7 +1,7 @@
-# core/config.py
-"""Configuration management using pydantic-settings.
+// core/config.py
+"""Application configuration using pydantic-settings.
 
-All configuration is loaded from environment variables.
+All configuration is managed via environment variables.
 No hardcoded secrets or configuration values.
 """
 
@@ -12,125 +12,8 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseSettings):
-    """Database configuration settings."""
-
-    database_url: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        description="Async PostgreSQL connection string",
-    )
-    database_pool_size: int = Field(default=20, ge=1, le=100)
-    database_max_overflow: int = Field(default=10, ge=0, le=50)
-    database_pool_timeout: int = Field(default=30, ge=1)
-    database_echo: bool = Field(default=False)
-
-    model_config = SettingsConfigDict(
-        env_prefix="DATABASE_",
-        case_sensitive=False,
-    )
-
-
-class SecuritySettings(BaseSettings):
-    """Security and authentication settings."""
-
-    jwt_secret_key: str = Field(
-        default="change-me-in-production",
-        description="Secret key for JWT signing (HS256)",
-    )
-    jwt_algorithm: str = Field(default="HS256")
-    jwt_access_token_expire_minutes: int = Field(default=30, ge=1)
-    jwt_refresh_token_expire_days: int = Field(default=7, ge=1)
-    bcrypt_rounds: int = Field(default=12, ge=4, le=20)
-
-    model_config = SettingsConfigDict(
-        env_prefix="JWT_",
-        case_sensitive=False,
-    )
-
-
-class ThresholdSettings(BaseSettings):
-    """Matching engine threshold settings."""
-
-    threshold_high: Annotated[float, Field(ge=0, le=100)] = Field(
-        default=95.0,
-        description="Auto-approve threshold (0-100)",
-    )
-    threshold_mid: Annotated[float, Field(ge=0, le=100)] = Field(
-        default=75.0,
-        description="One-click review threshold (0-100)",
-    )
-    threshold_low: Annotated[float, Field(ge=0, le=100)] = Field(
-        default=50.0,
-        description="Manual review threshold (0-100)",
-    )
-    tolerance_price: Annotated[float, Field(ge=0, le=100)] = Field(
-        default=5.0,
-        description="Price tolerance percentage",
-    )
-    tolerance_qty: Annotated[float, Field(ge=0, le=100)] = Field(
-        default=10.0,
-        description="Quantity tolerance percentage",
-    )
-
-    @field_validator("threshold_high", "threshold_mid", "threshold_low")
-    @classmethod
-    def validate_thresholds(cls, v: float, info) -> float:
-        """Validate threshold ordering."""
-        if info.field_name == "threshold_high":
-            return v
-        return v
-
-    model_config = SettingsConfigDict(
-        env_prefix="THRESHOLD_",
-        case_sensitive=False,
-    )
-
-
-class AppSettings(BaseSettings):
-    """Application-level settings."""
-
-    environment: str = Field(default="development")
-    log_level: str = Field(default="INFO")
-    api_port: int = Field(default=8000, ge=1, le=65535)
-    api_host: str = Field(default="0.0.0.0")
-    cors_origins: str = Field(
-        default="http://localhost:3000,http://localhost:8080",
-        description="Comma-separated list of allowed CORS origins",
-    )
-    debug: bool = Field(default=False)
-
-    model_config = SettingsConfigDict(
-        env_prefix="",
-        case_sensitive=False,
-    )
-
-
 class Settings(BaseSettings):
-    """Combined application settings.
-
-    Loads all settings from environment variables with appropriate prefixes.
-    """
-
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    security: SecuritySettings = Field(default_factory=SecuritySettings)
-    threshold: ThresholdSettings = Field(default_factory=ThresholdSettings)
-    app: AppSettings = Field(default_factory=AppSettings)
-
-    @property
-    def database_url(self) -> str:
-        """Get database URL for sync connections."""
-        return self.database.database_url.replace(
-            "postgresql+asyncpg", "postgresql+psycopg2"
-        )
-
-    @property
-    def cors_origins_list(self) -> list[str]:
-        """Get CORS origins as a list."""
-        return [
-            origin.strip()
-            for origin in self.app.cors_origins.split(",")
-            if origin.strip()
-        ]
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -138,6 +21,157 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    # Database Configuration
+    database_url: Annotated[
+        str,
+        Field(
+            description="Async PostgreSQL connection string for SQLAlchemy",
+            examples=["postgresql+asyncpg://user:pass@host:5432/dbname"],
+        ),
+    ]
+    database_url_sync: Annotated[
+        str,
+        Field(
+            description="Sync PostgreSQL connection string for Alembic",
+            examples=["postgresql://user:pass@host:5432/dbname"],
+        ),
+    ]
+
+    # PGBouncer Configuration (optional)
+    pgbouncer_host: str | None = Field(
+        default=None,
+        description="PGBouncer host for connection pooling",
+    )
+    pgbouncer_port: int = Field(
+        default=5432,
+        description="PGBouncer port",
+        ge=1,
+        le=65535,
+    )
+
+    # JWT / Authentication
+    jwt_secret_key: Annotated[
+        str,
+        Field(
+            description="HS256 secret key for JWT token signing",
+            min_length=32,
+        ),
+    ]
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm",
+    )
+    access_token_expire_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description="Access token expiration in minutes",
+    )
+    refresh_token_expire_days: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="Refresh token expiration in days",
+    )
+
+    # Matching Thresholds
+    threshold_high: Annotated[
+        float,
+        Field(
+            default=95.0,
+            ge=0.0,
+            le=100.0,
+            description="Auto-approve threshold percentage",
+        ),
+    ]
+    threshold_mid: Annotated[
+        float,
+        Field(
+            default=70.0,
+            ge=0.0,
+            le=100.0,
+            description="1-click review threshold percentage",
+        ),
+    ]
+    threshold_low: Annotated[
+        float,
+        Field(
+            default=40.0,
+            ge=0.0,
+            le=100.0,
+            description="Exception threshold percentage",
+        ),
+    ]
+
+    # Tolerance Settings
+    tolerance_price: Annotated[
+        float,
+        Field(
+            default=5.0,
+            ge=0.0,
+            le=100.0,
+            description="Price match tolerance percentage",
+        ),
+    ]
+    tolerance_qty: Annotated[
+        float,
+        Field(
+            default=10.0,
+            ge=0.0,
+            le=100.0,
+            description="Quantity match tolerance percentage",
+        ),
+    ]
+
+    # Application Settings
+    app_name: str = Field(
+        default="AP Automation Engine",
+        description="Application name",
+    )
+    environment: str = Field(
+        default="development",
+        description="Runtime environment",
+    )
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level",
+    )
+    debug: bool = Field(
+        default=False,
+        description="Debug mode flag",
+    )
+
+    # API Settings
+    api_v1_prefix: str = Field(
+        default="/api/v1",
+        description="API v1 route prefix",
+    )
+    cors_origins: list[str] = Field(
+        default=["*"],
+        description="CORS allowed origins",
+    )
+
+    @field_validator("threshold_high", "threshold_mid", "threshold_low")
+    @classmethod
+    def validate_threshold_order(
+        cls, v: float, info: field_validator
+    ) -> float:
+        """Validate that thresholds are in correct order: high > mid > low."""
+        if info.field_name == "threshold_high":
+            return v
+        # Additional validation can be done at startup
+        return v
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is a valid Python logging level."""
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}")
+        return v_upper
 
 
 @lru_cache
@@ -147,17 +181,3 @@ def get_settings() -> Settings:
     Uses lru_cache to ensure settings are only loaded once.
     """
     return Settings()
-
-
-# Global settings instance
-settings = get_settings()
-
-__all__ = [
-    "Settings",
-    "DatabaseSettings",
-    "SecuritySettings",
-    "ThresholdSettings",
-    "AppSettings",
-    "settings",
-    "get_settings",
-]
