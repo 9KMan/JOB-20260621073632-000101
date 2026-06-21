@@ -34,43 +34,258 @@ This phase covers four documentation deliverables:
 # FinaRo — AP Automation Core Engine
 
 ## Business Problem Solved
-[2–3 paragraphs: what AP teams struggle with, how FinaRo solves it]
 
-## Architecture Overview
-[ASCII diagram showing FastAPI → Matching Engine → Learning Loop → PostgreSQL]
+### The Challenge
+[1–2 paragraphs: what AP teams / accountants struggle with — manual 3-way matching, spreadsheet errors, supplier disputes, month-end bottlenecks]
 
-## Features
-- [x] 3-way matching (Invoice × PO × Delivery Note)
-- [x] Score-based routing (Post / Review / Exception)
-- [x] Learning loop via cross_ref persistence
-- [x] REST API (FastAPI)
-- [x] PostgreSQL + Alembic migrations
-- [x] Docker + docker-compose
-- [x] Unit + integration test suite
+### Our Solution
+FinaRo automates the 3-way matching process:
+
+1. **Automated 3-Way Matching** — Invoices matched against POs and delivery notes with configurable tolerances
+2. **Score-Based Routing** — Automatically routes to POST / REVIEW / EXCEPTION based on confidence thresholds
+3. **Learning Loop** — Human confirmations improve future match accuracy for repeat suppliers and SKUs
+4. **Real-Time Balances** — Per-PO and per-supplier balance ledgers always reflect current state
+5. **REST API** — FastAPI-powered API for ERP integration, built-in Alembic migrations
+
+### Value Delivered
+- **For AP Teams:** 80%+ straight-through processing rate, reduced manual review, faster month-end close
+- **For Finance:** Full audit trail, deterministic routing, compliance-friendly decision records
+- **For Suppliers:** Fewer disputes, faster approval cycles, transparent status tracking
+
+---
 
 ## Tech Stack
-[table: Python 3.11 · FastAPI · SQLAlchemy · Alembic · PostgreSQL · Docker · pytest]
 
-## Quick Start
-1. Clone
-2. cp .env.example .env
-3. docker-compose up -d
-4. alembic upgrade head
-5. pytest tests/ -v
+- **Runtime:** Python 3.11+ with type hints
+- **API Framework:** FastAPI with Pydantic v2 validation
+- **Database:** PostgreSQL 15+ with SQLAlchemy 2.0 (async) + Alembic migrations
+- **Authentication:** JWT (HS256) with bcrypt password hashing
+- **Container:** Docker + docker-compose for local dev and production
+- **Testing:** pytest with async test support, factory_boy fixtures
+
+---
 
 ## Project Structure
-[file tree]
 
-## Environment Variables
-[table of all env vars with defaults and descriptions]
+```
+.
+├── app/
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI app bootstrap + lifespan
+│   ├── config.py               # Settings from environment (Pydantic BaseSettings)
+│   ├── database.py             # Async SQLAlchemy engine + session factory
+│   ├── models/                 # SQLAlchemy ORM models
+│   │   ├── __init__.py
+│   │   ├── invoice.py
+│   │   ├── purchase_order.py
+│   │   ├── delivery_note.py
+│   │   ├── cross_ref.py
+│   │   ├── balance.py
+│   │   └── user.py
+│   ├── schemas/                # Pydantic request/response schemas
+│   │   ├── __init__.py
+│   │   ├── invoice.py
+│   │   ├── matching.py
+│   │   └── learning.py
+│   ├── api/                    # Route modules
+│   │   ├── __init__.py
+│   │   ├── invoices.py
+│   │   ├── purchase_orders.py
+│   │   ├── delivery_notes.py
+│   │   ├── matching.py
+│   │   ├── learning.py
+│   │   ├── balances.py
+│   │   ├── users.py
+│   │   └── health.py
+│   ├── services/               # Business logic
+│   │   ├── __init__.py
+│   │   ├── matching.py         # 3-way matching engine
+│   │   ├── learning.py         # Learning loop service
+│   │   └── balance.py          # Balance ledger service
+│   └── core/                   # Security, JWT, auth
+│       ├── __init__.py
+│       ├── security.py
+│       └── dependencies.py
+├── migrations/                 # Alembic migration scripts
+│   └── versions/
+├── tests/                      # pytest test suite
+│   ├── conftest.py             # Shared fixtures
+│   ├── unit/
+│   └── integration/
+├── docs/                       # Additional documentation
+│   ├── api.md
+│   ├── architecture.md
+│   └── deployment.md
+├── docker-compose.yml          # Local dev (API + PostgreSQL)
+├── Dockerfile                  # Production container
+├── .env.example                # Environment variable template
+├── alembic.ini                 # Alembic configuration
+└── pyproject.toml              # Project metadata + dependencies
+```
 
-## API Overview
-[brief paragraph linking to API.md]
+---
 
-## Deployment
-[link to DEPLOYMENT.md]
+## Features
 
-## License
+### 3-Way Matching Engine
+- Deterministic 4-level cascade: cross_ref → SKU/EAN → Description fuzzy → Price × Qty
+- Weighted scoring: line-level 70%, amount 20%, date 10%
+- All tolerances externalized to `config.yaml` — no hardcoded thresholds
+
+### Score-Based Routing
+- `score ≥ THRESHOLD_POST` (default 0.95) → auto-posted
+- `score ≥ THRESHOLD_REVIEW` (default 0.80) → queued for human review
+- `score < THRESHOLD_REVIEW` → exception workflow
+
+### Learning Loop
+- Human confirmation in `cross_ref` table promotes future matches: Level 4 → Level 1
+- Supplier + SKU granularity — learns per-supplier pricing quirks
+- Soft-delete preserves audit trail
+
+### Balance Ledger
+- Per-PO and per-supplier running balances
+- Invoice never posts without confirmed receipt (hard rule)
+- Delivery notes and invoices have independent arrival cycles
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- PostgreSQL 15+ (or Docker)
+- `uv` package manager
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/9KMan/JOB-20260621073632-000101.git
+cd JOB-20260621073632-000101
+uv sync
+```
+
+### 2. Environment Variables
+
+Create `.env` from the example:
+
+```bash
+cp .env.example .env
+```
+
+Required variables:
+
+| Variable | Description | Example |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://finaro:***@localhost:5432/finaro` |
+| `SECRET_KEY` | JWT signing key (min 32 chars) | `openssl rand -hex 32` |
+| `THRESHOLD_POST` | Auto-post confidence threshold | `0.95` |
+| `THRESHOLD_REVIEW` | Human-review threshold | `0.80` |
+| `ENVIRONMENT` | `development` or `production` | `development` |
+
+### 3. Start Database
+
+```bash
+docker compose up -d db
+```
+
+Wait for PostgreSQL to be ready (~5s), then run migrations:
+
+```bash
+alembic upgrade head
+```
+
+### 4. Start API
+
+```bash
+uv run uvicorn app.main:app --reload --port 8080
+```
+
+API server runs at `http://localhost:8080`. Health check:
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+### 5. Run Tests
+
+```bash
+uv run pytest tests/ -v
+```
+
+---
+
+## API Endpoints
+
+### Auth
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register new user |
+| `POST` | `/api/auth/login` | Login, returns access + refresh tokens |
+| `POST` | `/api/auth/refresh` | Refresh access token |
+| `POST` | `/api/auth/logout` | Invalidate refresh token |
+
+### Invoices
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/invoices` | Submit a new invoice |
+| `GET` | `/api/v1/invoices` | List invoices (filterable by status, supplier) |
+| `GET` | `/api/v1/invoices/{id}` | Get invoice details |
+| `GET` | `/api/v1/invoices/{id}/status` | Get invoice status + match result |
+| `POST` | `/api/v1/invoices/{id}/match` | Trigger manual re-match |
+| `POST` | `/api/v1/invoices/{id}/submit` | Submit invoice to matching engine |
+
+### Purchase Orders
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/purchase-orders` | Create a PO |
+| `GET` | `/api/v1/purchase-orders` | List POs |
+| `GET` | `/api/v1/purchase-orders/{id}` | Get PO details |
+| `GET` | `/api/v1/purchase-orders/{id}/lines` | Get PO line items |
+
+### Delivery Notes
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/delivery-notes` | Record a delivery note |
+| `GET` | `/api/v1/delivery-notes` | List delivery notes |
+| `GET` | `/api/v1/delivery-notes/{id}` | Get delivery note details |
+
+### Matching Engine
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/match` | Run 3-way match for an invoice |
+| `GET` | `/api/v1/match/{invoice_id}/result` | Get match result for an invoice |
+
+### Learning Loop
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/learning/confirm` | Confirm a match pair (promotes future matches) |
+| `GET` | `/api/v1/learning/promoted/{supplier_id}/{invoice_sku}` | Get promoted matches for supplier+SKU |
+| `GET` | `/api/v1/learning/supplier/{supplier_id}` | Get all learning records for a supplier |
+| `DELETE` | `/api/v1/learning/{cross_ref_id}` | Remove a learning record (soft-delete) |
+
+### Balances
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/balances/po/{po_id}` | Get balance ledger for a PO |
+| `GET` | `/api/v1/balances/supplier/{supplier_id}` | Get balance ledger for a supplier |
+
+### Health
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | Liveness probe |
+
+---
+
+## Database Schema
+
+**Core tables:** `users`, `invoices`, `invoice_lines`, `purchase_orders`, `po_lines`, `delivery_notes`, `delivery_note_lines`, `cross_ref`, `balances`, `settings`
+
+SQLAlchemy manages migrations in `migrations/versions/`. All financial amounts use `NUMERIC(12, 4)` for precision.
+
+---
+
+## Built by: KMan | AI-Augmented Engineering Factory
 ```
 
 ### 3.2 Quality Checklist
