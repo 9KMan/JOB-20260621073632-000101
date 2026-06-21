@@ -1,104 +1,82 @@
 # models/enums.py
-"""Enumeration types for AP Automation Engine.
+"""Enumerations for domain models.
 
-Contains all status enums and decision types used across the system.
+Defines status enums, decision types, and other constant values
+used throughout the application.
 """
 
-import enum
+import uuid
+from enum import Enum
 
 
-class DocumentStatus(str, enum.Enum):
-    """Status for documents (PO, Invoice, Delivery Note)."""
+class InvoiceStatus(str, Enum):
+    """Invoice processing status."""
 
     DRAFT = "draft"
     PENDING = "pending"
-    APPROVED = "approved"
+    PROCESSING = "processing"
     MATCHED = "matched"
-    EXCEPTION = "exception"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    CLOSED = "closed"
-
-
-class InvoiceStatus(str, enum.Enum):
-    """Status for invoices."""
-
-    DRAFT = "draft"
-    PENDING_REVIEW = "pending_review"
-    PENDING_MATCH = "pending_match"
-    MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    EXCEPTION = "exception"
     APPROVED = "approved"
+    EXCEPTION = "exception"
     REJECTED = "rejected"
     PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, enum.Enum):
-    """Status for purchase orders."""
+class PurchaseOrderStatus(str, Enum):
+    """Purchase order status."""
 
     DRAFT = "draft"
     SUBMITTED = "submitted"
     APPROVED = "approved"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
-    COMPLETED = "completed"
 
 
-class DeliveryNoteStatus(str, enum.Enum):
-    """Status for delivery notes."""
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status."""
 
     DRAFT = "draft"
-    ISSUED = "issued"
-    RECEIVED = "received"
-    PARTIAL_RECEIPT = "partial_receipt"
-    COMPLETED = "completed"
+    SUBMITTED = "submitted"
+    CONFIRMED = "confirmed"
+    PARTIALLY_INVOICED = "partially_invoiced"
+    INVOICED = "invoiced"
     CANCELLED = "cancelled"
 
 
-class MatchingStatus(str, enum.Enum):
-    """Status for matching operations."""
+class MatchStatus(str, Enum):
+    """Matching engine result status."""
 
     PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    NO_MATCH = "no_match"
+    PARTIAL_MATCH = "partial_match"
+    FULL_MATCH = "full_match"
+    EXCEPTION = "exception"
 
 
-class DecisionType(str, enum.Enum):
-    """Decision types for matching results."""
+class MatchConfidence(str, Enum):
+    """Match confidence level classification."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NONE = "none"
+
+
+class DecisionType(str, Enum):
+    """Matching decision outcome types."""
 
     AUTO_APPROVED = "auto_approved"
-    ONE_CLICK_APPROVE = "one_click_approve"
-    ONE_CLICK_REJECT = "one_click_reject"
+    ONE_CLICK_REVIEW = "one_click_review"
     MANUAL_REVIEW = "manual_review"
-    ESCALATED = "escalated"
-    DISMISSED = "dismissed"
+    EXCEPTION = "exception"
+    REJECTED = "rejected"
 
 
-class ExceptionReason(str, enum.Enum):
-    """Reasons for matching exceptions."""
-
-    PRICE_MISMATCH = "price_mismatch"
-    QUANTITY_MISMATCH = "quantity_mismatch"
-    MISSING_PURCHASE_ORDER = "missing_purchase_order"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    PARTIAL_MATCH = "partial_match"
-    DATE_MISMATCH = "date_mismatch"
-    VENDOR_MISMATCH = "vendor_mismatch"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    TAX_MISMATCH = "tax_mismatch"
-    DUPLICATE_LINE = "duplicate_line"
-    NO_MATCHING_PO_LINES = "no_matching_po_lines"
-    AMOUNT_EXCEEDS_PO = "amount_exceeds_po"
-    ORPHANED_DELIVERY_NOTE = "orphaned_delivery_note"
-    CONFLICTING_MATCHES = "conflicting_matches"
-
-
-class ExceptionStatus(str, enum.Enum):
-    """Status for exceptions."""
+class ExceptionStatus(str, Enum):
+    """Exception handling status."""
 
     OPEN = "open"
     UNDER_REVIEW = "under_review"
@@ -107,20 +85,43 @@ class ExceptionStatus(str, enum.Enum):
     ESCALATED = "escalated"
 
 
-class MatchConfidence(str, enum.Enum):
-    """Match confidence levels."""
+class ExceptionReason(str, Enum):
+    """Reasons for matching exceptions."""
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY_NOTE = "missing_delivery_note"
+    SUPPLIER_MISMATCH = "supplier_mismatch"
+    DATE_MISMATCH = "date_mismatch"
+    TAX_MISMATCH = "tax_mismatch"
+    MULTIPLE_POTENTIAL_MATCHES = "multiple_potential_matches"
+    NO_DELIVERY_EVIDENCE = "no_delivery_evidence"
+    PARTIAL_DELIVERY = "partial_delivery"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    OTHER = "other"
 
 
-class BalanceType(str, enum.Enum):
-    """Balance types for ledger entries."""
+class CrossRefType(str, Enum):
+    """Cross-reference learning record types."""
 
-    INVOICE = "invoice"
-    CREDIT_NOTE = "credit_note"
-    PAYMENT = "payment"
-    ADJUSTMENT = "adjustment"
-    DELIVERY_NOTE = "delivery_note"
+    PO_INVOICE_MATCH = "po_invoice_match"
+    LINE_MATCH = "line_match"
+    SUPPLIER_MATCH = "supplier_match"
+    ITEM_MATCH = "item_match"
+    PROMOTED_MATCH = "promoted_match"
+
+
+__all__ = [
+    "InvoiceStatus",
+    "PurchaseOrderStatus",
+    "DeliveryNoteStatus",
+    "MatchStatus",
+    "MatchConfidence",
+    "DecisionType",
+    "ExceptionStatus",
+    "ExceptionReason",
+    "CrossRefType",
+]

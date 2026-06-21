@@ -1,49 +1,49 @@
 # core/security.py
-"""Security utilities for JWT authentication and password hashing.
+"""Security utilities for authentication and authorization.
 
-Provides JWT token creation/validation and password hashing using bcrypt.
+Provides JWT token handling and password hashing using bcrypt.
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from core.config import settings
 
+
 # Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# HTTP Bearer token security scheme
-bearer_scheme = HTTPBearer(auto_error=True)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password.
-
-    Args:
-        plain_password: Plain text password to verify
-        hashed_password: Bcrypt hashed password
-
-    Returns:
-        bool: True if password matches, False otherwise
-    """
-    return pwd_context.verify(plain_password, hashed_password)
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=settings.security.bcrypt_rounds,
+)
 
 
-def get_password_hash(password: str) -> str:
+def hash_password(password: str) -> str:
     """Hash a password using bcrypt.
 
     Args:
-        password: Plain text password to hash
+        password: Plain text password to hash.
 
     Returns:
-        str: Bcrypt hashed password
+        str: Bcrypt hashed password.
     """
     return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against a hash.
+
+    Args:
+        plain_password: Plain text password to verify.
+        hashed_password: Bcrypt hashed password.
+
+    Returns:
+        bool: True if password matches, False otherwise.
+    """
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_access_token(
@@ -53,11 +53,11 @@ def create_access_token(
     """Create a JWT access token.
 
     Args:
-        data: Payload data to encode in the token
-        expires_delta: Optional custom expiration time
+        data: Payload data to encode in the token.
+        expires_delta: Optional expiration time delta.
 
     Returns:
-        str: Encoded JWT token
+        str: Encoded JWT token.
     """
     to_encode = data.copy()
 
@@ -65,85 +65,121 @@ def create_access_token(
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.jwt_access_token_expire_minutes
+            minutes=settings.security.jwt_access_token_expire_minutes
         )
 
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
 
     encoded_jwt = jwt.encode(
         to_encode,
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
+        settings.security.jwt_secret_key,
+        algorithm=settings.security.jwt_algorithm,
     )
 
     return encoded_jwt
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def create_refresh_token(
+    data: dict[str, Any],
+    expires_delta: timedelta | None = None,
+) -> str:
+    """Create a JWT refresh token.
+
+    Args:
+        data: Payload data to encode in the token.
+        expires_delta: Optional expiration time delta.
+
+    Returns:
+        str: Encoded JWT refresh token.
+    """
+    to_encode = data.copy()
+
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(
+            days=settings.security.jwt_refresh_token_expire_days
+        )
+
+    to_encode.update({
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+        "type": "refresh",
+    })
+
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.security.jwt_secret_key,
+        algorithm=settings.security.jwt_algorithm,
+    )
+
+    return encoded_jwt
+
+
+def decode_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT token.
 
     Args:
-        token: JWT token string to decode
+        token: JWT token string to decode.
 
     Returns:
-        dict: Decoded token payload
-
-    Raises:
-        HTTPException: If token is invalid or expired
+        dict | None: Decoded token payload or None if invalid.
     """
     try:
         payload = jwt.decode(
             token,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
+            settings.security.jwt_secret_key,
+            algorithms=[settings.security.jwt_algorithm],
         )
         return payload
-    except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    except JWTError:
+        return None
 
 
-async def get_current_user_id(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
-) -> str:
-    """Dependency to get current user ID from JWT token.
+def verify_token(token: str) -> bool:
+    """Verify if a JWT token is valid.
 
     Args:
-        credentials: HTTP Bearer credentials
+        token: JWT token string to verify.
 
     Returns:
-        str: User ID from token payload
-
-    Raises:
-        HTTPException: If token is invalid or user_id not in payload
+        bool: True if token is valid, False otherwise.
     """
-    payload = decode_token(credentials.credentials)
-
-    user_id: str | None = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing user identifier",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user_id
+    return decode_token(token) is not None
 
 
-class TokenData:
-    """Token payload data structure."""
+class TokenPayload:
+    """JWT token payload model."""
 
     def __init__(
         self,
         sub: str,
         exp: datetime,
         iat: datetime,
-        token_type: str = "access",
-    ):
+        type: str = "access",
+    ) -> None:
         self.sub = sub
         self.exp = exp
         self.iat = iat
-        self.token_type = token_type
+        self.type = type
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TokenPayload":
+        """Create TokenPayload from decoded token dictionary."""
+        return cls(
+            sub=data.get("sub", ""),
+            exp=datetime.fromtimestamp(data.get("exp", 0), tz=timezone.utc),
+            iat=datetime.fromtimestamp(data.get("iat", 0), tz=timezone.utc),
+            type=data.get("type", "access"),
+        )
+
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "create_access_token",
+    "create_refresh_token",
+    "decode_token",
+    "verify_token",
+    "TokenPayload",
+]

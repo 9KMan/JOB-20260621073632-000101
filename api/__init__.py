@@ -1,7 +1,21 @@
 # api/__init__.py
-"""API package for AP Automation Engine.
+"""API module for FastAPI routes and schemas.
 
-Contains FastAPI routers and Pydantic schemas.
+This module contains the API layer including:
+- Shared Pydantic schemas for request/response validation
+- Versioned API routes
 """
 
-__all__ = ["schemas"]
+from api.schemas import (
+    BaseResponse,
+    PaginatedResponse,
+    ErrorResponse,
+    HealthCheckResponse,
+)
+
+__all__ = [
+    "BaseResponse",
+    "PaginatedResponse",
+    "ErrorResponse",
+    "HealthCheckResponse",
+]

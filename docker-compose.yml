@@ -2,13 +2,49 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap-postgres
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-automation-api
+    ports:
+      - "${API_PORT:-8000}:8000"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appass123}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@db:5432/${POSTGRES_DB:-apautomation}
+      - PGBOUNCER_HOST=${PGBOUNCER_HOST:-pgbouncer}
+      - PGBOUNCER_PORT=${PGBOUNCER_PORT:-5432}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-95}
+      - THRESHOLD_MID=${THRESHOLD_MID:-75}
+      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
+      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
+      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    depends_on:
+      db:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - ap-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: ap-automation-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-apuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appass}
+      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -18,76 +54,57 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - ap-network
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
-    container_name: ap-pgbouncer
+    container_name: ap-automation-pgbouncer
     environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass123}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: "transaction"
-      MAX_CLIENT_CONN: "100"
-      DEFAULT_POOL_SIZE: "20"
-      RESERVE_POOL_SIZE: "5"
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${POSTGRES_USER:-apuser}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-appass}
+      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=10
+      - RESERVE_POOL_TIMEOUT=5
     ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ap-network
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ap-api
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass123}@pgbouncer:5432/${POSTGRES_DB:-apautomation}?prepared_statement_cache_size=500"
-      DATABASE_POOL_SIZE: 20
-      DATABASE_MAX_OVERFLOW: 10
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-changeme-in-production-super-secret-key-32chars}
-      JWT_ALGORITHM: HS256
-      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
-      THRESHOLD_HIGH: 0.95
-      THRESHOLD_MID: 0.75
-      THRESHOLD_LOW: 0.50
-      TOLERANCE_PRICE: 0.02
-      TOLERANCE_QTY: 0.05
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    ports:
-      - "${API_PORT:-8000}:8000"
-    depends_on:
-      pgbouncer:
-        condition: service_started
-      postgres:
-        condition: service_healthy
+      - "${PGBOUNCER_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "echo \"stats\" | nc localhost 6432 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - ap-network
 
-  alembic-migrate:
+  migrate:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-alembic-migrate
+    container_name: ap-automation-migrate
     command: ["alembic", "upgrade", "head"]
     environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass123}@postgres:5432/${POSTGRES_DB:-apautomation}"
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@db:5432/${POSTGRES_DB:-apautomation}
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
     networks:
       - ap-network
 
 volumes:
   postgres_data:
+    driver: local
 
 networks:
   ap-network:

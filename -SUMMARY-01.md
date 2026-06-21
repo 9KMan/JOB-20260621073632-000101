@@ -1,25 +1,21 @@
-// -SUMMARY-01.md
-# Technical Stack Summary — AP Automation Core Engine
-
-## Overview
-AP Automation Core Engine for Finaro — Python/FastAPI backend with PostgreSQL, implementing a 3-layer matching engine for accounts payable invoice processing.
+# Phase 2 Summary — Technical Stack
+## AP Automation Core Engine — FinaRo
 
 ---
 
-## Technology Stack
+## 1. Technology Choices
 
 | Component | Choice | Version |
 |-----------|--------|---------|
 | Language | Python | 3.11+ |
 | Web Framework | FastAPI | 0.110+ |
 | Database | PostgreSQL | 15+ |
-| ORM | SQLAlchemy | 2.0 (async) |
+| ORM | SQLAlchemy (async) | 2.0+ |
 | Migrations | Alembic | 1.13+ |
-| Connection Pooling | PGBouncer | - |
-| Validation | Pydantic | 2.6+ |
-| Testing | pytest | 8.1+ |
+| Authentication | JWT (HS256) + bcrypt | - |
+| Testing | pytest + pytest-asyncio | 8.1+ |
 
 ---
 
-## Architecture Layers
+## 2. Project Structure
 
