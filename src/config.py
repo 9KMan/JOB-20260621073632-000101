@@ -1,51 +1,54 @@
 // src/config.py
 """Application configuration management."""
-from typing import List
+import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
-    )
+    """Application settings with environment variable support."""
 
     # Application
-    app_name: str = "FinaRo AP Automation"
-    app_version: str = "1.0.0"
-    debug: bool = False
-    secret_key: str = "default-secret-key-change-in-production"
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = Field(default=False)
 
     # Database
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/finaro"
-    database_pool_size: int = 5
-    database_max_overflow: int = 10
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://finaro:finaro_secure_pass@localhost:5432/finaro_ap"
+    )
+    DATABASE_POOL_SIZE: int = Field(default=20)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30)
+    DATABASE_POOL_RECYCLE: int = Field(default=3600)
 
     # JWT Authentication
-    jwt_secret_key: str = "jwt-secret-key-change-in-production"
-    jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    JWT_SECRET_KEY: str = Field(default="change-me-in-production")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+
+    # Matching Engine Weights (must sum to 1.0)
+    MATCH_WEIGHT_LINE_LEVEL: float = 0.70
+    MATCH_WEIGHT_AMOUNT: float = 0.20
+    MATCH_WEIGHT_DATE: float = 0.10
+
+    # Match Thresholds
+    MATCH_THRESHOLD_AUTO_APPROVE: float = 0.95
+    MATCH_THRESHOLD_PENDING_REVIEW: float = 0.70
+    MATCH_THRESHOLD_REJECTED: float = 0.0
 
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["*"]
 
-    # API Prefixes
-    api_v1_prefix: str = "/api/v1"
+    # API
+    API_V1_PREFIX: str = "/api/v1"
 
-    # Matching Configuration
-    matching_line_weight: float = 0.70
-    matching_amount_weight: float = 0.20
-    matching_date_weight: float = 0.10
-    
-    # Auto-approval threshold (0.0 to 1.0)
-    auto_approve_threshold: float = 0.95
-    # Human review threshold
-    human_review_threshold: float = 0.70
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
 @lru_cache()

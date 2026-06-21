@@ -1,10 +1,12 @@
 // src/models/supplier.py
-"""Supplier model for vendor management."""
+"""Supplier model."""
+import uuid
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import List, TYPE_CHECKING
 
-from src.models.base import BaseModel
+from src.models.base import BaseModel, SoftDeleteMixin
 
 if TYPE_CHECKING:
     from src.models.purchase_order import PurchaseOrder
@@ -12,67 +14,56 @@ if TYPE_CHECKING:
     from src.models.delivery_note import DeliveryNote
 
 
-class Supplier(BaseModel):
+class Supplier(BaseModel, SoftDeleteMixin):
     """Supplier/vendor model."""
-    
+
     __tablename__ = "suppliers"
-    
+
     code: Mapped[str] = mapped_column(
         String(50),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
-    
     name: Mapped[str] = mapped_column(
         String(255),
-        nullable=False
+        nullable=False,
     )
-    
-    contact_email: Mapped[str] = mapped_column(
+    email: Mapped[str] = mapped_column(
         String(255),
-        nullable=True
+        nullable=True,
     )
-    
-    contact_phone: Mapped[str] = mapped_column(
+    phone: Mapped[str] = mapped_column(
         String(50),
-        nullable=True
+        nullable=True,
     )
-    
     address: Mapped[str] = mapped_column(
         String(500),
-        nullable=True
+        nullable=True,
     )
-    
     tax_id: Mapped[str] = mapped_column(
         String(50),
-        nullable=True
+        nullable=True,
     )
-    
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        nullable=False
+        nullable=False,
     )
-    
+
     # Relationships
-    purchase_orders: Mapped[List["PurchaseOrder"]] = relationship(
+    purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(
         "PurchaseOrder",
         back_populates="supplier",
-        lazy="dynamic"
     )
-    
-    invoices: Mapped[List["Invoice"]] = relationship(
+    invoices: Mapped[list["Invoice"]] = relationship(
         "Invoice",
         back_populates="supplier",
-        lazy="dynamic"
     )
-    
-    delivery_notes: Mapped[List["DeliveryNote"]] = relationship(
+    delivery_notes: Mapped[list["DeliveryNote"]] = relationship(
         "DeliveryNote",
         back_populates="supplier",
-        lazy="dynamic"
     )
-    
+
     def __repr__(self) -> str:
-        return f"<Supplier(id={self.id}, code={self.code}, name={self.name})>"
+        return f"<Supplier {self.code}: {self.name}>"

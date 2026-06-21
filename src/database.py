@@ -1,35 +1,49 @@
 // src/database.py
-"""Database configuration and session management."""
+"""Database connection and session management."""
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy.pool import NullPool
-from typing import Generator
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from src.config import get_settings
 
-
 settings = get_settings()
 
-# Create engine with connection pooling
-if settings.debug:
-    # Use NullPool for development to avoid connection issues
-    engine = create_engine(
-        settings.database_url,
-        poolclass=NullPool,
-        echo=settings.debug,
-    )
-else:
-    # Use built-in pool for production
-    engine = create_engine(
-        settings.database_url,
-        pool_size=settings.database_pool_size,
-        max_overflow=settings.database_max_overflow,
-        pool_pre_ping=True,
-        echo=False,
-    )
+# Async engine for FastAPI
+async_engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+    pool_recycle=settings.DATABASE_POOL_RECYCLE,
+    echo=settings.DEBUG,
+)
 
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Async session factory
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+# Sync engine for migrations and scripts
+sync_database_url = settings.DATABASE_URL.replace(
+    "postgresql+asyncpg://", "postgresql://"
+)
+sync_engine = create_engine(
+    sync_database_url,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+    pool_recycle=settings.DATABASE_POOL_RECYCLE,
+    echo=settings.DEBUG,
+)
+
+SyncSessionLocal = sessionmaker(bind=sync_engine, autocommit=False, autoflush=False)
 
 
 class Base(DeclarativeBase):
@@ -37,20 +51,39 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db() -> Generator:
-    """
-    Dependency that provides a database session.
-    
-    Yields:
-        Session: SQLAlchemy session instance
-        
-    Usage:
-        @app.get("/items")
-        def get_items(db: Session = Depends(get_db)):
-            ...
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency to get database session."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+@asynccontextmanager
+async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """Context manager for database session."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def init_db() -> None:
+    """Initialize database tables."""
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    """Close database connections."""
+    await async_engine.dispose()

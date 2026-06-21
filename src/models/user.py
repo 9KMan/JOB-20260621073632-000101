@@ -1,64 +1,64 @@
 // src/models/user.py
-"""User model for authentication and authorization."""
-from sqlalchemy import String, Boolean
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import List, TYPE_CHECKING
+"""User model for authentication."""
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from src.models.base import BaseModel
-from src.models.enums import UserRole, user_role_enum
+from sqlalchemy import Boolean, String, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import BaseModel, SoftDeleteMixin
+from src.models.enums import UserRole
 
 if TYPE_CHECKING:
-    from src.models.matching import Match
+    from src.models.match import Match
 
 
-class User(BaseModel):
+class User(BaseModel, SoftDeleteMixin):
     """User model for authentication and authorization."""
-    
+
     __tablename__ = "users"
-    
+
     email: Mapped[str] = mapped_column(
         String(255),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
-    
     hashed_password: Mapped[str] = mapped_column(
         String(255),
-        nullable=False
+        nullable=False,
     )
-    
     full_name: Mapped[str] = mapped_column(
         String(255),
-        nullable=False
+        nullable=False,
     )
-    
     role: Mapped[UserRole] = mapped_column(
-        user_role_enum,
+        UserRole.enum,
         default=UserRole.VIEWER,
-        nullable=False
+        nullable=False,
     )
-    
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        nullable=False
+        nullable=False,
     )
-    
+    last_login: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # Relationships
-    confirmed_matches: Mapped[List["Match"]] = relationship(
+    confirmed_matches: Mapped[list["Match"]] = relationship(
         "Match",
         back_populates="confirmed_by_user",
         foreign_keys="Match.confirmed_by_id",
-        lazy="dynamic"
     )
-    
-    rejected_matches: Mapped[List["Match"]] = relationship(
+    rejected_matches: Mapped[list["Match"]] = relationship(
         "Match",
         back_populates="rejected_by_user",
         foreign_keys="Match.rejected_by_id",
-        lazy="dynamic"
     )
-    
+
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, email={self.email}, role={self.role})>"
+        return f"<User {self.email}>"

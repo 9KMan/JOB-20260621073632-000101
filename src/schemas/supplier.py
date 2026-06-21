@@ -1,47 +1,45 @@
 // src/schemas/supplier.py
 """Supplier schemas."""
+from datetime import datetime
 from typing import Optional
-from pydantic import Field, EmailStr
+from uuid import UUID
 
-from src.schemas.base import BaseSchema, TimestampUUIDSchema
+from pydantic import Field, ConfigDict, EmailStr
+
+from src.schemas.common import BaseSchema
 
 
 class SupplierBase(BaseSchema):
     """Base supplier schema."""
-    
     code: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=255)
-    contact_email: Optional[EmailStr] = None
-    contact_phone: Optional[str] = Field(None, max_length=50)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
     tax_id: Optional[str] = Field(None, max_length=50)
-
-
-class SupplierCreate(SupplierBase):
-    """Schema for creating a supplier."""
-    
     is_active: bool = True
 
 
+class SupplierCreate(SupplierBase):
+    """Supplier creation schema."""
+    pass
+
+
 class SupplierUpdate(BaseSchema):
-    """Schema for updating a supplier."""
-    
+    """Supplier update schema."""
     code: Optional[str] = Field(None, min_length=1, max_length=50)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    contact_email: Optional[EmailStr] = None
-    contact_phone: Optional[str] = Field(None, max_length=50)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
     tax_id: Optional[str] = Field(None, max_length=50)
     is_active: Optional[bool] = None
 
 
-class SupplierResponse(TimestampUUIDSchema):
-    """Schema for supplier response."""
-    
-    code: str
-    name: str
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    address: Optional[str] = None
-    tax_id: Optional[str] = None
-    is_active: bool
+class SupplierResponse(SupplierBase):
+    """Supplier response schema."""
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
