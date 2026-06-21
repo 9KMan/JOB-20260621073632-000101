@@ -1,79 +1,63 @@
 // src/app/main.py
-"""
-FinaRo — AP Automation Core Engine
-Main FastAPI Application Entry Point
-"""
+"""FastAPI application entry point."""
 
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api.v1.router import api_router
-from app.config import settings
-from app.database import engine, Base
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from app.config import get_settings
+from app.database import Base, engine
+from app.api.routes import auth, purchase_orders, invoices, delivery_notes, matches
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup/shutdown events."""
-    logger.info("Starting FinaRo AP Automation Core Engine...")
-    
-    # Create database tables on startup
+    """Application lifespan events."""
+    # Startup: Create database tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    logger.info("Database initialized successfully")
-    
     yield
-    
-    logger.info("Shutting down FinaRo AP Automation Core Engine...")
+    # Shutdown: Dispose connection pool
     await engine.dispose()
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    settings = get_settings()
+
     app = FastAPI(
-        title="FinaRo AP Automation Core Engine",
-        description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
-        version="1.0.0",
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        title=settings.app_name,
+        version=settings.app_version,
+        description="AP Automation Core Engine - 3-Way Matching System for Invoice, Delivery Note, and Purchase Order",
         lifespan=lifespan,
+        debug=settings.debug,
     )
 
-    # Configure CORS
+    # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # Add trusted host middleware
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=settings.ALLOWED_HOSTS,
+    # Include routers
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+    app.include_router(
+        purchase_orders.router, prefix="/api/v1/purchase-orders", tags=["Purchase Orders"]
     )
-
-    # Include API router
-    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(invoices.router, prefix="/api/v1/invoices", tags=["Invoices"])
+    app.include_router(
+        delivery_notes.router, prefix="/api/v1/delivery-notes", tags=["Delivery Notes"]
+    )
+    app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matching"])
 
     @app.get("/health")
     async def health_check():
-        """Health check endpoint for monitoring."""
-        return {"status": "healthy", "service": "finaro-ap-engine"}
+        """Health check endpoint."""
+        return {"status": "healthy", "service": settings.app_name}
 
     return app
 
