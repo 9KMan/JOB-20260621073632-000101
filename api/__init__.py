@@ -1,9 +1,14 @@
-// api/__init__.py
-"""API package for AP Automation Engine.
+# api/__init__.py
+"""
+API package initialization.
 
-Exposes the FastAPI application and API routers.
+Exposes the API router and shared schemas.
 """
 
-from api.v1.router import api_router
+from api.schemas import BaseResponse, ErrorResponse, PaginatedResponse
 
-__all__ = ["api_router"]
+__all__ = [
+    "BaseResponse",
+    "ErrorResponse",
+    "PaginatedResponse",
+]

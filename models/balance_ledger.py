@@ -1,146 +1,159 @@
-// models/balance_ledger.py
-"""BalanceLedger SQLAlchemy model.
+# models/balance_ledger.py
+"""
+BalanceLedger SQLAlchemy model.
 
-The balance ledger tracks the running balances for PO lines,
-recording what's been delivered, invoiced, and what's remaining.
+Tracks running balances for PO lines to prevent over-invoicing.
 """
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from uuid import UUID
+from typing import Optional
 
-from sqlalchemy import (
-    DateTime,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base
+from models.base import Base, TimestampMixin, UUIDMixin
 
 
-class BalanceLedger(Base):
-    """Balance ledger entry model.
-
-    Tracks running balances for PO lines including:
-    - Total ordered
-    - Total delivered
-    - Total invoiced
-    - Remaining to deliver
-    - Remaining to invoice
+class BalanceLedger(Base, UUIDMixin, TimestampMixin):
+    """
+    Balance Ledger model for tracking PO line balances.
+    
+    Maintains a running balance for each PO line to track:
+    - Ordered quantity/amount
+    - Invoiced quantity/amount
+    - Paid quantity/amount
+    - Remaining balance
+    
+    This prevents over-invoicing and provides audit trail.
     """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
-        UniqueConstraint(
-            "po_line_id",
-            name="uq_balance_ledger_po_line",
-        ),
-        Index("ix_balance_ledger_po_id", "po_id"),
-        Index("ix_balance_ledger_created_at", "created_at"),
+        Index("ix_balance_ledger_po_line_id", "po_line_id"),
+        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        Index("ix_balance_ledger_entry_type", "entry_type"),
+        {"schema": None},
     )
 
-    # References to PO
-    po_id: Mapped[UUID] = mapped_column(
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    po_line_id: Mapped[UUID] = mapped_column(
+    # ─────────────────────────────────────────────────────────────────────────
+    # Foreign Keys
+    # ─────────────────────────────────────────────────────────────────────────
+    po_line_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
+        doc="PO line this balance entry belongs to",
     )
-
-    # Quantity balances
-    ordered_qty: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    delivered_qty: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    invoiced_qty: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    approved_invoiced_qty: Mapped[Decimal] = mapped_column(
-        Numeric(12, 3),
-        nullable=False,
-        default=Decimal("0"),
-    )
-
-    # Amount balances
-    ordered_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    delivered_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    invoiced_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0"),
-    )
-    approved_invoiced_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0"),
-    )
-
-    # Last transaction tracking
-    last_delivery_id: Mapped[UUID | None] = mapped_column(nullable=True)
-    last_delivery_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
+    invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice_lines.id", ondelete="SET NULL"),
         nullable=True,
+        doc="Invoice line that caused this entry",
     )
-    last_invoice_id: Mapped[UUID | None] = mapped_column(nullable=True)
-    last_invoice_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
+    dn_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
         nullable=True,
+        doc="DN line related to this entry",
     )
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Entry Type
+    # ─────────────────────────────────────────────────────────────────────────
+    entry_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        doc="Type of ledger entry (order, invoice, payment, credit, adjustment)",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Quantities
+    # ─────────────────────────────────────────────────────────────────────────
+    quantity_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+        doc="Quantity before this entry",
+    )
+    quantity_change: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+        doc="Quantity change (positive or negative)",
+    )
+    quantity_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0"),
+        doc="Quantity after this entry",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Amounts
+    # ─────────────────────────────────────────────────────────────────────────
+    amount_before: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Amount before this entry",
+    )
+    amount_change: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Amount change (positive or negative)",
+    )
+    amount_after: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Amount after this entry",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Metadata
+    # ─────────────────────────────────────────────────────────────────────────
+    reference_number: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Reference number (invoice number, payment ID, etc.)",
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        doc="Description of this entry",
+    )
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="User who created this entry",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder",
-        back_populates="balance_ledger_entries",
-    )
+    # ─────────────────────────────────────────────────────────────────────────
     po_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
-        foreign_keys=[po_line_id],
+        back_populates="balance_entries",
     )
 
-    @property
-    def remaining_to_deliver(self) -> Decimal:
-        """Calculate remaining quantity to deliver."""
-        return self.ordered_qty - self.delivered_qty
-
-    @property
-    def remaining_to_invoice(self) -> Decimal:
-        """Calculate remaining quantity to invoice."""
-        return self.delivered_qty - self.invoiced_qty
-
-    @property
-    def pending_approval_qty(self) -> Decimal:
-        """Calculate quantity pending approval."""
-        return self.invoiced_qty - self.approved_invoiced_qty
-
     def __repr__(self) -> str:
-        return (
-            f"<BalanceLedger PO:{self.po_id} Line:{self.po_line_id} "
-            f"Ordered:{self.ordered_qty} Delivered:{self.delivered_qty} "
-            f"Invoiced:{self.invoiced_qty}>"
-        )
+        return f"<BalanceLedger {self.entry_type}: {self.quantity_change}>"
 
 
 # Import at bottom to avoid circular imports
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from models.purchase_order import PurchaseOrderLine
+from models.invoice import InvoiceLine
+from models.delivery_note import DeliveryNoteLine
+
+# Add relationship back to PurchaseOrderLine
+PurchaseOrderLine.balance_entries = relationship(
+    "BalanceLedger",
+    back_populates="po_line",
+    cascade="all, delete-orphan",
+    lazy="selectin",
+)

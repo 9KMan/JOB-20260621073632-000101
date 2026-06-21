@@ -1,70 +1,101 @@
-// models/base.py
-"""SQLAlchemy declarative base.
+# models/base.py
+"""
+SQLAlchemy declarative base and mixins.
 
-All database models inherit from this Base class.
-Provides common columns and table configurations.
+Provides the base class for all models and common mixins.
 """
 
+import uuid
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from typing import Any
 
-from sqlalchemy import DateTime, Index, text
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models.
+    """SQLAlchemy declarative base for all models."""
 
-    Provides:
-    - UUID primary key
-    - created_at timestamp
-    - updated_at timestamp
-    - Soft delete support
+    pass
+
+
+class TimestampMixin:
+    """
+    Mixin that adds created_at and updated_at timestamps.
+    
+    All tables should include these columns for audit purposes.
     """
 
-    __abstract__ = True
-
-    id: Mapped[UUID] = mapped_column(
-        primary_key=True,
-        default=uuid4,
-        server_default=text("gen_random_uuid()"),
-        sort_order=0,
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        server_default=text("NOW()"),
-        sort_order=1,
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the record was created",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        server_default=text("NOW()"),
-        sort_order=2,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the record was last updated",
     )
+
+
+class UUIDMixin:
+    """
+    Mixin that adds a UUID primary key.
+    
+    Uses UUIDs instead of auto-increment integers for better distribution
+    and security.
+    """
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        doc="Unique identifier (UUID)",
+    )
+
+
+class SoftDeleteMixin:
+    """
+    Mixin that adds soft delete functionality.
+    
+    Records are not physically deleted but marked with deleted_at timestamp.
+    """
+
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         default=None,
-        sort_order=3,
+        doc="Timestamp when the record was soft deleted",
     )
-
-    def soft_delete(self) -> None:
-        """Mark record as deleted (soft delete pattern)."""
-        self.deleted_at = datetime.now(timezone.utc)
 
     @property
     def is_deleted(self) -> bool:
-        """Check if record is soft-deleted."""
+        """Check if the record is soft deleted."""
         return self.deleted_at is not None
 
+    def soft_delete(self) -> None:
+        """Mark the record as deleted."""
+        self.deleted_at = datetime.now(timezone.utc)
 
-def created_at_default() -> datetime:
-    """Factory for created_at default timestamp."""
-    return datetime.now(timezone.utc)
+    def restore(self) -> None:
+        """Restore a soft deleted record."""
+        self.deleted_at = None
 
 
-def updated_at_default() -> datetime:
-    """Factory for updated_at default timestamp."""
-    return datetime.now(timezone.utc)
+class TenantMixin:
+    """
+    Mixin that adds tenant_id for multi-tenancy support.
+    
+    Currently out of scope but provided for future extension.
+    """
+
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        default=None,
+        doc="Tenant identifier for multi-tenancy",
+    )

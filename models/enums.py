@@ -1,24 +1,22 @@
-// models/enums.py
-"""SQLAlchemy and Pydantic enums for the AP Automation Engine.
+# models/enums.py
+"""
+SQLAlchemy and Pydantic enum definitions.
 
-These enums define the valid states and types throughout the system.
+Centralizes all status and type enums used throughout the application.
 """
 
 import enum
-from typing import Annotated
-
-from pydantic import GetCoreSchemaHandler
-from pydantic_core import CoreSchema, core_schema
+from typing import Literal
 
 
 class InvoiceStatus(str, enum.Enum):
-    """Status of an invoice in the system."""
+    """Status values for invoices."""
 
     DRAFT = "draft"
-    PENDING_MATCHING = "pending_matching"
+    PENDING = "pending"
+    MATCHING = "matching"
     MATCHED = "matched"
-    AUTO_APPROVED = "auto_approved"
-    UNDER_REVIEW = "under_review"
+    PARTIALLY_MATCHED = "partially_matched"
     EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -27,102 +25,110 @@ class InvoiceStatus(str, enum.Enum):
 
 
 class PurchaseOrderStatus(str, enum.Enum):
-    """Status of a purchase order."""
+    """Status values for purchase orders."""
 
     DRAFT = "draft"
-    ACTIVE = "active"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
 class DeliveryNoteStatus(str, enum.Enum):
-    """Status of a delivery note."""
+    """Status values for delivery notes."""
 
     DRAFT = "draft"
+    ISSUED = "issued"
     RECEIVED = "received"
-    INVOICED = "invoiced"
+    PARTIALLY_RECEIVED = "partially_received"
     CANCELLED = "cancelled"
 
 
-class ExceptionStatus(str, enum.Enum):
-    """Status of a matching exception."""
+class MatchDecision(str, enum.Enum):
+    """
+    Matching decision outcomes.
+    
+    Determines what action should be taken for a match.
+    """
 
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
+    AUTO_APPROVE = "auto_approve"
+    """High confidence match - auto-approve payment"""
+
+    REVIEW = "review"
+    """Medium confidence match - requires 1-click review"""
+
+    EXCEPTION = "exception"
+    """Low confidence match - requires exception handling"""
+
+    NO_MATCH = "no_match"
+    """No matching records found"""
 
 
-class ExceptionReason(str, enum.Enum):
-    """Reason codes for matching exceptions."""
+class MatchConfidence(str, enum.Enum):
+    """Confidence level for match scores."""
+
+    HIGH = "high"
+    """Score >= threshold_high (0.95 default)"""
+
+    MEDIUM = "medium"
+    """Score >= threshold_mid (0.75 default)"""
+
+    LOW = "low"
+    """Score >= threshold_low (0.50 default)"""
+
+    NONE = "none"
+    """Score < threshold_low"""
+
+
+class ExceptionType(str, enum.Enum):
+    """Types of matching exceptions."""
 
     PRICE_VARIANCE = "price_variance"
+    """Invoice price differs from PO price beyond tolerance"""
+
     QUANTITY_VARIANCE = "quantity_variance"
+    """Invoice quantity differs from PO quantity beyond tolerance"""
+
+    NO_PO_FOUND = "no_po_found"
+    """No matching purchase order found"""
+
     DUPLICATE_INVOICE = "duplicate_invoice"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY = "missing_delivery"
-    PARTIAL_DELIVERY = "partial_delivery"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    DATE_VARIANCE = "date_variance"
-    MULTIPLE_MATCHES = "multiple_matches"
-    NO_MATCH = "no_match"
-    OTHER = "other"
+    """Potential duplicate invoice detected"""
 
-
-class MatchDecision(str, enum.Enum):
-    """Matching engine decision outcomes."""
-
-    AUTO_APPROVED = "auto_approved"
-    REVIEW = "review"
-    EXCEPTION = "exception"
-
-
-class DecisionType(str, enum.Enum):
-    """Type of matching decision."""
-
-    FULL_MATCH = "full_match"
     PARTIAL_MATCH = "partial_match"
-    EXCEPTION = "exception"
-    MANUAL = "manual"
+    """Only some invoice lines matched"""
+
+    PO_CLOSED = "po_closed"
+    """Purchase order is closed/cancelled"""
+
+    EXPIRED_DELIVERY = "expired_delivery"
+    """Delivery note is expired or outside valid window"""
 
 
-class LineMatchStatus(str, enum.Enum):
-    """Status of a line-level match."""
+class ExceptionStatus(str, enum.Enum):
+    """Status of exceptions in the exception queue."""
+
+    OPEN = "open"
+    """Exception is open and awaiting resolution"""
+
+    IN_REVIEW = "in_review"
+    """Exception is being reviewed"""
+
+    RESOLVED = "resolved"
+    """Exception has been resolved by user"""
+
+    DISMISSED = "dismissed"
+    """Exception has been dismissed by user"""
+
+    ESCALATED = "escalated"
+    """Exception has been escalated"""
+
+
+class PaymentStatus(str, enum.Enum):
+    """Payment processing status."""
 
     PENDING = "pending"
-    MATCHED = "matched"
-    OVER_MATCHED = "over_matched"
-    UNDER_MATCHED = "under_matched"
-    UNMATCHED = "unmatched"
-
-
-class MatchConfirmation(str, enum.Enum):
-    """Confirmation status for learning loop."""
-
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-
-
-class PydanticEnumMixin:
-    """Mixin to provide Pydantic schema support for enums."""
-
-    @classmethod
-    def get_pydantic_schema(cls, handler: GetCoreSchemaHandler) -> CoreSchema:
-        """Return Pydantic-compatible schema for the enum."""
-        return core_schema.nullable_schema(
-            inner_schema=core_schema.enum_schema(
-                list(cls),
-                serialization=core_schema.to_string_enum_serialization(cls),
-            )
-        )
-
-
-# Annotated types for better IDE support
-InvoiceStatusType = Annotated[InvoiceStatus, PydanticEnumMixin]
-PurchaseOrderStatusType = Annotated[PurchaseOrderStatus, PydanticEnumMixin]
-DeliveryNoteStatusType = Annotated[DeliveryNoteStatus, PydanticEnumMixin]
-ExceptionStatusType = Annotated[ExceptionStatus, PydanticEnumMixin]
-MatchDecisionType = Annotated[MatchDecision, PydanticEnumMixin]
-DecisionTypeType = Annotated[DecisionType, PydanticEnumMixin]
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REFUNDED = "refunded"

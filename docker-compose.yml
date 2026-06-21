@@ -1,27 +1,73 @@
-// docker-compose.yml
+# docker-compose.yml
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap_automation_postgres
+    environment:
+      POSTGRES_DB: ap_automation
+      POSTGRES_USER: ap_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ap_secure_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ap_user -d ap_automation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap_network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap_automation_pgbouncer
+    environment:
+      DATABASE_URL: "postgres://ap_user:${POSTGRES_PASSWORD:-ap_secure_password}@postgres:5432/ap_automation"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "20"
+      MIN_POOL_SIZE: "5"
+      RESERVE_POOL_SIZE: "5"
+      RESERVE_POOL_TIMEOUT: "3"
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U ap_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ap_network
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap-automation-api
-    ports:
-      - "${API_PORT:-8000}:8000"
+    container_name: ap_automation_api
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=HS256
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-95}
-      - THRESHOLD_MID=${THRESHOLD_MID:-75}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-50}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-5}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-10}
+      DATABASE_URL: "postgresql+asyncpg://ap_user:${POSTGRES_PASSWORD:-ap_secure_password}@pgbouncer:5432/ap_automation"
+      DATABASE_POOL_URL: "postgresql+asyncpg://ap_user:${POSTGRES_PASSWORD:-ap_secure_password}@pgbouncer:5432/ap_automation"
+      DATABASE_SYNC_URL: "postgresql://ap_user:${POSTGRES_PASSWORD:-ap_secure_password}@postgres:5432/ap_automation"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me_in_production_32chars}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      THRESHOLD_HIGH: 0.95
+      THRESHOLD_MID: 0.75
+      THRESHOLD_LOW: 0.50
+      TOLERANCE_PRICE: 0.02
+      TOLERANCE_QTY: 0.05
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
-      pgBouncer:
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -29,54 +75,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    restart: unless-stopped
-
-  db:
-    image: postgres:15-alpine
-    container_name: ap-automation-db
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  pgBouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap-automation-pgbouncer
-    environment:
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${POSTGRES_DB}
-      - DATABASE_USER=${POSTGRES_USER}
-      - DATABASE_PASSWORD=${POSTGRES_PASSWORD}
-      - POOL_MODE=transaction
-      - MAX_CLIENT_CONN=100
-      - DEFAULT_POOL_SIZE=20
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo 'stats' | nc localhost 5432 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+    networks:
+      - ap_network
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  default:
-    name: ap-automation-network
+  ap_network:
+    driver: bridge

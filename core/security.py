@@ -1,115 +1,92 @@
-// core/security.py
-"""JWT and password hashing utilities.
+# core/security.py
+"""
+JWT and password hashing utilities.
 
-Provides secure authentication helpers using bcrypt for password
-hashing and HS256 JWT tokens for authentication.
+Provides secure authentication and authorization helpers.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, ValidationError
 
 from core.config import settings
 
-# Password hashing context
+# Password hashing context using bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# JWT Bearer scheme
-bearer_scheme = HTTPBearer(auto_error=False)
-
-
-class TokenData(BaseModel):
-    """Decoded JWT token data."""
-
-    sub: str | None = None
-    exp: datetime | None = None
-    iat: datetime | None = None
-
-
-class TokenPayload(BaseModel):
-    """JWT token payload for encoding."""
-
-    sub: str
-    exp: datetime | None = None
-    iat: datetime | None = None
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash.
-
-    Args:
-        plain_password: Plain text password.
-        hashed_password: Bcrypt hashed password.
-
-    Returns:
-        True if password matches, False otherwise.
-    """
-    return pwd_context.verify(plain_password, hashed_password)
 
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt.
-
+    """
+    Hash a plain text password using bcrypt.
+    
     Args:
-        password: Plain text password to hash.
-
+        password: Plain text password to hash
+        
     Returns:
-        Bcrypt hashed password string.
+        Hashed password string
     """
     return pwd_context.hash(password)
 
 
-def create_access_token(
-    subject: str,
-    expires_delta: timedelta | None = None,
-    additional_claims: dict | None = None,
-) -> str:
-    """Create a JWT access token.
-
-    Args:
-        subject: Token subject (usually user ID).
-        expires_delta: Optional custom expiration time.
-        additional_claims: Optional additional JWT claims.
-
-    Returns:
-        Encoded JWT token string.
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    now = datetime.now(timezone.utc)
+    Verify a plain text password against a hashed password.
+    
+    Args:
+        plain_password: Plain text password to verify
+        hashed_password: Hashed password to compare against
+        
+    Returns:
+        True if passwords match, False otherwise
+    """
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(
+    data: Dict[str, Any],
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """
+    Create a JWT access token.
+    
+    Args:
+        data: Payload data to encode in the token
+        expires_delta: Optional custom expiration time
+        
+    Returns:
+        Encoded JWT token string
+    """
+    to_encode = data.copy()
     
     if expires_delta:
-        expire = now + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = now + timedelta(minutes=settings.jwt_access_token_expire_minutes)
-
-    payload = {
-        "sub": subject,
-        "exp": expire,
-        "iat": now,
-    }
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.jwt_access_token_expire_minutes
+        )
     
-    if additional_claims:
-        payload.update(additional_claims)
-
-    return jwt.encode(
-        payload,
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    
+    encoded_jwt = jwt.encode(
+        to_encode,
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )
+    
+    return encoded_jwt
 
 
-def decode_token(token: str) -> TokenData | None:
-    """Decode and validate a JWT token.
-
+def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Decode and verify a JWT access token.
+    
     Args:
-        token: JWT token string to decode.
-
+        token: JWT token string to decode
+        
     Returns:
-        TokenData if valid, None if invalid.
+        Decoded payload if valid, None if invalid
     """
     try:
         payload = jwt.decode(
@@ -117,64 +94,41 @@ def decode_token(token: str) -> TokenData | None:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        return TokenData(**payload)
+        return payload
     except JWTError:
         return None
 
 
-async def get_current_user_id(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> str | None:
-    """Extract user ID from JWT token.
-
-    Args:
-        credentials: HTTP Bearer credentials from request.
-
-    Returns:
-        User ID from token subject, or None if invalid.
+def create_refresh_token(data: Dict[str, Any]) -> str:
     """
-    if credentials is None:
-        return None
-
-    token_data = decode_token(credentials.credentials)
+    Create a long-lived refresh token.
     
-    if token_data is None or token_data.sub is None:
-        return None
-
-    # Check expiration
-    if token_data.exp and token_data.exp < datetime.now(timezone.utc):
-        return None
-
-    return token_data.sub
-
-
-async def require_auth(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-) -> str:
-    """Require valid authentication - raises 401 if invalid.
-
     Args:
-        credentials: Required HTTP Bearer credentials.
-
+        data: Payload data to encode in the token
+        
     Returns:
-        User ID from validated token.
-
-    Raises:
-        HTTPException: 401 if token is invalid or missing.
+        Encoded JWT refresh token string
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=7)  # 7 days refresh
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "refresh"})
+    
+    return jwt.encode(
+        to_encode,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
     )
 
-    token_data = decode_token(credentials.credentials)
+
+def verify_token_type(token_data: Dict[str, Any], expected_type: str = "access") -> bool:
+    """
+    Verify the type of a JWT token.
     
-    if token_data is None or token_data.sub is None:
-        raise credentials_exception
-
-    # Check expiration
-    if token_data.exp and token_data.exp < datetime.now(timezone.utc):
-        raise credentials_exception
-
-    return token_data.sub
+    Args:
+        token_data: Decoded token payload
+        expected_type: Expected token type ("access" or "refresh")
+        
+    Returns:
+        True if token type matches expected type
+    """
+    return token_data.get("type", "access") == expected_type
