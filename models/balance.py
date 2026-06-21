@@ -1,186 +1,104 @@
 // models/balance.py
-"""Balance tracking model for partial matches and reconciliation."""
-
+// models/balance.py
+"""Balance Ledger models for tracking partial matches and balances."""
 import uuid
-from datetime import datetime
 from decimal import Decimal
-from enum import Enum
-from typing import TYPE_CHECKING, List, Optional
-
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Integer,
-    Numeric,
-    String,
-    Text,
-    func,
-)
+from sqlalchemy import Column, String, Text, Numeric, ForeignKey, Date, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import relationship
+import enum
 
 from models.base import BaseModel
 
-if TYPE_CHECKING:
-    from models.delivery_note import DeliveryNote
-    from models.invoice import Invoice
-    from models.purchase_order import PurchaseOrder
+
+class BalanceType(enum.Enum):
+    """Balance type for tracking."""
+    INVOICE_BALANCE = "invoice_balance"
+    PO_BALANCE = "po_balance"
+    DELIVERY_BALANCE = "delivery_balance"
 
 
-class BalanceType(str, Enum):
-    """Balance type enumeration."""
-    INVOICE_VS_PO = "invoice_vs_po"
-    INVOICE_VS_DN = "invoice_vs_dn"
-    DN_VS_PO = "dn_vs_po"
-    PARTIAL_MATCH = "partial_match"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    OVER_INVOICE = "over_invoice"
-    UNDER_INVOICE = "under_invoice"
-
-
-class Balance(BaseModel):
-    """
-    Balance tracking model for managing partial matches and outstanding balances.
+class BalanceLedger(BaseModel):
+    """Balance ledger for tracking remaining balances across documents."""
     
-    This is the core of Layer 3 - tracking partial shipments, split invoices,
-    and multi-delivery scenarios.
-    """
+    __tablename__ = "balance_ledger"
     
-    __tablename__ = "balances"
+    # Document reference
+    document_type = Column(String(50), nullable=False)  # PO, INVOICE, DN
+    document_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    document_number = Column(String(100), nullable=False)
     
-    # Document references
-    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=True,
-    )
+    # Line reference (optional)
+    line_id = Column(UUID(as_uuid=True), nullable=True)
+    line_number = Column(Integer, nullable=True)
     
-    delivery_note_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    
-    purchase_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    
-    # Balance type
-    balance_type: Mapped[str] = mapped_column(
-        String(30),
-        nullable=False,
-    )
-    
-    # Amount tracking
-    original_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
-    
-    matched_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    
-    remaining_amount: Mapped[Decimal] = mapped_column(
-        nullable=False,
-    )
-    
-    # Quantity tracking
-    original_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=True,
-    )
-    
-    matched_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        default=Decimal("0.000"),
-        nullable=True,
-    )
-    
-    remaining_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=True,
-    )
+    # Balance tracking
+    balance_type = Column(String(50), nullable=False)  # From BalanceType
+    original_quantity = Column(Numeric(15, 3), nullable=False)
+    original_amount = Column(Numeric(15, 2), nullable=False)
+    matched_quantity = Column(Numeric(15, 3), default=Decimal("0.000"), nullable=False)
+    matched_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    remaining_quantity = Column(Numeric(15, 3), nullable=False)
+    remaining_amount = Column(Numeric(15, 2), nullable=False)
     
     # Status
-    is_resolved: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
+    is_settled = Column(String(20), default="OPEN", nullable=False)
+    settlement_date = Column(Date, nullable=True)
     
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    
-    resolved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    
-    resolution_notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    
-    # Reference to the match that created this balance
-    match_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    
-    # Additional info
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    
-    metadata: Mapped[Optional[dict]] = mapped_column(
-        Text,
-        nullable=True,
-    )  # JSON data
+    # Metadata
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False)
+    notes = Column(Text, nullable=True)
     
     # Relationships
-    invoice: Mapped[Optional["Invoice"]] = relationship(
-        "Invoice",
-        back_populates="balances",
-    )
+    supplier = relationship("Supplier")
+    entries = relationship("BalanceEntry", back_populates="balance_ledger", cascade="all, delete-orphan")
     
-    delivery_note: Mapped[Optional["DeliveryNote"]] = relationship(
-        "DeliveryNote",
-        back_populates="balances",
-    )
-    
-    purchase_order: Mapped[Optional["PurchaseOrder"]] = relationship(
-        "PurchaseOrder",
-        back_populates="balances",
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('document_type', 'document_id', 'line_id', name='uq_balance_document_line'),
     )
     
     def __repr__(self) -> str:
-        return f"<Balance {self.balance_type} - {self.remaining_amount}>"
+        return f"<BalanceLedger(id={self.id}, document_type={self.document_type}, document_number={self.document_number})>"
     
-    @property
-    def match_percentage(self) -> Decimal:
-        """Calculate match percentage."""
-        if self.original_amount == 0:
-            return Decimal("0")
-        return (self.matched_amount / self.original_amount) * 100
+    def update_balance(self, quantity: Decimal, amount: Decimal):
+        """Update matched and remaining balances."""
+        self.matched_quantity += quantity
+        self.matched_amount += amount
+        self.remaining_quantity = self.original_quantity - self.matched_quantity
+        self.remaining_amount = self.original_amount - self.matched_amount
+        
+        if self.remaining_quantity <= 0 and self.remaining_amount <= 0:
+            self.is_settled = "SETTLED"
+        else:
+            self.is_settled = "PARTIAL"
+
+
+class BalanceEntry(BaseModel):
+    """Individual balance entry for audit trail."""
     
-    @property
-    def is_overdue(self) -> bool:
-        """Check if balance is overdue (implementation depends on business rules)."""
-        return not self.is_resolved
+    __tablename__ = "balance_entries"
     
-    def resolve(self, resolved_by: uuid.UUID, notes: str = "") -> None:
-        """Mark balance as resolved."""
-        self.is_resolved = True
-        self.resolved_at = datetime.utcnow()
-        self.resolved_by = resolved_by
-        self.resolution_notes = notes
+    balance_ledger_id = Column(UUID(as_uuid=True), ForeignKey("balance_ledger.id", ondelete="CASCADE"), nullable=False)
+    matching_record_id = Column(UUID(as_uuid=True), ForeignKey("matching_records.id", ondelete="SET NULL"), nullable=True)
+    
+    # Entry details
+    entry_type = Column(String(50), nullable=False)  # INITIAL, MATCH, REVERSE
+    quantity_change = Column(Numeric(15, 3), default=Decimal("0.000"), nullable=False)
+    amount_change = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    
+    # Running balance
+    quantity_before = Column(Numeric(15, 3), nullable=False)
+    quantity_after = Column(Numeric(15, 3), nullable=False)
+    amount_before = Column(Numeric(15, 2), nullable=False)
+    amount_after = Column(Numeric(15, 2), nullable=False)
+    
+    # Reference
+    reference_number = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
+    
+    # Relationships
+    balance_ledger = relationship("BalanceLedger", back_populates="entries")
+    
+    def __repr__(self) -> str:
+        return f"<BalanceEntry(id={self.id}, balance_ledger_id={self.balance_ledger_id}, entry_type={self.entry_type})>"

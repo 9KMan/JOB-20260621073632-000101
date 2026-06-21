@@ -1,137 +1,66 @@
-# models/delivery_note.py
-"""DeliveryNote and DeliveryNoteLine SQLAlchemy models."""
-
+// models/delivery_note.py
+"""Delivery Note models."""
 import uuid
 from decimal import Decimal
-from datetime import datetime, timezone
-
-from sqlalchemy import (
-    DateTime,
-    Enum,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    Text,
-)
+from datetime import date
+from sqlalchemy import Column, String, Text, Numeric, ForeignKey, Date, Integer
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import relationship
+import enum
 
-from models.base import Base, Timestamps, UUIDPrimaryKey
-from models.enums import DeliveryNoteStatus
+from models.base import BaseModel
 
 
-class DeliveryNote(Base, UUIDPrimaryKey, Timestamps):
-    """Top-level delivery note entity (from ERP or OCR)."""
+class DeliveryNoteStatus(enum.Enum):
+    """Delivery Note status enum."""
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    COMPLETE = "complete"
+    PARTIAL = "partial"
 
+
+class DeliveryNote(BaseModel):
+    """Delivery Note / Goods Receipt model."""
+    
     __tablename__ = "delivery_notes"
-
-    # ── Vendor ─────────────────────────────────────────────────────────────
-    vendor_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    # ── Reference fields ────────────────────────────────────────────────────
-    dn_number: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    dn_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-    receipt_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-    # ── Source ──────────────────────────────────────────────────────────────
-    source: Mapped[str] = mapped_column(
-        String(20),
-        default="erp",
-        nullable=False,
-    )  # 'erp' | 'ocr'
-
-    # ── Status ──────────────────────────────────────────────────────────────
-    status: Mapped[DeliveryNoteStatus] = mapped_column(
-        Enum(DeliveryNoteStatus, name="delivery_note_status"),
-        default=DeliveryNoteStatus.RECEIVED,
-        nullable=False,
-        index=True,
-    )
-
-    # ── ERP ─────────────────────────────────────────────────────────────────
-    erp_dn_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    po_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    # ── Relationships ────────────────────────────────────────────────────────
-    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
-        "DeliveryNoteLine",
-        back_populates="delivery_note",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-    purchase_order: Mapped["PurchaseOrder | None"] = relationship(
-        "PurchaseOrder",
-        foreign_keys=[po_id],
-    )
-
-    __table_args__ = (
-        Index("ix_delivery_notes_vendor_status", "vendor_code", "status"),
-    )
+    
+    dn_number = Column(String(100), unique=True, nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False)
+    po_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True)
+    delivery_date = Column(Date, nullable=False)
+    received_by = Column(String(255), nullable=True)
+    status = Column(String(50), default=DeliveryNoteStatus.SUBMITTED.value, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+    
+    # Relationships
+    supplier = relationship("Supplier", back_populates="delivery_notes")
+    purchase_order = relationship("PurchaseOrder", foreign_keys=[po_id])
+    lines = relationship("DeliveryNoteLine", back_populates="delivery_note", cascade="all, delete-orphan")
+    matched_records = relationship("MatchingRecord", foreign_keys="MatchingRecord.dn_id", back_populates="delivery_note")
+    
+    def __repr__(self) -> str:
+        return f"<DeliveryNote(id={self.id}, dn_number={self.dn_number}, supplier_id={self.supplier_id})>"
 
 
-class DeliveryNoteLine(Base, UUIDPrimaryKey, Timestamps):
-    """Line-level detail for a delivery note."""
-
+class DeliveryNoteLine(BaseModel):
+    """Delivery Note Line Item model."""
+    
     __tablename__ = "delivery_note_lines"
-
-    dn_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    line_number: Mapped[int] = mapped_column(nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # ── Product / SKU ───────────────────────────────────────────────────────
-    product_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
-    # ── Quantities ──────────────────────────────────────────────────────────
-    quantity_delivered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=False,
-    )
-    unit_of_measure: Mapped[str | None] = mapped_column(String(20), nullable=True)
-
-    # ── Matching ────────────────────────────────────────────────────────────
-    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-
-    # ── Relationships ────────────────────────────────────────────────────────
-    delivery_note: Mapped["DeliveryNote"] = relationship(
-        "DeliveryNote",
-        back_populates="lines",
-    )
-
-    __table_args__ = (
-        Index("ix_dn_lines_dn_id_number", "dn_id", "line_number"),
-    )
-
-
-# ── Forward reference resolution ──────────────────────────────────────────────
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine  # noqa: E402, F401
+    
+    delivery_note_id = Column(UUID(as_uuid=True), ForeignKey("delivery_notes.id", ondelete="CASCADE"), nullable=False)
+    po_line_id = Column(UUID(as_uuid=True), ForeignKey("purchase_order_lines.id", ondelete="SET NULL"), nullable=True)
+    line_number = Column(Integer, nullable=False)
+    item_code = Column(String(100), nullable=True)
+    description = Column(Text, nullable=False)
+    quantity_ordered = Column(Numeric(15, 3), nullable=True)  # From PO
+    quantity_delivered = Column(Numeric(15, 3), nullable=False)
+    unit_of_measure = Column(String(20), default="EA", nullable=False)
+    notes = Column(Text, nullable=True)
+    
+    # Relationships
+    delivery_note = relationship("DeliveryNote", back_populates="lines")
+    po_line = relationship("PurchaseOrderLine", foreign_keys=[po_line_id])
+    matched_lines = relationship("MatchingLine", back_populates="dn_line")
+    
+    def __repr__(self) -> str:
+        return f"<DeliveryNoteLine(id={self.id}, dn_id={self.delivery_note_id}, line_number={self.line_number})>"

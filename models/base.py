@@ -1,83 +1,66 @@
-# models/base.py
-"""SQLAlchemy declarative base and mixins."""
-
+// models/base.py
+"""Base model classes with common mixins."""
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Optional
 
-from sqlalchemy import DateTime, Func, Index
+from sqlalchemy import Column, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import declared_attr
+
+from core.database import Base
 
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
-
-    type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
-        datetime: DateTime(timezone=True),
-    }
-
-
-class UUIDPrimaryKey:
-    """
-    Mixin that adds a UUID primary-key column called `id`.
-
-    Uses server-generated UUID v4 by default.
-    """
-
-    id: Mapped[uuid.UUID] = mapped_column(
+class UUIDMixin:
+    """Mixin that adds UUID primary key."""
+    
+    id = Column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        sort_key=lambda: uuid.uuid4(),  # allows ORDER BY id in SQLite compat mode
-    )
-
-
-class Timestamps:
-    """
-    Mixin that adds `created_at` and `updated_at` datetime columns.
-
-    - ``created_at`` is set once on insert.
-    - ``updated_at`` is refreshed on every insert and update via ``onupdate``.
-    """
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
         nullable=False,
-        server_default=Func.now(),
     )
-    updated_at: Mapped[datetime] = mapped_column(
+
+
+class TimestampMixin:
+    """Mixin that adds created_at and updated_at timestamps."""
+    
+    created_at = Column(
         DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
         nullable=False,
-        server_default=Func.now(),
-        onupdate=lambda _: datetime.now(timezone=True),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
 
-class AuditMixin:
-    """
-    Mixin that adds an `audit_json` column for storing mutable audit metadata.
-
-    Use cases: store who triggered a status change, raw ERP payload snippets, etc.
-    """
-
-    audit_json: Mapped[dict[str, Any] | None] = mapped_column(
-        default=None,
-        nullable=True,
-    )
+class SoftDeleteMixin:
+    """Mixin that adds soft delete functionality."""
+    
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    
+    @declared_attr
+    def is_deleted(cls):
+        return Column(DateTime(timezone=True), nullable=True, default=None)
 
 
-# ── Common indexes ─────────────────────────────────────────────────────────────
-
-def _fk_index(table_name: str, column_name: str) -> Index:
-    """Return an Index for a foreign-key column."""
-    return Index(f"ix_{table_name}_{column_name}", column_name)
-
-
-def make_indexes() -> list[Index]:
-    """
-    Return a list of commonly-needed indexes.
-    Add more specific composite indexes per-model as needed.
-    """
-    return []
+class BaseModel(Base, UUIDMixin, TimestampMixin):
+    """Abstract base model with common fields."""
+    
+    __abstract__ = True
+    
+    @classmethod
+    def get_by_id(cls, db, model_id: uuid.UUID):
+        """Get a single record by ID."""
+        return db.query(cls).filter(cls.id == model_id).first()
+    
+    def to_dict(self) -> dict:
+        """Convert model to dictionary."""
+        return {
+            column.name: getattr(self, column.name)
+            for column in self.__table__.columns
+        }

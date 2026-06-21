@@ -1,16 +1,16 @@
-# core/config.py
-"""Application configuration via pydantic-settings."""
-
+// core/config.py
+"""Application configuration management."""
+import os
 from functools import lru_cache
-from typing import Annotated
+from typing import List
 
-from pydantic import Field, PostgresDsn, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -18,78 +18,54 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Database ──────────────────────────────────────────────────────────────
-    database_url: Annotated[
-        PostgresDsn,
-        Field(
-            default="postgresql+asyncpg://apuser:apsecret@localhost:5432/apautomation",
-            description="Async PostgreSQL connection string",
-        ),
-    ]
-    database_pool_size: Annotated[int, Field(default=20, ge=1, le=100)]
-    database_max_overflow: Annotated[int, Field(default=10, ge=0, le=50)]
-    database_pool_timeout: Annotated[int, Field(default=30, ge=5)]
-    database_echo: Annotated[bool, Field(default=False)]
-
-    # ── JWT / Auth ────────────────────────────────────────────────────────────
-    jwt_secret_key: Annotated[str, Field(min_length=32)]
-    jwt_algorithm: Annotated[str, Field(default="HS256")]
-    jwt_expire_minutes: Annotated[int, Field(default=30, ge=1)]
-
-    # ── CORS ──────────────────────────────────────────────────────────────────
-    cors_origins: Annotated[str, Field(default="*")]
-
-    # ── Matching Thresholds ─────────────────────────────────────────────────────
-    threshold_high: Annotated[int, Field(default=95, ge=0, le=100, description="Auto-approve score threshold")]
-    threshold_mid: Annotated[int, Field(default=75, ge=0, le=100, description="1-click review threshold")]
-    threshold_low: Annotated[int, Field(default=50, ge=0, le=100, description="Exception threshold")]
-
-    # ── Match Tolerance ─────────────────────────────────────────────────────────
-    tolerance_price: Annotated[float, Field(default=2.0, ge=0, description="Price match tolerance %")]
-    tolerance_qty: Annotated[float, Field(default=5.0, ge=0, description="Quantity match tolerance %")]
-
-    # ── Logging ────────────────────────────────────────────────────────────────
-    log_level: Annotated[str, Field(default="INFO")]
-
-    # ── Derived helpers ────────────────────────────────────────────────────────
+    # Application
+    app_name: str = Field(default="FinaRo", alias="APP_NAME")
+    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
+    debug: bool = Field(default=False, alias="DEBUG")
+    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
+    
+    # Database
+    database_url: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/finaro",
+        alias="DATABASE_URL"
+    )
+    database_pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=20, alias="DATABASE_MAX_OVERFLOW")
+    
+    # Redis / Celery
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    celery_broker_url: str = Field(default="redis://localhost:6379/0", alias="CELERY_BROKER_URL")
+    celery_result_backend: str = Field(default="redis://localhost:6379/0", alias="CELERY_RESULT_BACKEND")
+    
+    # JWT
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    jwt_expiration_minutes: int = Field(default=1440, alias="JWT_EXPIRATION_MINUTES")
+    
+    # CORS
+    cors_origins: str = Field(default="http://localhost:3000,http://localhost:8000", alias="CORS_ORIGINS")
+    
     @property
-    def database_url_sync(self) -> str:
-        """Synchronous DB URL for Alembic migrations."""
-        return self.database_url.replace("postgresql+asyncpg", "postgresql")
-
-    @property
-    def cors_origins_list(self) -> list[str]:
-        """Parse CORS_ORIGINS comma-separated string into a list."""
-        if self.cors_origins == "*":
-            return ["*"]
+    def cors_origins_list(self) -> List[str]:
+        """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-
-    @model_validator(mode="after")
-    def _validate_thresholds(self) -> "Settings":
-        """Ensure thresholds are ordered: high >= mid >= low."""
-        if not (self.threshold_low <= self.threshold_mid <= self.threshold_high):
-            raise ValueError("threshold_low must be <= threshold_mid <= threshold_high")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_jwt_secret(self) -> "Settings":
-        """Warn if JWT secret looks like a default/placeholder in non-test envs."""
-        weak_secrets = {"change-me", "changeme", "secret", "your-secret", "change-me-in-production"}
-        if self.jwt_secret_key.lower() in weak_secrets:
-            import warnings
-            warnings.warn(
-                "JWT_SECRET_KEY appears weak. Set a strong random value in production.",
-                UserWarning,
-                stacklevel=1,
-            )
-        return self
+    
+    # API
+    api_v1_prefix: str = "/api/v1"
+    
+    # Matching weights
+    matching_weight_line_level: float = 0.70
+    matching_weight_amount: float = 0.20
+    matching_weight_date: float = 0.10
+    
+    # Approval thresholds
+    auto_approve_threshold: float = 0.95
+    human_review_threshold: float = 0.70
 
 
-@lru_cache
+@lru_cache()
 def get_settings() -> Settings:
-    """Return a singleton cached Settings instance."""
+    """Get cached settings instance."""
     return Settings()
 
 
-# Global singleton
 settings = get_settings()

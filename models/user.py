@@ -1,18 +1,18 @@
 // models/user.py
 """User model for authentication."""
-
 import uuid
-from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
-
-from sqlalchemy import Boolean, DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Column, String, Boolean, Enum
+from sqlalchemy.orm import relationship
+import enum
 
 from models.base import BaseModel
 
-if TYPE_CHECKING:
-    from models.audit import AuditLog
+
+class UserRole(enum.Enum):
+    """User roles for access control."""
+    ADMIN = "admin"
+    ACCOUNTANT = "accountant"
+    VIEWER = "viewer"
 
 
 class User(BaseModel):
@@ -20,46 +20,15 @@ class User(BaseModel):
     
     __tablename__ = "users"
     
-    email: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        index=True,
-        nullable=False,
-    )
-    
-    hashed_password: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-    
-    full_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-    
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-    )
-    
-    is_superuser: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-    
-    last_login: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    role = Column(Enum(UserRole), default=UserRole.VIEWER, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     
     # Relationships
-    audit_logs: Mapped[List["AuditLog"]] = relationship(
-        "AuditLog",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
+    matched_records = relationship("MatchingRecord", back_populates="matched_by_user")
+    confirmed_records = relationship("MatchingRecord", foreign_keys="MatchingRecord.confirmed_by_id", back_populates="confirmed_by_user")
     
     def __repr__(self) -> str:
-        return f"<User {self.email}>"
+        return f"<User(id={self.id}, email={self.email}, role={self.role})>"

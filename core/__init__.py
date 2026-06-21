@@ -1,11 +1,16 @@
-# core/__init__.py
-"""Core module — config, database, security, and main app."""
-
+// core/__init__.py
+"""Core module for FinaRo AP Automation Engine."""
 from core.config import settings
-from core.database import get_db, AsyncSessionLocal
+from core.database import Base, engine, SessionLocal, get_db
+from core.security import create_access_token, verify_password, get_password_hash
 
 __all__ = [
     "settings",
+    "Base",
+    "engine",
+    "SessionLocal",
     "get_db",
-    "AsyncSessionLocal",
+    "create_access_token",
+    "verify_password",
+    "get_password_hash",
 ]
