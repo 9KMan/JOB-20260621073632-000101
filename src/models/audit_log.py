@@ -1,94 +1,35 @@
 // src/models/audit_log.py
-"""Audit Log model for tracking system changes."""
+"""Audit Log model for tracking all changes."""
+from sqlalchemy import Column, Integer, String, Text
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Optional
-
-from sqlalchemy import (
-    DateTime,
-    ForeignKey,
-    Index,
-    String,
-    Text,
-)
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from src.models.base import BaseModel
-
-if TYPE_CHECKING:
-    from src.models.user import User
+from src.models.base import Base, BaseModel
 
 
-class AuditAction(str):
-    """Audit action types."""
-
-    CREATE = "create"
-    UPDATE = "update"
-    DELETE = "delete"
-    MATCH = "match"
-    APPROVE = "approve"
-    REJECT = "reject"
-    DISPUTE = "dispute"
-    LOGIN = "login"
-    LOGOUT = "logout"
-
-
-class AuditLog(BaseModel):
-    """Audit Log model for tracking all system changes."""
-
+class AuditLog(Base, BaseModel):
+    """Audit Log for tracking all system changes."""
     __tablename__ = "audit_logs"
 
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    action: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-    entity_type: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-    )
-    entity_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-    )
-    changes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    ip_address: Mapped[Optional[str]] = mapped_column(
-        String(45),
-        nullable=True,
-    )
-    user_agent: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-
-    # Relationships
-    user: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="audit_logs",
-        lazy="selectin",
-    )
-
-    __table_args__ = (
-        Index("ix_al_user_id", "user_id"),
-        Index("ix_al_entity", "entity_type", "entity_id"),
-        Index("ix_al_timestamp", "timestamp"),
-        Index("ix_al_action", "action"),
-    )
+    # Action details
+    action = Column(String(50), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)
+    entity_id = Column(String(36), nullable=True, index=True)
+    
+    # User info
+    user_id = Column(String(36), nullable=True, index=True)
+    username = Column(String(100), nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    
+    # Change details
+    old_values = Column(Text, nullable=True)  # JSON string
+    new_values = Column(Text, nullable=True)  # JSON string
+    changes = Column(Text, nullable=True)  # JSON string of changed fields
+    
+    # Additional context
+    description = Column(Text, nullable=True)
+    request_id = Column(String(36), nullable=True)
+    
+    # Severity
+    severity = Column(String(20), default="INFO", nullable=False)  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
     def __repr__(self) -> str:
-        return f"<AuditLog action={self.action} entity={self.entity_type} id={self.entity_id}>"
-
-
-import uuid
+        return f"<AuditLog {self.action} - {self.entity_type}>"

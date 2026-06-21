@@ -1,78 +1,47 @@
 // src/database.py
-"""Database configuration and session management."""
+"""Database connection and session management."""
+from contextlib import contextmanager
+from typing import Generator
 
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from sqlalchemy.orm import DeclarativeBase
+from src.config import config
 
-from src.app.config import get_settings
-
-settings = get_settings()
-
-# Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,
+# Create engine with connection pooling
+engine = create_engine(
+    config.database.url,
+    pool_size=config.database.pool_size,
+    max_overflow=config.database.max_overflow,
+    echo=config.database.echo,
+    pool_pre_ping=True,
 )
 
-# Create async session factory
-async_session_factory = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
+# Session factory
+SessionLocal = sessionmaker(
     autocommit=False,
+    autoflush=False,
+    bind=engine,
 )
 
-
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class."""
-
-    pass
+# Base class for models
+Base = declarative_base()
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency for getting async database sessions.
-    
-    Yields:
-        AsyncSession: Database session for the request
-    """
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+def get_db() -> Generator[Session, None, None]:
+    """Dependency for getting database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for getting async database sessions.
-    
-    Yields:
-        AsyncSession: Database session
-    """
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+@contextmanager
+def get_db_context() -> Generator[Session, None, None]:
+    """Context manager for database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

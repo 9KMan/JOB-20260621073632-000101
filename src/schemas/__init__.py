@@ -1,7 +1,6 @@
 // src/schemas/__init__.py
-"""Pydantic schemas for API request/response validation."""
-
-from src.schemas.base import BaseSchema, PaginationParams
+"""Pydantic schemas package."""
+from src.schemas.base import BaseSchema, PaginatedResponse, ErrorResponse
 from src.schemas.user import (
     UserCreate,
     UserUpdate,
@@ -9,11 +8,6 @@ from src.schemas.user import (
     UserLogin,
     Token,
     TokenData,
-)
-from src.schemas.supplier import (
-    SupplierCreate,
-    SupplierUpdate,
-    SupplierResponse,
 )
 from src.schemas.purchase_order import (
     PurchaseOrderCreate,
@@ -39,32 +33,30 @@ from src.schemas.delivery_note import (
     DeliveryNoteLineUpdate,
     DeliveryNoteLineResponse,
 )
-from src.schemas.match import (
-    MatchCreate,
-    MatchUpdate,
+from src.schemas.match_result import (
+    MatchResultCreate,
+    MatchResultUpdate,
+    MatchResultResponse,
+    MatchResultLineCreate,
+    MatchResultLineResponse,
+    MatchRequest,
     MatchResponse,
-    MatchLineResponse,
     MatchDecision,
-    MatchingResult,
 )
-from src.schemas.balance import (
-    BalanceLedgerCreate,
+from src.schemas.balance_ledger import (
     BalanceLedgerResponse,
-    BalanceSummary,
 )
 
 __all__ = [
     "BaseSchema",
-    "PaginationParams",
+    "PaginatedResponse",
+    "ErrorResponse",
     "UserCreate",
     "UserUpdate",
     "UserResponse",
     "UserLogin",
     "Token",
     "TokenData",
-    "SupplierCreate",
-    "SupplierUpdate",
-    "SupplierResponse",
     "PurchaseOrderCreate",
     "PurchaseOrderUpdate",
     "PurchaseOrderResponse",
@@ -83,13 +75,13 @@ __all__ = [
     "DeliveryNoteLineCreate",
     "DeliveryNoteLineUpdate",
     "DeliveryNoteLineResponse",
-    "MatchCreate",
-    "MatchUpdate",
+    "MatchResultCreate",
+    "MatchResultUpdate",
+    "MatchResultResponse",
+    "MatchResultLineCreate",
+    "MatchResultLineResponse",
+    "MatchRequest",
     "MatchResponse",
-    "MatchLineResponse",
     "MatchDecision",
-    "MatchingResult",
-    "BalanceLedgerCreate",
     "BalanceLedgerResponse",
-    "BalanceSummary",
 ]

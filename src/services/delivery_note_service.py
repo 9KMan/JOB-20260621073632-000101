@@ -1,164 +1,159 @@
-# src/services/delivery_note_service.py
-from typing import Optional, List
+// src/services/delivery_note_service.py
+"""Delivery Note service for DN management."""
+from datetime import datetime
 from decimal import Decimal
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from typing import List, Optional
 
-from src.models.delivery_note import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
+from sqlalchemy.orm import Session, joinedload
+
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
 from src.schemas.delivery_note import DeliveryNoteCreate, DeliveryNoteUpdate
+from src.services.base import BaseService
+from src.services.audit_service import AuditService
 
 
-class DeliveryNoteService:
-    """Service for Delivery Note operations."""
+class DeliveryNoteService(BaseService[DeliveryNote]):
+    """Service for Delivery Note management."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: Session):
+        """Initialize DN service."""
+        super().__init__(DeliveryNote, db)
+        self.audit_service = AuditService(db)
 
-    async def get_by_id(self, dn_id: str) -> Optional[DeliveryNote]:
-        """Get Delivery Note by ID with lines."""
-        result = await self.db.execute(
-            select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.id == dn_id)
+    def get_by_dn_number(self, dn_number: str) -> Optional[DeliveryNote]:
+        """Get DN by DN number."""
+        return (
+            self.db.query(DeliveryNote)
+            .filter(DeliveryNote.dn_number == dn_number)
+            .first()
         )
-        return result.scalar_one_or_none()
 
-    async def get_by_number(self, dn_number: str) -> Optional[DeliveryNote]:
-        """Get Delivery Note by number."""
-        result = await self.db.execute(
-            select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.dn_number == dn_number)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_all(
-        self, skip: int = 0, limit: int = 100, status: Optional[DeliveryNoteStatus] = None
-    ) -> List[DeliveryNote]:
-        """Get all Delivery Notes with pagination."""
-        query = select(DeliveryNote).options(selectinload(DeliveryNote.lines))
-
-        if status:
-            query = query.where(DeliveryNote.status == status)
-
-        result = await self.db.execute(
-            query.offset(skip).limit(limit).order_by(DeliveryNote.created_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def get_by_supplier(
-        self, supplier_id: str, skip: int = 0, limit: int = 100
-    ) -> List[DeliveryNote]:
-        """Get Delivery Notes by supplier."""
-        result = await self.db.execute(
-            select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.supplier_id == supplier_id)
+    def get_by_supplier(self, supplier_id: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
+        """Get DNs by supplier."""
+        return (
+            self.db.query(DeliveryNote)
+            .filter(DeliveryNote.supplier_id == supplier_id)
             .offset(skip)
             .limit(limit)
-            .order_by(DeliveryNote.created_at.desc())
+            .all()
         )
-        return list(result.scalars().all())
 
-    async def get_by_po_reference(
-        self, po_reference: str, skip: int = 0, limit: int = 100
-    ) -> List[DeliveryNote]:
-        """Get Delivery Notes by PO reference."""
-        result = await self.db.execute(
-            select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.po_reference == po_reference)
+    def get_by_po(self, po_id: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
+        """Get DNs linked to a PO."""
+        return (
+            self.db.query(DeliveryNote)
+            .filter(DeliveryNote.po_id == po_id)
             .offset(skip)
             .limit(limit)
-        )
-        return list(result.scalars().all())
-
-    async def get_unmatched(self, supplier_id: Optional[str] = None) -> List[DeliveryNote]:
-        """Get unmatched delivery notes for matching."""
-        query = (
-            select(DeliveryNote)
-            .options(selectinload(DeliveryNote.lines))
-            .where(DeliveryNote.status.in_([DeliveryNoteStatus.RECEIVED, DeliveryNoteStatus.DRAFT]))
+            .all()
         )
 
-        if supplier_id:
-            query = query.where(DeliveryNote.supplier_id == supplier_id)
+    def get_pending_dns(self, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
+        """Get all pending DNs."""
+        return (
+            self.db.query(DeliveryNote)
+            .filter(DeliveryNote.status == "pending")
+            .options(joinedload(DeliveryNote.lines))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-        result = await self.db.execute(query.order_by(DeliveryNote.delivery_date))
-        return list(result.scalars().all())
+    def get_by_status(self, status: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
+        """Get DNs by status."""
+        return (
+            self.db.query(DeliveryNote)
+            .filter(DeliveryNote.status == status)
+            .options(joinedload(DeliveryNote.lines))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-    async def create(self, dn_data: DeliveryNoteCreate) -> DeliveryNote:
+    def create_dn(self, dn_data: DeliveryNoteCreate, received_by: Optional[str] = None) -> DeliveryNote:
         """Create a new Delivery Note with lines."""
-        # Calculate total amount (simplified - would normally come from pricing)
-        total_amount = Decimal("0")
+        # Check for duplicate
+        existing = self.get_by_dn_number(dn_data.dn_number)
+        if existing:
+            raise ValueError(f"DN with number {dn_data.dn_number} already exists")
 
-        dn = DeliveryNote(
-            dn_number=dn_data.dn_number,
-            supplier_id=dn_data.supplier_id,
-            supplier_name=dn_data.supplier_name,
-            supplier_code=dn_data.supplier_code,
-            po_reference=dn_data.po_reference,
-            delivery_date=dn_data.delivery_date,
-            received_date=dn_data.received_date,
-            currency=dn_data.currency,
-            total_amount=total_amount,
-            notes=dn_data.notes,
-            metadata=dn_data.metadata,
-            status=DeliveryNoteStatus.RECEIVED,
-        )
+        # Calculate totals
+        subtotal = sum(line.line_total for line in dn_data.lines)
+        tax_amount = sum(line.line_total * Decimal("0.10") for line in dn_data.lines)  # Assume 10% tax
+        total_amount = subtotal + tax_amount
+
+        # Create DN data
+        dn_dict = dn_data.model_dump(exclude={"lines"})
+        dn_dict["subtotal"] = subtotal
+        dn_dict["tax_amount"] = tax_amount
+        dn_dict["total_amount"] = total_amount
+        dn_dict["receipt_date"] = datetime.utcnow()
+        if received_by:
+            dn_dict["received_by"] = received_by
+
+        # Create DN with lines
+        dn = DeliveryNote(**dn_dict)
         self.db.add(dn)
-        await self.db.flush()
+        self.db.flush()
 
         # Create lines
         for line_data in dn_data.lines:
-            dn_line = DeliveryNoteLine(
-                delivery_note_id=dn.id,
-                line_number=line_data.line_number,
-                product_code=line_data.product_code,
-                description=line_data.description,
-                quantity_delivered=line_data.quantity_delivered,
-                quantity_accepted=line_data.quantity_accepted,
-                quantity_rejected=line_data.quantity_rejected,
-                unit_of_measure=line_data.unit_of_measure,
-                po_line_reference=line_data.po_line_reference,
-                notes=line_data.notes,
+            line_dict = line_data.model_dump()
+            line = DeliveryNoteLine(delivery_note_id=dn.id, **line_dict)
+            self.db.add(line)
+
+        self.db.commit()
+        self.db.refresh(dn)
+
+        # Audit log
+        self.audit_service.log_create(dn, received_by)
+
+        return dn
+
+    def update_dn(self, id: str, dn_data: DeliveryNoteUpdate) -> Optional[DeliveryNote]:
+        """Update Delivery Note."""
+        dn = self.get_by_id(id)
+        if not dn:
+            return None
+
+        update_dict = dn_data.model_dump(exclude_unset=True)
+        
+        # Audit before update
+        self.audit_service.log_update(dn, update_dict, dn.received_by)
+
+        return self.update(id, update_dict)
+
+    def link_to_po(self, dn_id: str, po_id: str, matched_by: Optional[str] = None) -> Optional[DeliveryNote]:
+        """Link DN to a PO."""
+        dn = self.get_by_id(dn_id)
+        if dn:
+            dn.po_id = po_id
+            self.db.commit()
+            self.db.refresh(dn)
+            self.audit_service.log_update(
+                dn, {"po_id": po_id, "matched_by": matched_by}, matched_by
             )
-            self.db.add(dn_line)
-
-        await self.db.flush()
-        await self.db.refresh(dn)
         return dn
 
-    async def update(self, dn_id: str, dn_data: DeliveryNoteUpdate) -> Optional[DeliveryNote]:
-        """Update an existing Delivery Note."""
-        dn = await self.get_by_id(dn_id)
-        if not dn:
-            return None
-
-        update_data = dn_data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(dn, field, value)
-
-        await self.db.flush()
-        await self.db.refresh(dn)
+    def update_match_status(self, dn_id: str, match_score: Decimal, match_status: str) -> Optional[DeliveryNote]:
+        """Update DN match status."""
+        dn = self.get_by_id(dn_id)
+        if dn:
+            dn.match_score = match_score
+            dn.match_status = match_status
+            self.db.commit()
+            self.db.refresh(dn)
         return dn
 
-    async def update_status(self, dn_id: str, status: DeliveryNoteStatus) -> Optional[DeliveryNote]:
-        """Update Delivery Note status."""
-        dn = await self.get_by_id(dn_id)
-        if not dn:
-            return None
-        dn.status = status
-        await self.db.flush()
-        await self.db.refresh(dn)
+    def mark_as_received(self, dn_id: str, received_by: str) -> Optional[DeliveryNote]:
+        """Mark DN as received."""
+        dn = self.get_by_id(dn_id)
+        if dn:
+            dn.status = "received"
+            dn.received_by = received_by
+            self.db.commit()
+            self.db.refresh(dn)
+            self.audit_service.log_update(
+                dn, {"status": "received", "received_by": received_by}, received_by
+            )
         return dn
-
-    async def delete(self, dn_id: str) -> bool:
-        """Delete a Delivery Note."""
-        dn = await self.get_by_id(dn_id)
-        if not dn:
-            return False
-        await self.db.delete(dn)
-        await self.db.flush()
-        return True

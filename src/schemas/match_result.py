@@ -1,149 +1,145 @@
-# src/schemas/match_result.py
-"""Match Result Pydantic schemas."""
-from typing import Optional, List, Dict, Any
-from uuid import UUID
+// src/schemas/match_result.py
+"""Match Result schemas."""
+from datetime import date, datetime
 from decimal import Decimal
-from datetime import date
+from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-
-# Match Line Item
-class MatchLineItemResponse(BaseModel):
-    """Schema for match line item response."""
-    
-    id: UUID
-    match_result_id: UUID
-    po_line_item_id: Optional[UUID]
-    po_line_number: Optional[str]
-    po_sku: Optional[str]
-    invoice_line_item_id: Optional[UUID]
-    invoice_line_number: Optional[str]
-    invoice_sku: Optional[str]
-    dn_line_item_id: Optional[UUID]
-    dn_line_number: Optional[str]
-    dn_sku: Optional[str]
-    po_quantity: Optional[Decimal]
-    invoice_quantity: Optional[Decimal]
-    dn_quantity: Optional[Decimal]
-    po_amount: Optional[Decimal]
-    invoice_amount: Optional[Decimal]
-    dn_amount: Optional[Decimal]
-    is_matched: str
-    match_type: Optional[str]
-    quantity_variance: Decimal
-    amount_variance: Decimal
-    variance_percentage: Decimal
-    match_data: Optional[Dict[str, Any]]
-    created_at: str
-    updated_at: str
-    
-    model_config = {"from_attributes": True}
+from src.schemas.base import BaseSchema
 
 
-# Match Result
-class MatchResultBase(BaseModel):
-    """Base schema for match results."""
-    
-    match_type: str = Field(..., description="Match type")
-    match_date: date = Field(..., description="Match date")
+class MatchResultLineBase(BaseSchema):
+    """Base match result line schema."""
+    po_line_id: Optional[str] = None
+    invoice_line_id: Optional[str] = None
+    dn_line_id: Optional[str] = None
+    match_score: Decimal = Decimal("0.0000")
+    po_quantity: Optional[Decimal] = None
+    invoice_quantity: Optional[Decimal] = None
+    dn_quantity: Optional[Decimal] = None
+    matched_quantity: Decimal = Decimal("0")
+    variance_quantity: Decimal = Decimal("0")
+    po_amount: Optional[Decimal] = None
+    invoice_amount: Optional[Decimal] = None
+    dn_amount: Optional[Decimal] = None
+    matched_amount: Decimal = Decimal("0.00")
+    variance_amount: Decimal = Decimal("0.00")
+    po_unit_price: Optional[Decimal] = None
+    invoice_unit_price: Optional[Decimal] = None
+    dn_unit_price: Optional[Decimal] = None
+    price_variance: Decimal = Decimal("0")
+    price_variance_percent: Decimal = Decimal("0.0000")
+    item_code: Optional[str] = None
+    item_description: Optional[str] = None
+    match_status: str = "matched"
+
+
+class MatchResultLineCreate(MatchResultLineBase):
+    """Match result line creation schema."""
+    pass
+
+
+class MatchResultLineResponse(MatchResultLineBase):
+    """Match result line response schema."""
+    id: str
+    match_result_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class MatchResultBase(BaseSchema):
+    """Base match result schema."""
+    po_id: Optional[str] = None
+    invoice_id: Optional[str] = None
+    dn_id: Optional[str] = None
+    overall_score: Decimal = Decimal("0.0000")
+    po_invoice_score: Optional[Decimal] = None
+    po_dn_score: Optional[Decimal] = None
+    invoice_dn_score: Optional[Decimal] = None
+    po_amount: Optional[Decimal] = None
+    invoice_amount: Optional[Decimal] = None
+    dn_amount: Optional[Decimal] = None
+    amount_variance: Decimal = Decimal("0.00")
+    amount_variance_percent: Decimal = Decimal("0.0000")
+    total_quantity_po: Optional[Decimal] = None
+    total_quantity_invoice: Optional[Decimal] = None
+    total_quantity_dn: Optional[Decimal] = None
+    quantity_variance: Decimal = Decimal("0")
+    match_status: str = "pending"
+    decision: str
+    match_type: str = "full"
+    auto_approved_amount: Decimal = Decimal("0.00")
+    pending_review_amount: Decimal = Decimal("0.00")
+    disputed_amount: Decimal = Decimal("0.00")
+    resolved: bool = False
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    resolution_notes: Optional[str] = None
+    layer: int = 1
+    match_sequence: int = 1
+    po_date: Optional[date] = None
+    invoice_date: Optional[date] = None
+    dn_date: Optional[date] = None
+    has_amount_variance: bool = False
+    has_quantity_variance: bool = False
+    has_date_variance: bool = False
+    has_price_variance: bool = False
 
 
 class MatchResultCreate(MatchResultBase):
-    """Schema for creating match results."""
-    
-    purchase_order_id: Optional[UUID] = Field(None, description="PO ID")
-    invoice_id: Optional[UUID] = Field(None, description="Invoice ID")
-    delivery_note_id: Optional[UUID] = Field(None, description="Delivery Note ID")
+    """Match result creation schema."""
+    lines: List[MatchResultLineCreate] = Field(default_factory=list)
 
 
-class MatchResultUpdate(BaseModel):
-    """Schema for updating match results."""
-    
-    match_status: Optional[str] = Field(None, description="Match status")
-    decision: Optional[str] = Field(None, description="Decision")
-    notes: Optional[str] = Field(None, description="Notes")
-    dispute_reason: Optional[str] = Field(None, description="Dispute reason")
-    reviewer_comments: Optional[str] = Field(None, description="Reviewer comments")
+class MatchResultUpdate(BaseSchema):
+    """Match result update schema."""
+    match_status: Optional[str] = None
+    decision: Optional[str] = None
+    resolved: Optional[bool] = None
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    resolution_notes: Optional[str] = None
+    auto_approved_amount: Optional[Decimal] = None
+    pending_review_amount: Optional[Decimal] = None
+    disputed_amount: Optional[Decimal] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
 
 
-class MatchDecisionRequest(BaseModel):
-    """Schema for making match decisions."""
-    
-    decision: str = Field(..., description="Decision: CONFIRMED, REJECTED, or PENDING_REVIEW")
-    reviewer_comments: Optional[str] = Field(None, description="Reviewer comments")
-    dispute_reason: Optional[str] = Field(None, description="Dispute reason if rejected")
+class MatchResultResponse(MatchResultBase):
+    """Match result response schema."""
+    id: str
+    matched_by: Optional[str] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    lines: List[MatchResultLineResponse] = Field(default_factory=list)
+    is_auto_approvable: bool = Field(default=False, exclude=True)
+    needs_human_review: bool = Field(default=False, exclude=True)
 
 
-class MatchResultResponse(BaseModel):
-    """Schema for match result response."""
-    
-    id: UUID
-    purchase_order_id: Optional[UUID]
-    invoice_id: Optional[UUID]
-    delivery_note_id: Optional[UUID]
-    match_type: str
-    match_status: str
-    confidence_score: Decimal
-    decision: Optional[str]
-    po_amount: Optional[Decimal]
-    invoice_amount: Optional[Decimal]
-    dn_amount: Optional[Decimal]
-    variance_amount: Decimal
-    match_date: date
-    decision_date: Optional[date]
-    decided_by: Optional[str]
-    notes: Optional[str]
-    dispute_reason: Optional[str]
-    reviewer_comments: Optional[str]
-    reviewed_at: Optional[date]
-    created_at: str
-    updated_at: str
-    
-    model_config = {"from_attributes": True}
+class MatchRequest(BaseSchema):
+    """Request to match documents."""
+    invoice_id: str
+    dn_id: Optional[str] = None
+    po_id: Optional[str] = None
+    force_match: bool = False
 
 
-class MatchResultWithDetails(MatchResultResponse):
-    """Schema for match result with full details."""
-    
-    line_items: List[MatchLineItemResponse] = []
-    match_details: Optional[Dict[str, Any]] = None
-    
-    model_config = {"from_attributes": True}
+class MatchResponse(BaseSchema):
+    """Response from matching operation."""
+    success: bool
+    match_result: Optional[MatchResultResponse] = None
+    message: str
+    auto_approved: bool = False
+    requires_review: bool = False
 
 
-class MatchResultListResponse(BaseModel):
-    """Schema for match result list response."""
-    
-    id: UUID
-    match_type: str
-    match_status: str
-    decision: Optional[str]
-    confidence_score: Decimal
-    variance_amount: Decimal
-    match_date: date
-    created_at: str
-    
-    model_config = {"from_attributes": True}
-
-
-class MatchRequest(BaseModel):
-    """Schema for requesting matches."""
-    
-    invoice_id: Optional[UUID] = Field(None, description="Invoice ID to match")
-    delivery_note_id: Optional[UUID] = Field(None, description="Delivery Note ID to match")
-    po_id: Optional[UUID] = Field(None, description="Specific PO ID to match against")
-    match_type: Optional[str] = Field(
-        None,
-        description="Match type: PO_INVOICE, PO_DN, INVOICE_DN, or THREE_WAY"
-    )
-
-
-class MatchSummary(BaseModel):
-    """Summary of matching results."""
-    
-    total_matches: int = Field(..., description="Total number of matches")
-    auto_approved: int = Field(..., description="Number auto-approved")
-    pending_review: int = Field(..., description="Number pending review")
-    rejected: int = Field(..., description="Number rejected")
-    average_confidence: Decimal = Field(..., description="Average confidence score")
+class MatchDecision(BaseSchema):
+    """Decision on a match result."""
+    match_result_id: str
+    decision: str  # approve, reject, dispute
+    notes: Optional[str] = None
+    amount_override: Optional[Decimal] = None

@@ -1,108 +1,106 @@
 // src/schemas/delivery_note.py
-"""Delivery Note-related Pydantic schemas."""
-
-from datetime import date
+"""Delivery Note schemas."""
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
-from uuid import UUID
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.schemas.base import BaseSchema, TimestampMixin
-from src.schemas.supplier import SupplierSummary
+from src.schemas.base import BaseSchema
 
 
 class DeliveryNoteLineBase(BaseSchema):
     """Base delivery note line schema."""
-
-    line_number: int = Field(ge=1)
-    sku: Optional[str] = Field(default=None, max_length=100)
-    description: str = Field(min_length=1, max_length=500)
-    quantity_ordered: Optional[Decimal] = Field(default=None, decimal_places=3)
-    quantity_delivered: Decimal = Field(gt=0, decimal_places=3)
-    unit_of_measure: str = Field(default="EA", max_length=20)
-    unit_price: Optional[Decimal] = Field(default=None, ge=0, decimal_places=4)
-    line_total: Decimal = Field(ge=0, decimal_places=2)
+    line_number: int
+    item_code: Optional[str] = None
+    item_description: str
+    quantity: Decimal
+    unit_of_measure: str = "EA"
+    unit_price: Decimal
+    line_total: Decimal
+    po_line_id: Optional[str] = None
+    match_score: Optional[Decimal] = None
+    status: str = "pending"
 
 
 class DeliveryNoteLineCreate(DeliveryNoteLineBase):
-    """Schema for creating a delivery note line."""
-
+    """Delivery note line creation schema."""
     pass
 
 
 class DeliveryNoteLineUpdate(BaseSchema):
-    """Schema for updating a delivery note line."""
-
-    line_number: Optional[int] = Field(default=None, ge=1)
-    sku: Optional[str] = Field(default=None, max_length=100)
-    description: Optional[str] = Field(default=None, min_length=1, max_length=500)
-    quantity_ordered: Optional[Decimal] = Field(default=None, decimal_places=3)
-    quantity_delivered: Optional[Decimal] = Field(default=None, gt=0, decimal_places=3)
-    unit_of_measure: Optional[str] = Field(default=None, max_length=20)
-    unit_price: Optional[Decimal] = Field(default=None, ge=0, decimal_places=4)
-    line_total: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
+    """Delivery note line update schema."""
+    item_code: Optional[str] = None
+    item_description: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    unit_of_measure: Optional[str] = None
+    unit_price: Optional[Decimal] = None
+    po_line_id: Optional[str] = None
+    status: Optional[str] = None
 
 
-class DeliveryNoteLineResponse(DeliveryNoteLineBase, TimestampMixin):
-    """Schema for delivery note line response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    delivery_note_id: UUID
+class DeliveryNoteLineResponse(DeliveryNoteLineBase):
+    """Delivery note line response schema."""
+    id: str
+    delivery_note_id: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class DeliveryNoteBase(BaseSchema):
     """Base delivery note schema."""
-
-    dn_number: str = Field(min_length=1, max_length=50)
-    supplier_id: UUID
-    reference_po_number: Optional[str] = Field(default=None, max_length=50)
-    delivery_date: date
-    received_date: Optional[date] = None
-    currency: str = Field(default="USD", max_length=3)
-    total_amount: Decimal = Field(default=Decimal("0.00"), ge=0, decimal_places=2)
+    dn_number: str
+    supplier_id: str
+    supplier_name: str
+    supplier_code: Optional[str] = None
+    po_id: Optional[str] = None
+    po_number: Optional[str] = None
+    dn_date: date
+    delivery_date: Optional[date] = None
+    receipt_date: Optional[datetime] = None
+    status: str = "pending"
+    currency: str = "USD"
     notes: Optional[str] = None
+    delivery_address: Optional[str] = None
+    carrier: Optional[str] = None
+    tracking_number: Optional[str] = None
 
 
 class DeliveryNoteCreate(DeliveryNoteBase):
-    """Schema for creating a delivery note."""
-
-    lines: list[DeliveryNoteLineCreate] = Field(default_factory=list)
+    """Delivery note creation schema."""
+    subtotal: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal
+    lines: List[DeliveryNoteLineCreate] = Field(default_factory=list)
 
 
 class DeliveryNoteUpdate(BaseSchema):
-    """Schema for updating a delivery note."""
-
-    dn_number: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    supplier_id: Optional[UUID] = None
-    reference_po_number: Optional[str] = Field(default=None, max_length=50)
-    status: Optional[str] = None
+    """Delivery note update schema."""
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
+    po_id: Optional[str] = None
+    po_number: Optional[str] = None
     delivery_date: Optional[date] = None
-    received_date: Optional[date] = None
-    currency: Optional[str] = Field(default=None, max_length=3)
-    total_amount: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
+    receipt_date: Optional[datetime] = None
+    status: Optional[str] = None
     notes: Optional[str] = None
-    received_by: Optional[UUID] = None
+    delivery_address: Optional[str] = None
+    carrier: Optional[str] = None
+    tracking_number: Optional[str] = None
+    received_by: Optional[str] = None
+    matched_by: Optional[str] = None
 
 
-class DeliveryNoteResponse(DeliveryNoteBase, TimestampMixin):
-    """Schema for delivery note response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    status: str
-    received_by: Optional[UUID] = None
-    supplier: SupplierSummary
-    lines: list[DeliveryNoteLineResponse] = Field(default_factory=list)
-
-
-class DeliveryNoteSummary(BaseSchema):
-    """Schema for delivery note summary in nested responses."""
-
-    id: UUID
-    dn_number: str
+class DeliveryNoteResponse(DeliveryNoteBase):
+    """Delivery note response schema."""
+    id: str
+    subtotal: Decimal
+    tax_amount: Decimal
     total_amount: Decimal
-    status: str
+    match_score: Optional[Decimal] = None
+    match_status: Optional[str] = None
+    received_by: Optional[str] = None
+    matched_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    lines: List[DeliveryNoteLineResponse] = Field(default_factory=list)

@@ -1,178 +1,119 @@
 // src/models/delivery_note.py
-"""Delivery Note and Delivery Note Line models."""
-
-from datetime import date
+"""Delivery Note models."""
 from decimal import Decimal
-from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import List, Optional
 
-from sqlalchemy import (
-    Date,
-    Enum as SQLEnum,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    Text,
-)
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.orm import relationship
 
-from src.models.base import BaseModel
-
-if TYPE_CHECKING:
-    from src.models.supplier import Supplier
-    from src.models.match import Match
+from src.models.base import Base, BaseModel
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Delivery Note status enumeration."""
-
-    RECEIVED = "received"
-    PARTIAL = "partial"
-    COMPLETE = "complete"
-    OVERDUE = "overdue"
-    CANCELLED = "cancelled"
-
-
-class DeliveryNote(BaseModel):
-    """Delivery Note model - one of the three documents in 3-way matching."""
-
+class DeliveryNote(Base, BaseModel):
+    """Delivery Note model."""
     __tablename__ = "delivery_notes"
 
-    dn_number: Mapped[str] = mapped_column(
-        String(50),
-        unique=True,
-        index=True,
-        nullable=False,
-    )
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    reference_po_number: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        index=True,
-        nullable=True,
-    )
-    status: Mapped[DeliveryNoteStatus] = mapped_column(
-        SQLEnum(DeliveryNoteStatus, name="delivery_note_status"),
-        default=DeliveryNoteStatus.RECEIVED,
-        nullable=False,
-    )
-    delivery_date: Mapped[date] = mapped_column(
-        Date,
-        nullable=False,
-    )
-    received_date: Mapped[Optional[date]] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        default="USD",
-        nullable=False,
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        default=Decimal("0.00"),
-        nullable=False,
-    )
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    received_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
+    dn_number = Column(String(50), unique=True, nullable=False, index=True)
+    supplier_id = Column(String(36), nullable=False, index=True)
+    supplier_name = Column(String(255), nullable=False)
+    supplier_code = Column(String(50), nullable=True)
+    
+    # Reference to PO
+    po_id = Column(String(36), ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    po_number = Column(String(50), nullable=True, index=True)
+    
+    # Dates
+    dn_date = Column(Date, nullable=False)
+    delivery_date = Column(Date, nullable=True)
+    receipt_date = Column(DateTime, nullable=True)
+    
+    # Status
+    status = Column(String(50), default="pending", nullable=False)  # pending, matched, received, rejected
+    currency = Column(String(3), default="USD", nullable=False)
+    
+    # Amounts
+    subtotal = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    tax_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    total_amount = Column(Numeric(15, 2), default=Decimal("0.00"), nullable=False)
+    
+    # Matching info
+    match_score = Column(Numeric(5, 4), nullable=True)
+    match_status = Column(String(50), nullable=True)
+    
+    # Notes
+    notes = Column(Text, nullable=True)
+    delivery_address = Column(Text, nullable=True)
+    carrier = Column(String(100), nullable=True)
+    tracking_number = Column(String(100), nullable=True)
+    
+    # Metadata
+    received_by = Column(String(36), nullable=True)
+    matched_by = Column(String(36), nullable=True)
 
     # Relationships
-    supplier: Mapped["Supplier"] = relationship(
-        "Supplier",
-        back_populates="delivery_notes",
-        lazy="selectin",
-    )
-    lines: Mapped[list["DeliveryNoteLine"]] = relationship(
+    lines: List["DeliveryNoteLine"] = relationship(
         "DeliveryNoteLine",
         back_populates="delivery_note",
-        lazy="selectin",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    matches: Mapped[list["Match"]] = relationship(
-        "Match",
+    po: Optional["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        foreign_keys=[po_id],
+    )
+    match_results: List["MatchResult"] = relationship(
+        "MatchResult",
+        foreign_keys="MatchResult.dn_id",
+        back_populates="delivery_note",
+        lazy="selectin",
+    )
+    balance_entries: List["BalanceLedger"] = relationship(
+        "BalanceLedger",
+        foreign_keys="BalanceLedger.dn_id",
         back_populates="delivery_note",
         lazy="selectin",
     )
 
-    __table_args__ = (
-        Index("ix_dn_supplier_status", "supplier_id", "status"),
-        Index("ix_dn_delivery_date", "delivery_date"),
-        Index("ix_dn_reference_po", "reference_po_number"),
-    )
-
     def __repr__(self) -> str:
-        return f"<DeliveryNote dn_number={self.dn_number}>"
+        return f"<DeliveryNote {self.dn_number}>"
 
 
-class DeliveryNoteLine(BaseModel):
-    """Delivery Note Line item model."""
-
+class DeliveryNoteLine(Base, BaseModel):
+    """Delivery Note Line model."""
     __tablename__ = "delivery_note_lines"
 
-    delivery_note_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    delivery_note_id = Column(
+        String(36),
         ForeignKey("delivery_notes.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
-    line_number: Mapped[int] = mapped_column(
-        nullable=False,
-    )
-    sku: Mapped[str] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-    description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
-    quantity_ordered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=True,
-    )
-    quantity_delivered: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-    )
-    unit_of_measure: Mapped[str] = mapped_column(
-        String(20),
-        default="EA",
-        nullable=False,
-    )
-    unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-    )
-    line_total: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-    )
+    line_number = Column(Integer, nullable=False)
+    item_code = Column(String(50), nullable=True, index=True)
+    item_description = Column(String(500), nullable=False)
+    quantity = Column(Numeric(15, 4), nullable=False)
+    unit_of_measure = Column(String(20), default="EA", nullable=False)
+    unit_price = Column(Numeric(15, 4), nullable=False)  # From PO
+    line_total = Column(Numeric(15, 2), nullable=False)
+    
+    # Reference to PO line
+    po_line_id = Column(String(36), ForeignKey("purchase_order_lines.id", ondelete="SET NULL"), nullable=True)
+    
+    # Match info
+    match_score = Column(Numeric(5, 4), nullable=True)
+    
+    # Status
+    status = Column(String(50), default="pending", nullable=False)
 
     # Relationships
-    delivery_note: Mapped["DeliveryNote"] = relationship(
+    delivery_note: "DeliveryNote" = relationship(
         "DeliveryNote",
         back_populates="lines",
-        lazy="selectin",
     )
-
-    __table_args__ = (
-        Index("ix_dnl_delivery_note_line_number", "delivery_note_id", "line_number"),
-        Index("ix_dnl_sku", "sku"),
+    po_line: Optional["PurchaseOrderLine"] = relationship(
+        "PurchaseOrderLine",
+        foreign_keys=[po_line_id],
     )
 
     def __repr__(self) -> str:
-        return f"<DeliveryNoteLine dn_id={self.delivery_note_id} line={self.line_number}>"
-
-
-import uuid
+        return f"<DeliveryNoteLine {self.line_number}>"

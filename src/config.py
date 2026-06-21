@@ -1,59 +1,61 @@
-# src/config.py
-"""Application configuration management."""
+// src/config.py
+"""Application configuration from environment variables."""
+import os
 from functools import lru_cache
-from typing import Any
+from typing import Optional
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    # Application
-    app_name: str = Field(default="FinaRo AP Automation", alias="APP_NAME")
-    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
-    debug: bool = Field(default=False, alias="DEBUG")
-    api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
-
-    # Database
-    database_url: str = Field(
-        default="postgresql://finaro:finaro_secret@localhost:5432/finaro_ap",
-        alias="DATABASE_URL",
-    )
-    database_pool_size: int = Field(default=5, alias="DATABASE_POOL_SIZE")
-    database_max_overflow: int = Field(default=10, alias="DATABASE_MAX_OVERFLOW")
-
-    # Security
-    secret_key: str = Field(
-        default="change-this-secret-key-in-production",
-        alias="SECRET_KEY",
-    )
-    algorithm: str = Field(default="HS256", alias="ALGORITHM")
-    access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
-    refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
-
-    # Server
-    host: str = Field(default="0.0.0.0", alias="HOST")
-    port: int = Field(default=8000, alias="PORT")
-
-    def get_database_url(self) -> str:
-        """Return the database URL."""
-        return self.database_url
-
-    def get_async_database_url(self) -> str:
-        """Return async database URL for SQLAlchemy."""
-        return self.database_url.replace("postgresql://", "postgresql+psycopg2://")
+from pydantic import BaseModel, Field
 
 
-@lru_cache
-def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+class DatabaseConfig(BaseModel):
+    """Database configuration."""
+    url: str = Field(default_factory=lambda: os.getenv(
+        "DATABASE_URL",
+        "postgresql://postgres:postgres@localhost:5432/finaro_ap"
+    ))
+    pool_size: int = int(os.getenv("DB_POOL_SIZE", "10"))
+    max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    echo: bool = os.getenv("DB_ECHO", "false").lower() == "true"
+
+
+class JWTConfig(BaseModel):
+    """JWT configuration."""
+    secret_key: str = Field(default_factory=lambda: os.getenv(
+        "JWT_SECRET_KEY",
+        "your-super-secret-key-change-in-production"
+    ))
+    algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    access_token_expire_minutes: int = int(os.getenv(
+        "JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"
+    ))
+
+
+class AppConfig(BaseModel):
+    """Application configuration."""
+    name: str = "FinaRo AP Automation"
+    version: str = "1.0.0"
+    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    api_v1_prefix: str = "/api/v1"
+    
+    # Matching weights
+    match_weight_line_level: float = 0.70
+    match_weight_amount: float = 0.20
+    match_weight_date: float = 0.10
+    
+    # Auto-approval threshold (0.0 to 1.0)
+    auto_approve_threshold: float = 0.95
+    
+    # Database settings
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    
+    # JWT settings
+    jwt: JWTConfig = Field(default_factory=JWTConfig)
+
+
+@lru_cache()
+def get_config() -> AppConfig:
+    """Get cached application configuration."""
+    return AppConfig()
+
+
+config = get_config()

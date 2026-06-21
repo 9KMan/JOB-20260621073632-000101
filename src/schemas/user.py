@@ -1,68 +1,61 @@
 // src/schemas/user.py
-"""User-related Pydantic schemas."""
-
+"""User schemas."""
 from datetime import datetime
 from typing import Optional
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from src.schemas.base import BaseSchema, TimestampMixin
+from src.schemas.base import BaseSchema
 
 
 class UserBase(BaseSchema):
     """Base user schema."""
-
     email: EmailStr
     username: str = Field(min_length=3, max_length=100)
-    full_name: Optional[str] = Field(default=None, max_length=255)
+    full_name: Optional[str] = None
+    role: str = "user"
 
 
 class UserCreate(UserBase):
-    """Schema for creating a new user."""
-
+    """User creation schema."""
     password: str = Field(min_length=8, max_length=100)
     is_superuser: bool = False
 
 
 class UserUpdate(BaseSchema):
-    """Schema for updating a user."""
-
+    """User update schema."""
     email: Optional[EmailStr] = None
     username: Optional[str] = Field(default=None, min_length=3, max_length=100)
-    full_name: Optional[str] = Field(default=None, max_length=255)
-    password: Optional[str] = Field(default=None, min_length=8, max_length=100)
+    full_name: Optional[str] = None
+    role: Optional[str] = None
     is_active: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=100)
 
 
-class UserResponse(UserBase, TimestampMixin):
-    """Schema for user response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
+class UserResponse(UserBase):
+    """User response schema."""
+    id: str
     is_active: bool
     is_superuser: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class UserLogin(BaseSchema):
-    """Schema for user login."""
-
+    """User login schema."""
     username: str
     password: str
 
 
 class Token(BaseSchema):
-    """Schema for JWT token response."""
-
+    """Token response schema."""
     access_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
 class TokenData(BaseSchema):
-    """Schema for token payload data."""
-
-    sub: Optional[str] = None
-    exp: Optional[datetime] = None
-    type: str = "access"
+    """Token data schema."""
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+    role: Optional[str] = None

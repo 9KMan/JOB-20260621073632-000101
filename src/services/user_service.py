@@ -1,104 +1,118 @@
-# src/services/user_service.py
-from typing import Optional, List
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+// src/services/user_service.py
+"""User service for authentication and authorization."""
+from datetime import datetime, timedelta
+from typing import Optional
 
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+
+from src.config import config
 from src.models.user import User
-from src.schemas.user import UserCreate, UserUpdate
-from src.core.security import get_password_hash, verify_password
+from src.schemas.user import UserCreate, UserUpdate, UserResponse, Token, TokenData
+from src.services.base import BaseService
 
 
-class UserService:
-    """Service for user operations."""
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
 
-    async def get_by_id(self, user_id: str) -> Optional[User]:
-        """Get user by ID."""
-        result = await self.db.execute(select(User).where(User.id == user_id))
-        return result.scalar_one_or_none()
+class UserService(BaseService[User]):
+    """Service for user management and authentication."""
 
-    async def get_by_email(self, email: str) -> Optional[User]:
+    def __init__(self, db: Session):
+        """Initialize user service."""
+        super().__init__(User, db)
+
+    def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email."""
-        result = await self.db.execute(select(User).where(User.email == email))
-        return result.scalar_one_or_none()
+        return self.db.query(User).filter(User.email == email).first()
 
-    async def get_by_username(self, username: str) -> Optional[User]:
+    def get_by_username(self, username: str) -> Optional[User]:
         """Get user by username."""
-        result = await self.db.execute(select(User).where(User.username == username))
-        return result.scalar_one_or_none()
+        return self.db.query(User).filter(User.username == username).first()
 
-    async def get_all(self, skip: int = 0, limit: int = 100) -> List[User]:
-        """Get all users with pagination."""
-        result = await self.db.execute(
-            select(User).offset(skip).limit(limit).order_by(User.created_at.desc())
+    def create_user(self, user_data: UserCreate) -> User:
+        """Create a new user with hashed password."""
+        hashed_password = self.hash_password(user_data.password)
+        user_dict = user_data.model_dump(exclude={"password"})
+        user_dict["hashed_password"] = hashed_password
+        return self.create(user_dict)
+
+    def update_user(self, id: str, user_data: UserUpdate) -> Optional[User]:
+        """Update user with optional password change."""
+        update_dict = user_data.model_dump(exclude_unset=True)
+        if "password" in update_dict and update_dict["password"]:
+            update_dict["hashed_password"] = self.hash_password(update_dict.pop("password"))
+        return self.update(id, update_dict)
+
+    def authenticate(self, username: str, password: str) -> Optional[User]:
+        """Authenticate user with username and password."""
+        user = self.get_by_username(username)
+        if not user:
+            return None
+        if not self.verify_password(password, user.hashed_password):
+            return None
+        if not user.is_active:
+            return None
+        return user
+
+    def create_access_token(self, user: User) -> Token:
+        """Create JWT access token for user."""
+        expires_delta = timedelta(minutes=config.jwt.access_token_expire_minutes)
+        expire = datetime.utcnow() + expires_delta
+        to_encode = {
+            "sub": user.id,
+            "username": user.username,
+            "role": user.role,
+            "exp": expire,
+        }
+        encoded_jwt = jwt.encode(
+            to_encode,
+            config.jwt.secret_key,
+            algorithm=config.jwt.algorithm,
         )
-        return list(result.scalars().all())
-
-    async def create(self, user_data: UserCreate) -> User:
-        """Create a new user."""
-        hashed_password = get_password_hash(user_data.password)
-        user = User(
-            email=user_data.email,
-            username=user_data.username,
-            hashed_password=hashed_password,
-            full_name=user_data.full_name,
-            role=user_data.role,
+        return Token(
+            access_token=encoded_jwt,
+            token_type="bearer",
+            expires_in=config.jwt.access_token_expire_minutes * 60,
         )
-        self.db.add(user)
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
 
-    async def update(self, user_id: str, user_data: UserUpdate) -> Optional[User]:
-        """Update an existing user."""
-        user = await self.get_by_id(user_id)
-        if not user:
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """Hash a password using bcrypt."""
+        return pwd_context.hash(password)
+
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """Verify a password against a hash."""
+        return pwd_context.verify(plain_password, hashed_password)
+
+    @staticmethod
+    def decode_token(token: str) -> Optional[TokenData]:
+        """Decode and validate JWT token."""
+        try:
+            payload = jwt.decode(
+                token,
+                config.jwt.secret_key,
+                algorithms=[config.jwt.algorithm],
+            )
+            user_id = payload.get("sub")
+            username = payload.get("username")
+            role = payload.get("role")
+            if user_id is None:
+                return None
+            return TokenData(user_id=user_id, username=username, role=role)
+        except JWTError:
             return None
 
-        update_data = user_data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(user, field, value)
+    def get_active_users(self) -> list[User]:
+        """Get all active users."""
+        return self.db.query(User).filter(User.is_active == True).all()
 
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
-
-    async def delete(self, user_id: str) -> bool:
-        """Delete a user."""
-        user = await self.get_by_id(user_id)
-        if not user:
-            return False
-        await self.db.delete(user)
-        await self.db.flush()
-        return True
-
-    async def authenticate(self, username: str, password: str) -> Optional[User]:
-        """Authenticate a user."""
-        user = await self.get_by_username(username)
-        if not user:
-            return None
-        if not verify_password(password, user.hashed_password):
-            return None
-        return user
-
-    async def activate(self, user_id: str) -> Optional[User]:
-        """Activate a user."""
-        user = await self.get_by_id(user_id)
-        if not user:
-            return None
-        user.is_active = True
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
-
-    async def deactivate(self, user_id: str) -> Optional[User]:
+    def deactivate_user(self, id: str) -> Optional[User]:
         """Deactivate a user."""
-        user = await self.get_by_id(user_id)
-        if not user:
-            return None
-        user.is_active = False
-        await self.db.flush()
-        await self.db.refresh(user)
-        return user
+        return self.update(id, {"is_active": False})
+
+    def activate_user(self, id: str) -> Optional[User]:
+        """Activate a user."""
+        return self.update(id, {"is_active": True})

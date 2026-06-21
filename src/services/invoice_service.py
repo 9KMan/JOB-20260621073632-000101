@@ -1,180 +1,178 @@
-# src/services/invoice_service.py
-from typing import Optional, List
+// src/services/invoice_service.py
+"""Invoice service for invoice management."""
+from datetime import datetime
 from decimal import Decimal
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from typing import List, Optional
 
-from src.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from sqlalchemy.orm import Session, joinedload
+
+from src.models.invoice import Invoice, InvoiceLine
 from src.schemas.invoice import InvoiceCreate, InvoiceUpdate
+from src.services.base import BaseService
+from src.services.audit_service import AuditService
 
 
-class InvoiceService:
-    """Service for Invoice operations."""
+class InvoiceService(BaseService[Invoice]):
+    """Service for Invoice management."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: Session):
+        """Initialize invoice service."""
+        super().__init__(Invoice, db)
+        self.audit_service = AuditService(db)
 
-    async def get_by_id(self, invoice_id: str) -> Optional[Invoice]:
-        """Get Invoice by ID with lines."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.id == invoice_id)
+    def get_by_invoice_number(self, invoice_number: str) -> Optional[Invoice]:
+        """Get invoice by invoice number."""
+        return (
+            self.db.query(Invoice)
+            .filter(Invoice.invoice_number == invoice_number)
+            .first()
         )
-        return result.scalar_one_or_none()
 
-    async def get_by_number(self, invoice_number: str) -> Optional[Invoice]:
-        """Get Invoice by number."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.invoice_number == invoice_number)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_all(
-        self, skip: int = 0, limit: int = 100, status: Optional[InvoiceStatus] = None
-    ) -> List[Invoice]:
-        """Get all Invoices with pagination."""
-        query = select(Invoice).options(selectinload(Invoice.lines))
-
-        if status:
-            query = query.where(Invoice.status == status)
-
-        result = await self.db.execute(
-            query.offset(skip).limit(limit).order_by(Invoice.created_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def get_by_supplier(
-        self, supplier_id: str, skip: int = 0, limit: int = 100
-    ) -> List[Invoice]:
-        """Get Invoices by supplier."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.supplier_id == supplier_id)
+    def get_by_supplier(self, supplier_id: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
+        """Get invoices by supplier."""
+        return (
+            self.db.query(Invoice)
+            .filter(Invoice.supplier_id == supplier_id)
             .offset(skip)
             .limit(limit)
-            .order_by(Invoice.created_at.desc())
+            .all()
         )
-        return list(result.scalars().all())
 
-    async def get_by_po_reference(
-        self, po_reference: str, skip: int = 0, limit: int = 100
-    ) -> List[Invoice]:
-        """Get Invoices by PO reference."""
-        result = await self.db.execute(
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.po_reference == po_reference)
+    def get_by_po(self, po_id: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
+        """Get invoices linked to a PO."""
+        return (
+            self.db.query(Invoice)
+            .filter(Invoice.po_id == po_id)
             .offset(skip)
             .limit(limit)
-        )
-        return list(result.scalars().all())
-
-    async def get_unmatched(self, supplier_id: Optional[str] = None) -> List[Invoice]:
-        """Get unmatched invoices for matching."""
-        query = (
-            select(Invoice)
-            .options(selectinload(Invoice.lines))
-            .where(Invoice.status.in_([InvoiceStatus.RECEIVED, InvoiceStatus.DRAFT]))
+            .all()
         )
 
-        if supplier_id:
-            query = query.where(Invoice.supplier_id == supplier_id)
+    def get_pending_invoices(self, skip: int = 0, limit: int = 100) -> List[Invoice]:
+        """Get all pending invoices."""
+        return (
+            self.db.query(Invoice)
+            .filter(Invoice.status == "pending")
+            .options(joinedload(Invoice.lines))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-        result = await self.db.execute(query.order_by(Invoice.invoice_date))
-        return list(result.scalars().all())
+    def get_by_status(self, status: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
+        """Get invoices by status."""
+        return (
+            self.db.query(Invoice)
+            .filter(Invoice.status == status)
+            .options(joinedload(Invoice.lines))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-    async def create(self, invoice_data: InvoiceCreate) -> Invoice:
+    def create_invoice(self, invoice_data: InvoiceCreate, received_by: Optional[str] = None) -> Invoice:
         """Create a new Invoice with lines."""
         # Calculate totals
-        subtotal = Decimal("0")
-        tax_amount = Decimal("0")
-
-        for line in invoice_data.lines:
-            line_amount = line.quantity * line.unit_price
-            line_tax = line_amount * line.tax_rate if line.tax_rate else Decimal("0")
-            subtotal += line_amount
-            tax_amount += line_tax
-
+        subtotal = sum(line.line_total for line in invoice_data.lines)
+        tax_amount = sum(line.tax_amount for line in invoice_data.lines)
         total_amount = subtotal + tax_amount
 
-        invoice = Invoice(
-            invoice_number=invoice_data.invoice_number,
-            supplier_id=invoice_data.supplier_id,
-            supplier_name=invoice_data.supplier_name,
-            supplier_code=invoice_data.supplier_code,
-            invoice_date=invoice_data.invoice_date,
-            due_date=invoice_data.due_date,
-            po_reference=invoice_data.po_reference,
-            currency=invoice_data.currency,
-            subtotal=subtotal,
-            tax_amount=tax_amount,
-            total_amount=total_amount,
-            notes=invoice_data.notes,
-            metadata=invoice_data.metadata,
-            status=InvoiceStatus.RECEIVED,
-        )
+        # Create invoice data
+        invoice_dict = invoice_data.model_dump(exclude={"lines"})
+        invoice_dict["subtotal"] = subtotal
+        invoice_dict["tax_amount"] = tax_amount
+        invoice_dict["total_amount"] = total_amount
+        invoice_dict["receipt_date"] = datetime.utcnow()
+        if received_by:
+            invoice_dict["received_by"] = received_by
+
+        # Create invoice with lines
+        invoice = Invoice(**invoice_dict)
         self.db.add(invoice)
-        await self.db.flush()
+        self.db.flush()
 
         # Create lines
         for line_data in invoice_data.lines:
-            line_amount = line_data.quantity * line_data.unit_price
-            line_tax = line_amount * (line_data.tax_rate or Decimal("0"))
+            line_dict = line_data.model_dump()
+            line = InvoiceLine(invoice_id=invoice.id, **line_dict)
+            self.db.add(line)
 
-            invoice_line = InvoiceLine(
-                invoice_id=invoice.id,
-                line_number=line_data.line_number,
-                product_code=line_data.product_code,
-                description=line_data.description,
-                quantity=line_data.quantity,
-                unit_of_measure=line_data.unit_of_measure,
-                unit_price=line_data.unit_price,
-                line_amount=line_amount,
-                tax_rate=line_data.tax_rate or Decimal("0"),
-                tax_amount=line_tax,
-                po_line_reference=line_data.po_line_reference,
-                notes=line_data.notes,
+        self.db.commit()
+        self.db.refresh(invoice)
+
+        # Audit log
+        self.audit_service.log_create(invoice, received_by)
+
+        return invoice
+
+    def update_invoice(self, id: str, invoice_data: InvoiceUpdate) -> Optional[Invoice]:
+        """Update Invoice."""
+        invoice = self.get_by_id(id)
+        if not invoice:
+            return None
+
+        update_dict = invoice_data.model_dump(exclude_unset=True)
+        
+        # Audit before update
+        self.audit_service.log_update(invoice, update_dict, invoice.received_by)
+
+        return self.update(id, update_dict)
+
+    def match_invoice_to_po(self, invoice_id: str, po_id: str, matched_by: Optional[str] = None) -> Optional[Invoice]:
+        """Link invoice to a PO."""
+        invoice = self.get_by_id(invoice_id)
+        if invoice:
+            invoice.po_id = po_id
+            self.db.commit()
+            self.db.refresh(invoice)
+            self.audit_service.log_update(
+                invoice, {"po_id": po_id, "matched_by": matched_by}, matched_by
             )
-            self.db.add(invoice_line)
-
-        await self.db.flush()
-        await self.db.refresh(invoice)
         return invoice
 
-    async def update(self, invoice_id: str, invoice_data: InvoiceUpdate) -> Optional[Invoice]:
-        """Update an existing Invoice."""
-        invoice = await self.get_by_id(invoice_id)
-        if not invoice:
-            return None
-
-        update_data = invoice_data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(invoice, field, value)
-
-        await self.db.flush()
-        await self.db.refresh(invoice)
+    def update_match_status(self, invoice_id: str, match_score: Decimal, match_status: str) -> Optional[Invoice]:
+        """Update invoice match status."""
+        invoice = self.get_by_id(invoice_id)
+        if invoice:
+            invoice.match_score = match_score
+            invoice.match_status = match_status
+            self.db.commit()
+            self.db.refresh(invoice)
         return invoice
 
-    async def update_status(self, invoice_id: str, status: InvoiceStatus) -> Optional[Invoice]:
-        """Update Invoice status."""
-        invoice = await self.get_by_id(invoice_id)
-        if not invoice:
-            return None
-        invoice.status = status
-        await self.db.flush()
-        await self.db.refresh(invoice)
+    def approve_invoice(self, invoice_id: str, approved_by: str) -> Optional[Invoice]:
+        """Approve an invoice."""
+        invoice = self.get_by_id(invoice_id)
+        if invoice:
+            invoice.status = "approved"
+            invoice.approved_by = approved_by
+            invoice.approved_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(invoice)
+            self.audit_service.log_update(
+                invoice, {"status": "approved", "approved_by": approved_by}, approved_by
+            )
         return invoice
 
-    async def delete(self, invoice_id: str) -> bool:
-        """Delete an Invoice."""
-        invoice = await self.get_by_id(invoice_id)
-        if not invoice:
-            return False
-        await self.db.delete(invoice)
-        await self.db.flush()
-        return True
+    def reject_invoice(self, invoice_id: str, rejected_by: str, reason: Optional[str] = None) -> Optional[Invoice]:
+        """Reject an invoice."""
+        invoice = self.get_by_id(invoice_id)
+        if invoice:
+            invoice.status = "rejected"
+            invoice.notes = f"{invoice.notes or ''} | Rejected: {reason}".strip(" |")
+            self.db.commit()
+            self.db.refresh(invoice)
+            self.audit_service.log_update(
+                invoice, {"status": "rejected", "reason": reason}, rejected_by
+            )
+        return invoice
+
+    def mark_as_paid(self, invoice_id: str, payment_reference: str) -> Optional[Invoice]:
+        """Mark invoice as paid."""
+        invoice = self.get_by_id(invoice_id)
+        if invoice:
+            invoice.status = "paid"
+            invoice.payment_reference = payment_reference
+            self.db.commit()
+            self.db.refresh(invoice)
+        return invoice
