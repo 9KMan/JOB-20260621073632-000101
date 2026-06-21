@@ -1,45 +1,46 @@
 # models/__init__.py
-"""Database models package.
-
-This package contains all SQLAlchemy ORM models for the AP Automation Engine.
-"""
+"""Database models package."""
 
 from models.base import Base
-from models.invoice import Invoice, InvoiceLine
-from models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from models.delivery_note import DeliveryNote, DeliveryNoteLine
 from models.balance_ledger import BalanceLedger
 from models.cross_ref import CrossRef
+from models.delivery_note import DeliveryNote
 from models.enums import (
-    InvoiceStatus,
-    PurchaseOrderStatus,
-    DeliveryNoteStatus,
-    MatchStatus,
-    MatchDecision,
-    ExceptionType,
+    ExceptionReason,
     ExceptionStatus,
-    SourceSystem,
+    InvoiceStatus,
+    MatchConfidence,
+    MatchDecision,
+    MatchStatus,
+    PurchaseOrderStatus,
 )
+from models.invoice import Invoice
+from models.purchase_order import PurchaseOrder
+
+__all_models__ = [
+    "Invoice",
+    "PurchaseOrder",
+    "DeliveryNote",
+    "BalanceLedger",
+    "CrossRef",
+]
 
 __all__ = [
-    # Base
     "Base",
-    # Enums
+    "Invoice",
+    "PurchaseOrder",
+    "DeliveryNote",
+    "BalanceLedger",
+    "CrossRef",
     "InvoiceStatus",
     "PurchaseOrderStatus",
     "DeliveryNoteStatus",
     "MatchStatus",
     "MatchDecision",
-    "ExceptionType",
+    "MatchConfidence",
+    "ExceptionReason",
     "ExceptionStatus",
-    "SourceSystem",
-    # Models
-    "Invoice",
-    "InvoiceLine",
-    "PurchaseOrder",
-    "PurchaseOrderLine",
-    "DeliveryNote",
-    "DeliveryNoteLine",
-    "BalanceLedger",
-    "CrossRef",
 ]
+
+# Re-export enums for convenience
+from models.enums import DeliveryNoteStatus

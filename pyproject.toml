@@ -1,29 +1,32 @@
 # pyproject.toml
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "ap-automation-engine"
-version = "0.1.0"
-description = "AP Automation Core Engine for FinaRo"
+name = "ap-automation-core"
+version = "1.0.0"
+description = "AP Automation Core Engine for Finaro"
 readme = "README.md"
+license = {text = "PROPRIETARY"}
 requires-python = ">=3.11"
-license = { text = "MIT" }
 authors = [
-    { name = "FinaRo", email = "dev@finaro.com" }
+    {name = "Finaro Engineering", email = "engineering@finaro.com"}
 ]
-keywords = ["ap", "automation", "invoice", "matching", "fastapi"]
+keywords = ["ap", "automation", "invoice", "matching", "erp"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Framework :: FastAPI",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Office/Business :: Financial",
+    "Framework :: FastAPI",
 ]
 
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "pydantic>=2.6.0",
@@ -45,22 +48,16 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
-    "types-python-jose>=3.3.4",
-    "types-passlib>=1.7.4",
+    "pre-commit>=3.7.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
 Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
-Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
-Issues = "https://github.com/9KMan/JOB-20260621073632-000101/issues"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/app"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "core*", "models*", "services*", "workers*", "migrations*"]
 
 [tool.ruff]
 line-length = 100
@@ -68,7 +65,7 @@ target-version = "py311"
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
-    "F",   # pyflakes
+    "F",   # Pyflakes
     "I",   # isort
     "C",   # flake8-comprehensions
     "B",   # flake8-bugbear
@@ -80,34 +77,33 @@ ignore = [
     "C901",  # too complex
 ]
 
-[tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]
-"tests/*" = ["F811"]
-
 [tool.mypy]
 python_version = "3.11"
 strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-follow_imports = "normal"
 ignore_missing_imports = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
-minversion = "8.1"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["api", "core", "models", "services", "workers"]
+omit = ["*/tests/*", "*/migrations/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]

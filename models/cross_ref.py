@@ -1,267 +1,161 @@
 # models/cross_ref.py
-"""CrossRef SQLAlchemy model for the learning/matching loop."""
+"""Cross Reference model for the learning loop."""
 
-import uuid
-from datetime import date
+from datetime import datetime, timezone
 from decimal import Decimal
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, CommonMixin
-from models.enums import MatchDecision, MatchStatus
+from models.base import Base, TimestampMixin, UUIDMixin
+from models.enums import MatchConfidence, MatchDecision, MatchStatus
+
+if TYPE_CHECKING:
+    from models.invoice import Invoice
+    from models.purchase_order import PurchaseOrderLine
 
 
-class CrossRef(Base, CommonMixin):
-    """Cross Reference model for tracking match history and learning.
+class CrossRef(Base, UUIDMixin, TimestampMixin):
+    """
+    Cross Reference table for the learning loop.
 
-    This table implements the learning loop by recording:
-    - Match patterns (invoice-PO-DN combinations)
-    - Confidence scores and decisions
-    - User confirmations/corrections
-    - Promotion rules for future matching
+    This table tracks confirmed matches between invoices and PO lines,
+    enabling the system to learn and improve matching accuracy over time.
     """
 
     __tablename__ = "cross_ref"
     __table_args__ = (
-        Index("ix_cross_ref_invoice_id", "invoice_id"),
-        Index("ix_cross_ref_po_id", "po_id"),
-        Index("ix_cross_ref_dn_id", "dn_id"),
-        Index("ix_cross_ref_confirmed_at", "confirmed_at"),
-        Index("ix_cross_ref_match_hash", "match_hash"),
-        {"schema": None},
+        Index("ix_xref_invoice_id", "invoice_id"),
+        Index("ix_xref_po_line_id", "purchase_order_line_id"),
+        Index("ix_xref_vendor_item", "vendor_number", "supplier_item_number"),
+        Index("ix_xref_item_number", "item_number"),
+        Index("ix_xref_match_score", "match_score"),
     )
 
-    # Document references
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+    # Reference to Invoice
+    invoice_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    invoice_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-    invoice_date: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    invoice_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
-    )
-
-    po_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    po_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-    po_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 2),
-        nullable=True,
-    )
-
-    dn_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("delivery_notes.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    dn_number: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    # Match attributes
-    match_hash: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-        index=True,
-        comment="Hash of match attributes for quick lookup",
-    )
-    match_score: Mapped[float] = mapped_column(
-        Numeric(5, 4),
-        nullable=False,
-        comment="Calculated match score (0-1)",
-    )
-    price_score: Mapped[float | None] = mapped_column(
-        Numeric(5, 4),
-        nullable=True,
-    )
-    quantity_score: Mapped[float | None] = mapped_column(
-        Numeric(5, 4),
-        nullable=True,
-    )
-    date_score: Mapped[float | None] = mapped_column(
-        Numeric(5, 4),
-        nullable=True,
-    )
-    description_score: Mapped[float | None] = mapped_column(
-        Numeric(5, 4),
-        nullable=True,
-    )
-
-    # Match decision
-    decision: Mapped[MatchDecision] = mapped_column(
-        nullable=False,
-    )
-    status: Mapped[MatchStatus] = mapped_column(
-        nullable=False,
-        default=MatchStatus.PENDING,
-    )
-
-    # Learning tracking
-    is_confirmed: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-    )
-    confirmed_by: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-    confirmed_at: Mapped[date | None] = mapped_column(
-        Date,
-        nullable=True,
-    )
-    confirmation_source: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        comment="How was this confirmed: user, system, auto",
-    )
-
-    # Promotion tracking
-    confirmation_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-    )
-    rejection_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-    )
-    promotion_level: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        comment="0=new, 1=learned, 2=trusted, 3=canonical",
-    )
-    is_promotion_active: Mapped[bool] = mapped_column(
-        default=True,
         nullable=False,
     )
 
-    # Variance details
-    price_variance: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
-    )
-    quantity_variance: Mapped[Decimal | None] = mapped_column(
-        Numeric(15, 4),
-        nullable=True,
+    # Reference to PO Line
+    purchase_order_line_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+        nullable=False,
     )
 
-    # Attributes for learning
-    vendor_id: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        index=True,
+    # Match information at time of creation
+    match_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    match_decision: Mapped[MatchDecision] = mapped_column(
+        Enum(MatchDecision),
+        nullable=False,
     )
-    product_sku: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
+    match_confidence: Mapped[MatchConfidence] = mapped_column(
+        Enum(MatchConfidence),
+        nullable=False,
     )
-    description_text: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+    match_status: Mapped[MatchStatus] = mapped_column(
+        Enum(MatchStatus),
+        default=MatchStatus.COMPLETED,
+        nullable=False,
     )
 
-    # User notes
-    notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
+    # Match criteria details
+    price_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    quantity_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    date_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    item_match_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+
+    # Vendor item mapping (learned from confirmed matches)
+    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    supplier_item_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    our_item_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    item_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Standard price learned from confirmed matches
+    standard_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    standard_quantity: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+
+    # Usage tracking for learning algorithm
+    times_matched: Mapped[int] = mapped_column(Integer, default=0)
+    times_confirmed: Mapped[int] = mapped_column(Integer, default=0)
+    times_rejected: Mapped[int] = mapped_column(Integer, default=0)
+    confirmation_rate: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    last_matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Promoted from manual review (becomes a learned match)
+    is_promoted: Mapped[bool] = mapped_column(default=False)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(default=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivation_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Relationships
-    invoice: Mapped["Invoice | None"] = relationship(
+    invoice: Mapped["Invoice"] = relationship(
         "Invoice",
         back_populates="cross_refs",
-        foreign_keys=[invoice_id],
     )
-    purchase_order: Mapped["PurchaseOrder | None"] = relationship(
-        "PurchaseOrder",
-        back_populates="cross_refs",
-        foreign_keys=[po_id],
-    )
-    delivery_note: Mapped["DeliveryNote | None"] = relationship(
-        "DeliveryNote",
-        back_populates="cross_refs",
-        foreign_keys=[dn_id],
+    purchase_order_line: Mapped["PurchaseOrderLine"] = relationship(
+        "PurchaseOrderLine",
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<CrossRef INV:{self.invoice_number} PO:{self.po_number} "
-            f"DN:{self.dn_number} Score:{self.match_score}>"
-        )
+        return f"<CrossRef {self.vendor_number}:{self.supplier_item_number} -> {self.our_item_number}>"
 
-    @property
-    def is_trusted(self) -> bool:
-        """Check if this match is trusted (can be used for auto-match)."""
-        return self.promotion_level >= 2 or self.confirmation_count >= 3
+    def update_confirmation(
+        self,
+        confirmed: bool,
+        score_delta: float = 0.0,
+    ) -> None:
+        """Update confirmation stats when a match is confirmed or rejected."""
+        self.last_matched_at = datetime.now(timezone.utc)
 
-    @property
-    def is_canonical(self) -> bool:
-        """Check if this is a canonical (authoritative) match."""
-        return self.promotion_level >= 3
+        if confirmed:
+            self.times_confirmed += 1
+            self.match_confidence = MatchConfidence.HIGH
+        else:
+            self.times_rejected += 1
 
-    def should_auto_match(self, min_score: float = 0.85) -> bool:
-        """Determine if this match should be used for auto-matching.
+        self.times_matched += 1
 
-        Args:
-            min_score: Minimum score threshold
+        # Update confirmation rate
+        if self.times_matched > 0:
+            self.confirmation_rate = self.times_confirmed / self.times_matched
 
-        Returns:
-            bool: True if should auto-match
-        """
-        if self.decision == MatchDecision.REJECTED:
-            return False
-        if self.rejection_count > 0:
-            return False
-        return self.match_score >= min_score and (self.is_confirmed or self.is_trusted)
+        # Update match score with delta
+        if score_delta != 0.0:
+            self.match_score = max(0.0, min(100.0, self.match_score + score_delta))
 
-    def promote(self) -> bool:
-        """Promote this cross-reference to the next level.
+        # Deactivate if rejection rate is too high
+        if self.times_matched >= 5 and self.confirmation_rate < 0.3:
+            self.deactivate("Low confirmation rate")
 
-        Returns:
-            bool: True if promotion occurred
-        """
-        if self.promotion_level < 3:
-            self.promotion_level += 1
-            return True
-        return False
+    def deactivate(self, reason: str | None = None) -> None:
+        """Deactivate this cross-reference entry."""
+        self.is_active = False
+        self.deactivated_at = datetime.now(timezone.utc)
+        self.deactivation_reason = reason
 
-    def confirm(self, confirmed_by: str | None = None) -> None:
-        """Confirm this match.
-
-        Args:
-            confirmed_by: User who confirmed
-        """
-        self.is_confirmed = True
-        self.confirmed_by = confirmed_by
-        self.confirmation_count += 1
-        self.promote()
-
-    def reject(self) -> None:
-        """Reject this match."""
-        self.rejection_count += 1
-        self.is_confirmed = False
-        if self.rejection_count >= 3:
-            self.is_promotion_active = False
+    def promote(self) -> None:
+        """Promote this manual match to a learned match."""
+        self.is_promoted = True
+        self.promoted_at = datetime.now(timezone.utc)
