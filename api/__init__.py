@@ -1,16 +1,6 @@
 // api/__init__.py
-"""API package for AP Automation Engine."""
+"""API package initialization."""
 
-from api.schemas import (
-    PaginationParams,
-    ErrorResponse,
-    SuccessResponse,
-    HealthResponse,
-)
+from api.v1.router import api_router
 
-__all__ = [
-    "PaginationParams",
-    "ErrorResponse",
-    "SuccessResponse",
-    "HealthResponse",
-]
+__all__ = ["api_router"]

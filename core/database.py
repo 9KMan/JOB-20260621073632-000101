@@ -1,35 +1,73 @@
 // core/database.py
-"""Async SQLAlchemy database session management."""
+"""Async SQLAlchemy database session management.
+
+Provides async session factory and dependency injection for FastAPI.
+"""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase
 
-from core.config import settings
+from core.config import get_settings
+
+# Naming convention for constraints
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+# Create metadata with naming convention
+metadata = MetaData(naming_convention=convention)
 
 
-# Async engine for application use
-engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DATABASE_ECHO,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-)
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base class.
 
-# Async session factory
-async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    engine,
+    All database models should inherit from this class.
+    Provides common functionality like timestamps.
+    """
+
+    metadata = metadata
+
+
+def create_engine() -> AsyncEngine:
+    """Create async SQLAlchemy engine.
+
+    Returns:
+        AsyncEngine: Configured async engine.
+    """
+    settings = get_settings()
+
+    engine = create_async_engine(
+        settings.database.url,
+        pool_size=settings.database.pool_size,
+        max_overflow=settings.database.max_overflow,
+        pool_timeout=settings.database.pool_timeout,
+        pool_recycle=settings.database.pool_recycle,
+        echo=settings.database.echo,
+        pool_pre_ping=True,
+    )
+
+    return engine
+
+
+# Create engine instance
+engine = create_engine()
+
+# Create async session factory
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
@@ -37,36 +75,19 @@ async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
 )
 
 
-# Sync engine for Alembic migrations
-sync_engine = create_engine(
-    settings.DATABASE_SYNC_URL,
-    echo=settings.DATABASE_ECHO,
-    pool_pre_ping=True,
-)
-
-
-# Sync session factory for migrations
-SyncSessionLocal = sessionmaker(
-    sync_engine,
-    autocommit=False,
-    autoflush=False,
-    class_=Session,
-)
-
-
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency that provides an async database session.
+    """Dependency for getting async database session.
 
     Yields:
-        AsyncSession: SQLAlchemy async session
+        AsyncSession: Database session that auto-closes after use.
 
     Example:
-        @router.get("/items")
+        @app.get("/items")
         async def get_items(db: AsyncSession = Depends(get_db_session)):
-            ...
+            result = await db.execute(select(Item))
+            return result.scalars().all()
     """
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
@@ -78,73 +99,43 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 @asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for database session outside of FastAPI dependencies.
+async def get_db_session_context() -> AsyncGenerator[AsyncSession, None]:
+    """Context manager for database session.
+
+    Useful for non-FastAPI contexts like background workers.
 
     Yields:
-        AsyncSession: SQLAlchemy async session
+        AsyncSession: Database session.
 
     Example:
-        async with get_db_context() as db:
-            result = await db.execute(select(Model))
+        async with get_db_session_context() as db:
+            result = await db.execute(select(Invoice))
+            invoices = result.scalars().all()
     """
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()
 
 
 async def init_db() -> None:
-    """
-    Initialize database by creating all tables.
+    """Initialize database tables.
 
-    This function imports all models to ensure they are registered
-    with the declarative base before creating tables.
+    Creates all tables defined in models.
+    Use Alembic migrations for production.
     """
-    # Import models to register them with the base
-    from models.base import Base
-
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db() -> None:
-    """Close database connections on application shutdown."""
+    """Close database connections.
+
+    Call on application shutdown.
+    """
     await engine.dispose()
-
-
-class DatabaseManager:
-    """
-    Database manager for manual transaction control.
-
-    Example:
-        async with DatabaseManager() as db:
-            db.add(model)
-            await db.commit()
-    """
-
-    def __init__(self) -> None:
-        self._session: AsyncSession | None = None
-
-    async def __aenter__(self) -> AsyncSession:
-        self._session = async_session_factory()
-        return self._session
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        if self._session:
-            if exc_type:
-                await self._session.rollback()
-            else:
-                await self._session.commit()
-            await self._session.close()
-
-    @property
-    def session(self) -> AsyncSession:
-        """Get the current session."""
-        if self._session is None:
-            raise RuntimeError("DatabaseManager not initialized")
-        return self._session

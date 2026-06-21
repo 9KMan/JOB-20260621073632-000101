@@ -1,162 +1,154 @@
 // models/balance_ledger.py
-"""Balance Ledger SQLAlchemy model."""
+"""BalanceLedger database model.
 
+Tracks balance information for PO lines, enabling
+calculation of remaining quantities and amounts.
+"""
+
+from datetime import datetime
 from decimal import Decimal
-from datetime import date
 from typing import TYPE_CHECKING
+from uuid import UUID
 
-from sqlalchemy import (
-    Date,
-    ForeignKey,
-    Index,
-    Numeric,
-    String,
-    func,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import LineStatus
+from models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from models.invoice import InvoiceLine
     from models.purchase_order import PurchaseOrderLine
 
 
-class BalanceLedger(Base, UUIDMixin, TimestampMixin):
-    """
-    Balance Ledger for tracking PO line balances.
+class BalanceLedger(Base, TimestampMixin):
+    """Balance ledger entry model.
 
-    This table maintains the running balance for each PO line,
-    tracking quantities and amounts across receipts and invoices.
+    Maintains running balances for PO lines to track:
+    - Total ordered quantity
+    - Delivered quantity
+    - Invoiced quantity
+    - Remaining balances
     """
 
     __tablename__ = "balance_ledger"
     __table_args__ = (
         Index("ix_balance_ledger_po_line_id", "po_line_id"),
-        Index("ix_balance_ledger_transaction_type", "transaction_type"),
-        Index("ix_balance_ledger_transaction_date", "transaction_date"),
-        Index("ix_balance_ledger_created_at", "created_at"),
-        {
-            "schema": "public",
-        },
+        Index("ix_balance_ledger_invoice_line_id", "invoice_line_id"),
+        UniqueConstraint(
+            "po_line_id",
+            "invoice_line_id",
+            name="uq_ledger_po_invoice_line",
+        ),
+        {"schema": "public"},
     )
 
-    # PO Line reference
-    po_line_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("purchase_order_lines.id", ondelete="CASCADE"),
+    # Foreign keys
+    po_line_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("public.purchase_order_lines.id", ondelete="CASCADE"),
         nullable=False,
-        doc="PO line this balance belongs to",
     )
-
-    # Transaction reference
-    transaction_type: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        doc="Type: RECEIPT, INVOICE, CREDIT_MEMO, ADJUSTMENT",
-    )
-    transaction_id: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        doc="Reference to source document (DN, Invoice, etc.)",
-    )
-    transaction_line_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False),
+    invoice_line_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("public.invoice_lines.id", ondelete="SET NULL"),
         nullable=True,
-        doc="Reference to source line",
     )
 
-    # Date information
-    transaction_date: Mapped[date] = mapped_column(
-        Date,
+    # Balance quantities
+    ordered_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        doc="Date of transaction",
     )
-    posting_date: Mapped[date] = mapped_column(
-        Date,
+    delivered_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        doc="Date to post to ledger",
+        default=Decimal("0"),
     )
-
-    # Quantities
-    opening_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
+    invoiced_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        default=Decimal("0.000"),
-        doc="Quantity before this transaction",
-    )
-    transaction_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-        doc="Quantity added/deducted by this transaction",
-    )
-    closing_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3),
-        nullable=False,
-        doc="Quantity after this transaction",
+        default=Decimal("0"),
     )
 
-    # Amounts
-    opening_amount: Mapped[Decimal] = mapped_column(
+    # Balance amounts
+    ordered_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-        default=Decimal("0.00"),
-        doc="Amount before this transaction",
     )
-    transaction_amount: Mapped[Decimal] = mapped_column(
+    delivered_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-        doc="Amount added/deducted by this transaction",
+        default=Decimal("0"),
     )
-    closing_amount: Mapped[Decimal] = mapped_column(
+    invoiced_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-        doc="Amount after this transaction",
+        default=Decimal("0"),
     )
 
-    # Unit price for calculations
+    # Unit price (for calculation)
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
         nullable=False,
-        doc="Unit price at time of transaction",
     )
 
-    # Status
-    status: Mapped[LineStatus] = mapped_column(
-        String(20),
+    # Remaining balances (computed but stored for efficiency)
+    remaining_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        default=LineStatus.PENDING,
-        doc="Entry status",
+    )
+    remaining_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
     )
 
-    # User tracking
-    created_by: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="User who created the entry",
-    )
-    approved_by: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="User who approved the entry",
-    )
+    # References
+    invoice_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delivery_note_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # Additional metadata
-    notes: Mapped[str | None] = mapped_column(
-        String(500),
+    # Timestamps for audit
+    last_invoice_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
-        doc="Notes or reference",
+    )
+    last_delivery_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     # Relationships
     po_line: Mapped["PurchaseOrderLine"] = relationship(
         "PurchaseOrderLine",
+        back_populates="balance_ledgers",
+    )
+    invoice_line: Mapped["InvoiceLine | None"] = relationship(
+        "InvoiceLine",
         back_populates="balance_ledger",
+        uselist=False,
     )
 
+    def update_balances(
+        self,
+        delivered_qty: Decimal | None = None,
+        invoiced_qty: Decimal | None = None,
+    ) -> None:
+        """Update remaining balances after delivery or invoice.
+
+        Args:
+            delivered_qty: Quantity delivered in this transaction.
+            invoiced_qty: Quantity invoiced in this transaction.
+        """
+        if delivered_qty is not None:
+            self.delivered_quantity += delivered_qty
+            self.delivered_amount += delivered_qty * self.unit_price
+
+        if invoiced_qty is not None:
+            self.invoiced_quantity += invoiced_qty
+            self.invoiced_amount += invoiced_qty * self.unit_price
+
+        self.remaining_quantity = self.ordered_quantity - self.delivered_quantity
+        self.remaining_amount = self.ordered_amount - self.delivered_amount
+
     def __repr__(self) -> str:
-        return (
-            f"<BalanceLedger(id={self.id}, po_line_id={self.po_line_id}, "
-            f"type={self.transaction_type}, qty={self.transaction_quantity})>"
-        )
+        return f"<BalanceLedger po_line={self.po_line_id}>"

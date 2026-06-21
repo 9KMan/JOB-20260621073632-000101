@@ -1,35 +1,31 @@
-# core/security.py
-"""Security utilities for JWT and password hashing.
+// core/security.py
+"""JWT and password hashing security utilities.
 
-Provides HS256 JWT token handling and bcrypt password hashing.
+Provides JWT token creation/verification and password hashing
+using bcrypt.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from core.config import get_settings
 
-
-# Password hashing context using bcrypt
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=12,
-)
+# Password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password.
 
     Args:
-        plain_password: Plain text password to verify
-        hashed_password: Hashed password to compare against
+        plain_password: Plain text password.
+        hashed_password: Hashed password from database.
 
     Returns:
-        bool: True if password matches, False otherwise
+        bool: True if password matches, False otherwise.
     """
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -38,142 +34,151 @@ def get_password_hash(password: str) -> str:
     """Hash a password using bcrypt.
 
     Args:
-        password: Plain text password to hash
+        password: Plain text password to hash.
 
     Returns:
-        str: Bcrypt hashed password
+        str: Hashed password.
     """
     return pwd_context.hash(password)
 
 
 def create_access_token(
-    data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
-    token_type: str = "access",
+    subject: str | Any,
+    expires_delta: timedelta | None = None,
+    additional_claims: dict[str, Any] | None = None,
 ) -> str:
     """Create a JWT access token.
 
     Args:
-        data: Payload data to encode in the token
-        expires_delta: Optional custom expiration time
-        token_type: Type of token (access or refresh)
+        subject: The token subject (typically user ID).
+        expires_delta: Optional custom expiration time.
+        additional_claims: Additional claims to include in token.
 
     Returns:
-        str: Encoded JWT token
+        str: Encoded JWT token.
     """
     settings = get_settings()
-    jwt_settings = settings.jwt
 
-    to_encode = data.copy()
-
-    if token_type == "access":
-        expire = datetime.now(timezone.utc) + (
-            expires_delta or timedelta(minutes=jwt_settings.jwt_access_token_expire_minutes)
-        )
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(
-            days=jwt_settings.jwt_refresh_token_expire_days
+            minutes=settings.jwt.access_token_expire_minutes
         )
 
-    to_encode.update({
+    to_encode: dict[str, Any] = {
         "exp": expire,
+        "sub": str(subject),
         "iat": datetime.now(timezone.utc),
-        "type": token_type,
-    })
+        "type": "access",
+    }
+
+    if additional_claims:
+        to_encode.update(additional_claims)
 
     encoded_jwt = jwt.encode(
         to_encode,
-        jwt_settings.jwt_secret_key,
-        algorithm=jwt_settings.jwt_algorithm,
+        settings.jwt.secret_key,
+        algorithm=settings.jwt.algorithm,
     )
 
     return encoded_jwt
 
 
-def create_refresh_token(data: Dict[str, Any]) -> str:
-    """Create a JWT refresh token.
+def decode_token(token: str) -> dict[str, Any]:
+    """Decode and verify a JWT token.
 
     Args:
-        data: Payload data to encode in the token
+        token: JWT token string.
 
     Returns:
-        str: Encoded JWT refresh token
-    """
-    return create_access_token(data, token_type="refresh")
+        dict: Decoded token payload.
 
-
-def decode_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode and validate a JWT token.
-
-    Args:
-        token: JWT token string to decode
-
-    Returns:
-        Optional[Dict[str, Any]]: Decoded token payload or None if invalid
+    Raises:
+        JWTError: If token is invalid or expired.
     """
     settings = get_settings()
-    jwt_settings = settings.jwt
 
-    try:
-        payload = jwt.decode(
-            token,
-            jwt_settings.jwt_secret_key,
-            algorithms=[jwt_settings.jwt_algorithm],
-        )
-        return payload
-    except JWTError:
-        return None
-
-
-def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, Any]]:
-    """Verify a JWT token and check its type.
-
-    Args:
-        token: JWT token string to verify
-        token_type: Expected token type
-
-    Returns:
-        Optional[Dict[str, Any]]: Decoded payload if valid, None otherwise
-    """
-    payload = decode_token(token)
-
-    if payload is None:
-        return None
-
-    if payload.get("type") != token_type:
-        return None
+    payload = jwt.decode(
+        token,
+        settings.jwt.secret_key,
+        algorithms=[settings.jwt.algorithm],
+    )
 
     return payload
 
 
-class TokenData:
-    """Token data extracted from JWT."""
+class TokenPayload:
+    """JWT token payload model."""
 
     def __init__(
         self,
+        exp: datetime,
         sub: str,
-        user_id: Optional[str] = None,
-        roles: Optional[list[str]] = None,
-        exp: Optional[datetime] = None,
+        iat: datetime,
+        type: str,
+        **extra: Any,
     ) -> None:
-        self.sub = sub
-        self.user_id = user_id or sub
-        self.roles = roles or []
         self.exp = exp
+        self.sub = sub
+        self.iat = iat
+        self.type = type
+        self.extra = extra
 
     @classmethod
-    def from_payload(cls, payload: Dict[str, Any]) -> "TokenData":
-        """Create TokenData from JWT payload.
-
-        Args:
-            payload: Decoded JWT payload
-
-        Returns:
-            TokenData: Token data instance
-        """
+    def from_dict(cls, data: dict[str, Any]) -> "TokenPayload":
+        """Create from decoded token dictionary."""
         return cls(
-            sub=payload.get("sub", ""),
-            user_id=payload.get("user_id"),
-            roles=payload.get("roles", []),
-            exp=datetime.fromtimestamp(payload.get("exp", 0), tz=timezone.utc),
+            exp=datetime.fromtimestamp(data["exp"], tz=timezone.utc),
+            sub=data["sub"],
+            iat=datetime.fromtimestamp(data["iat"], tz=timezone.utc),
+            type=data.get("type", "access"),
+            **{k: v for k, v in data.items() if k not in ("exp", "sub", "iat", "type")},
         )
+
+
+class UserPayload:
+    """User payload extracted from JWT token."""
+
+    def __init__(
+        self,
+        user_id: str,
+        email: str | None = None,
+        roles: list[str] | None = None,
+        **extra: Any,
+    ) -> None:
+        self.user_id = user_id
+        self.email = email
+        self.roles = roles or []
+        self.extra = extra
+
+    @classmethod
+    def from_token_payload(cls, payload: dict[str, Any]) -> "UserPayload":
+        """Create user payload from decoded JWT."""
+        return cls(
+            user_id=payload["sub"],
+            email=payload.get("email"),
+            roles=payload.get("roles", []),
+            **{k: v for k, v in payload.items() if k not in ("sub", "email", "roles")},
+        )
+
+
+async def get_current_user(token: str) -> UserPayload:
+    """Get current user from JWT token.
+
+    This is an async wrapper for use in FastAPI dependencies.
+
+    Args:
+        token: JWT token string.
+
+    Returns:
+        UserPayload: Current user information.
+
+    Raises:
+        JWTError: If token is invalid or expired.
+    """
+    try:
+        payload = decode_token(token)
+        return UserPayload.from_token_payload(payload)
+    except JWTError as e:
+        raise JWTError(f"Invalid token: {e!s}") from e

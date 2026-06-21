@@ -8,21 +8,20 @@ services:
       dockerfile: Dockerfile
     container_name: ap-automation-api
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
-      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-95}
-      - THRESHOLD_MID=${THRESHOLD_MID:-80}
-      - THRESHOLD_LOW=${THRESHOLD_LOW:-60}
-      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-2.0}
-      - TOLERANCE_QTY=${TOLERANCE_QTY:-5.0}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5432
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - THRESHOLD_HIGH=95
+      - THRESHOLD_MID=70
+      - THRESHOLD_LOW=40
+      - TOLERANCE_PRICE=5.0
+      - TOLERANCE_QTY=10.0
+      - LOG_LEVEL=INFO
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,7 +32,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 10s
     restart: unless-stopped
     networks:
       - ap-network
@@ -42,19 +41,18 @@ services:
     image: postgres:15-alpine
     container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-apuser}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appass}
-      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
+      - POSTGRES_USER=apuser
+      - POSTGRES_PASSWORD=appass
+      - POSTGRES_DB=apautomation
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
     restart: unless-stopped
     networks:
       - ap-network
@@ -63,25 +61,20 @@ services:
     image: edoburu/pgbouncer:latest
     container_name: ap-automation-pgbouncer
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
+      - DATABASE_URL=postgresql://apuser:appass@postgres:5432/apautomation
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
       - MIN_POOL_SIZE=5
       - RESERVE_POOL_SIZE=5
       - RESERVE_POOL_TIMEOUT=5
-      - MAX_DB_CONNECTIONS=50
-      - PGBOUNCER_USER=${POSTGRES_USER:-apuser}
-      - PGBOUNCER_PASSWORD=${POSTGRES_PASSWORD:-appass}
     ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
+      - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pgbouncer -v"]
+      test: ["CMD-SHELL", "pgbouncer -V"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -94,19 +87,23 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ap-automation-migrations
-    command: ["alembic", "upgrade", "head"]
     environment:
-      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5432
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     networks:
       - ap-network
 
-networks:
-  ap-network:
-    driver: bridge
-
 volumes:
   postgres_data:
     driver: local
+
+networks:
+  ap-network:
+    driver: bridge

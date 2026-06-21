@@ -1,94 +1,102 @@
 // models/enums.py
-"""Enumeration types for AP Automation Engine."""
+"""Enum types for the AP Automation Core Engine.
 
-from enum import Enum
+Defines all status enums and decision types used throughout
+the application.
+"""
+
+from enum import StrEnum
 
 
-class InvoiceStatus(str, Enum):
-    """Invoice processing status."""
+class InvoiceStatus(StrEnum):
+    """Invoice status values."""
 
     DRAFT = "draft"
     PENDING = "pending"
-    PROCESSING = "processing"
+    SUBMITTED = "submitted"
+    MATCHING = "matching"
     MATCHED = "matched"
     APPROVED = "approved"
     EXCEPTION = "exception"
     REJECTED = "rejected"
+    PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, Enum):
-    """Purchase order status."""
+class PurchaseOrderStatus(StrEnum):
+    """Purchase order status values."""
 
     DRAFT = "draft"
-    SENT = "sent"
-    ACKNOWLEDGED = "acknowledged"
-    PARTIALLY_RECEIVED = "partially_received"
+    APPROVED = "approved"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
+
+
+class DeliveryNoteStatus(StrEnum):
+    """Delivery note status values."""
+
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
     RECEIVED = "received"
+    PARTIAL = "partial"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class DeliveryNoteStatus(str, Enum):
-    """Delivery note status."""
-
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    PARTIALLY_INVOICED = "partially_invoiced"
-    FULLY_INVOICED = "fully_invoiced"
-    CANCELLED = "cancelled"
-
-
-class MatchStatus(str, Enum):
-    """Invoice-PO matching status."""
+class MatchingStatus(StrEnum):
+    """Matching process status values."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
-    FULL_MATCH = "full_match"
-    PARTIAL_MATCH = "partial_match"
-    NO_MATCH = "no_match"
-    EXCEPTION = "exception"
-
-
-class DecisionType(str, Enum):
-    """Matching decision type."""
-
-    AUTO_APPROVED = "auto_approved"
-    AUTO_REJECTED = "auto_rejected"
-    MANUAL_REVIEW = "manual_review"
-    EXCEPTION = "exception"
-
-
-class ExceptionType(str, Enum):
-    """Exception categorization types."""
-
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MISSING_DELIVERY_NOTE = "missing_delivery_note"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    DATE_VARIANCE = "date_variance"
-    UNMATCHED_LINE = "unmatched_line"
-    MULTIPLE_MATCHES = "multiple_matches"
-    CROSS_ENTITY_CONFLICT = "cross_entity_conflict"
-
-
-class LineStatus(str, Enum):
-    """Status for individual invoice/PO/delivery note lines."""
-
-    PENDING = "pending"
-    MATCHED = "matched"
-    PARTIALLY_MATCHED = "partially_matched"
-    EXCEPTION = "exception"
+    COMPLETED = "completed"
+    FAILED = "failed"
     CANCELLED = "cancelled"
 
 
-class MatchConfidence(str, Enum):
-    """Match confidence level."""
+class MatchDecision(StrEnum):
+    """Matching decision outcomes."""
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    NONE = "none"
+    AUTO_APPROVED = "auto_approved"
+    ONE_CLICK_REVIEW = "one_click_review"
+    MANUAL_REVIEW = "manual_review"
+    EXCEPTION = "exception"
+    NO_MATCH = "no_match"
+    REJECTED = "rejected"
+
+
+class ExceptionType(StrEnum):
+    """Exception types for matching exceptions."""
+
+    PRICE_VARIANCE = "price_variance"
+    QUANTITY_VARIANCE = "quantity_variance"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    MISSING_PO = "missing_po"
+    MISSING_DELIVERY = "missing_delivery"
+    OVER_DELIVERY = "over_delivery"
+    UNDER_DELIVERY = "under_delivery"
+    TIMING_ISSUE = "timing_issue"
+    DUPLICATE_MATCH = "duplicate_match"
+    AMOUNT_MISMATCH = "amount_mismatch"
+    TAX_VARIANCE = "tax_variance"
+    CURRENCY_MISMATCH = "currency_mismatch"
+
+
+class ExceptionStatus(StrEnum):
+    """Exception resolution status values."""
+
+    OPEN = "open"
+    IN_REVIEW = "in_review"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+    ESCALATED = "escalated"
+
+
+class LineMatchStatus(StrEnum):
+    """Line-level matching status."""
+
+    UNMATCHED = "unmatched"
+    PARTIAL_MATCH = "partial_match"
+    FULL_MATCH = "full_match"
+    OVER_MATCH = "over_match"
+    CROSS_MATCH = "cross_match"
