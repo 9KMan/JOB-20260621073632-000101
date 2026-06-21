@@ -1,19 +1,16 @@
-# api/__init__.py
-"""API package initialization.
-
-Exports shared schemas and API configuration.
-"""
+// api/__init__.py
+"""API package for AP Automation Engine."""
 
 from api.schemas import (
-    PaginatedResponse,
+    PaginationParams,
     ErrorResponse,
     SuccessResponse,
-    BaseFilterParams,
+    HealthResponse,
 )
 
 __all__ = [
-    "PaginatedResponse",
+    "PaginationParams",
     "ErrorResponse",
     "SuccessResponse",
-    "BaseFilterParams",
+    "HealthResponse",
 ]

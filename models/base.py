@@ -1,134 +1,96 @@
-# models/base.py
-"""SQLAlchemy declarative base and shared mixins.
+// models/base.py
+"""SQLAlchemy declarative base configuration."""
 
-Provides the base class for all models and common mixins for
-UUID primary keys and timestamp fields.
-"""
-
-import uuid
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
+from sqlalchemy import DateTime, Index, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models.
-
-    All models should inherit from this class.
-    """
+    """Base class for all SQLAlchemy models."""
 
     type_annotation_map = {
-        uuid.UUID: UUID(as_uuid=True),
+        datetime: DateTime(timezone=True),
     }
 
-
-class UUIDMixin:
-    """Mixin providing UUID primary key."""
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        index=True,
-    )
+    @classmethod
+    def generate_uuid(cls) -> str:
+        """Generate a UUID4 string."""
+        return str(uuid4())
 
 
 class TimestampMixin:
-    """Mixin providing created_at and updated_at timestamps.
-
-    Both fields are automatically managed by SQLAlchemy.
-    """
+    """Mixin for created_at and updated_at timestamp columns."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+        doc="Timestamp when the record was created",
     )
-
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+        doc="Timestamp when the record was last updated",
+    )
+
+
+class UUIDMixin:
+    """Mixin for UUID primary key."""
+
+    id: Mapped[str] = mapped_column(
+        primary_key=True,
+        default=UUIDMixin.generate_uuid,
+        doc="UUID primary key",
     )
 
 
 class SoftDeleteMixin:
-    """Mixin providing soft delete functionality."""
+    """Mixin for soft delete functionality."""
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        default=None,
+        doc="Timestamp when the record was soft deleted",
     )
-    is_deleted: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
+    deleted_by: Mapped[str | None] = mapped_column(
+        nullable=True,
+        doc="ID of user who soft deleted the record",
     )
 
-    def soft_delete(self) -> None:
-        """Mark record as deleted."""
-        self.deleted_at = datetime.now(timezone.utc)
-        self.is_deleted = True
-
-    def restore(self) -> None:
-        """Restore a soft-deleted record."""
-        self.deleted_at = None
-        self.is_deleted = False
+    @property
+    def is_deleted(self) -> bool:
+        """Check if the record is soft deleted."""
+        return self.deleted_at is not None
 
 
-class TableNameMixin:
-    """Mixin providing automatic table name generation."""
+def create_indexes(
+    table_name: str,
+    columns: list[str],
+    unique: bool = False,
+    name: str | None = None,
+) -> Index:
+    """
+    Create an index for the specified columns.
 
-    @declared_attr
-    def __tablename__(cls) -> str:
-        """Generate table name from class name.
+    Args:
+        table_name: Name of the table
+        columns: List of column names
+        unique: Whether the index is unique
+        name: Optional custom index name
 
-        Converts CamelCase to snake_case.
-        Example: PurchaseOrder -> purchase_order
-        """
-        import re
-
-        name = cls.__name__
-        # Insert underscore before uppercase letters and lowercase the result
-        table_name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-        return table_name
-
-
-class DictableMixin:
-    """Mixin providing dictionary conversion methods."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary.
-
-        Returns:
-            dict[str, Any]: Dictionary representation of the model
-        """
-        result = {}
-        for column in self.__table__.columns:
-            value = getattr(self, column.name)
-            if isinstance(value, uuid.UUID):
-                result[column.name] = str(value)
-            elif isinstance(value, datetime):
-                result[column.name] = value.isoformat() if value else None
-            else:
-                result[column.name] = value
-        return result
-
-    def to_dict_safe(self, exclude: list[str] | None = None) -> dict[str, Any]:
-        """Convert model to dictionary, excluding specified fields.
-
-        Args:
-            exclude: List of field names to exclude
-
-        Returns:
-            dict[str, Any]: Dictionary representation
-        """
-        exclude = exclude or []
-        result = self.to_dict()
-        for field in exclude:
-            result.pop(field, None)
-        return result
+    Returns:
+        Index object
+    """
+    idx_name = name or f"ix_{table_name}_{'_'.join(columns)}"
+    return Index(
+        idx_name,
+        *columns,
+        unique=unique,
+        if_not_exists=True,
+    )

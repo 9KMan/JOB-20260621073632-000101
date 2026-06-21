@@ -1,75 +1,31 @@
-# docker-compose.yml
+// docker-compose.yml
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap_automation_postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
-      POSTGRES_HOST_AUTH_METHOD: md5
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ap_network
-    restart: unless-stopped
-
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap_automation_pgbouncer
-    environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 100
-      DEFAULT_POOL_SIZE: 10
-      RESERVE_POOL_SIZE: 5
-      RESERVE_POOL_TIMEOUT: 3
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "echo -e '\\x30\\x00\\x00\\x00\\x00' | nc localhost 5432 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - ap_network
-    restart: unless-stopped
-
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap_automation_api
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@pgbouncer:5432/${POSTGRES_DB:-apautomation}
-      - DATABASE_POOL_SIZE=10
-      - DATABASE_MAX_OVERFLOW=20
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme-in-production}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - THRESHOLD_HIGH=95
-      - THRESHOLD_MID=70
-      - THRESHOLD_LOW=40
-      - TOLERANCE_PRICE=5.0
-      - TOLERANCE_QTY=10.0
-      - LOG_LEVEL=INFO
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+    container_name: ap-automation-api
     ports:
       - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - THRESHOLD_HIGH=${THRESHOLD_HIGH:-95}
+      - THRESHOLD_MID=${THRESHOLD_MID:-80}
+      - THRESHOLD_LOW=${THRESHOLD_LOW:-60}
+      - TOLERANCE_PRICE=${TOLERANCE_PRICE:-2.0}
+      - TOLERANCE_QTY=${TOLERANCE_QTY:-5.0}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
     depends_on:
+      postgres:
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
     healthcheck:
@@ -78,34 +34,79 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - ap_network
     restart: unless-stopped
-    volumes:
-      - ./:/app
-      - /app/__pycache__
+    networks:
+      - ap-network
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: ap_automation_pgadmin
+  postgres:
+    image: postgres:15-alpine
+    container_name: ap-automation-postgres
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@finaro.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-adminpassword}
+      - POSTGRES_USER=${POSTGRES_USER:-apuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-appass}
+      - POSTGRES_DB=${POSTGRES_DB:-apautomation}
     ports:
-      - "${PGADMIN_PORT:-5050}:80"
-    depends_on:
-      - postgres
-    networks:
-      - ap_network
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
-    profiles:
-      - tools
+    networks:
+      - ap-network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ap-automation-pgbouncer
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=${POSTGRES_DB:-apautomation}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=5
+      - RESERVE_POOL_TIMEOUT=5
+      - MAX_DB_CONNECTIONS=50
+      - PGBOUNCER_USER=${POSTGRES_USER:-apuser}
+      - PGBOUNCER_PASSWORD=${POSTGRES_PASSWORD:-appass}
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgbouncer -v"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ap-network
+
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ap-automation-migrations
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      - DATABASE_SYNC_URL=postgresql+psycopg2://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appass}@postgres:5432/${POSTGRES_DB:-apautomation}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ap-network
 
 networks:
-  ap_network:
+  ap-network:
     driver: bridge
-    name: ap_automation_network
 
 volumes:
   postgres_data:
-    name: ap_automation_postgres_data
+    driver: local
