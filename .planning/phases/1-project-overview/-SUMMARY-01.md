@@ -2,10 +2,10 @@
 
 ## Overview
 **Plan:** 
-**Completed:** 2026-06-21T10:18:54Z
-**Duration:** 1.2 min
+**Completed:** 2026-06-21T10:22:18Z
+**Duration:** 1.3 min
 **Model:** MiniMax-M2.7-highspeed
-**Commit:** 40cefba8
+**Commit:** 7d16af01
 
 ## Execution
 - Files created: 1
@@ -28,15 +28,7 @@ None — plan executed exactly as written.
 // docs/architecture.md
 # FinaRo — AP Automation Core Engine Architecture
 
-| Field | Value |
-|---|---|
-| Project Name | FinaRo — AP Automation Core Engine |
-| Client | Finaro |
-| Type | 3-Way Matching Engine (Invoice × Delivery Note × Purchase Order) |
-| Tier | PREMIUM |
-| Budget | $14,250–$21,375 (150–225 hrs @ $95/hr) |
-| Timeline | 4–8 weeks |
-| Rate | $95/hr |
+FinaRo is a 3-Way Matching Engine designed to automate the reconciliation of Invoices, Delivery Notes (GRN/Goods Receipt), and Purchase Orders. The system establishes a Purchase Order as the anchor point, performs cascade matching across document pairs, and resolves partial matches through a balances ledger before routing decisions to appropriate workflows.
 
 ## Next
 Ready for next plan in this phase.
