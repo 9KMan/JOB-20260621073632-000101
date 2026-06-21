@@ -1,145 +1,111 @@
-// src/app/schemas/__init__.py
-"""API schemas."""
-from app.schemas.auth import (
-    LoginRequest,
-    RefreshTokenRequest,
-    Token,
-    TokenPayload,
+# src/app/schemas/__init__.py
+"""Pydantic schemas for API request/response validation."""
+from src.app.schemas.user import (
     UserCreate,
-    UserInDB,
-    UserResponse,
     UserUpdate,
+    UserResponse,
+    UserListResponse,
 )
-from app.schemas.balance import (
-    BalanceLedgerCreate,
-    BalanceLedgerDetailResponse,
-    BalanceLedgerListResponse,
-    BalanceLedgerResponse,
-    BalanceLedgerUpdate,
-    PurchaseOrderBalanceSummary,
-    SupplierBalanceSummary,
-)
-from app.schemas.base import (
-    ErrorDetail,
-    ErrorResponse,
-    PaginatedResponse,
-    PaginationParams,
-    SuccessResponse,
-    UUIDSchema,
-)
-from app.schemas.delivery_note import (
-    DeliveryNoteCreate,
-    DeliveryNoteDetailResponse,
-    DeliveryNoteLineCreate,
-    DeliveryNoteLineResponse,
-    DeliveryNoteLineUpdate,
-    DeliveryNoteListResponse,
-    DeliveryNoteResponse,
-    DeliveryNoteUpdate,
-)
-from app.schemas.invoice import (
-    InvoiceCreate,
-    InvoiceDetailResponse,
-    InvoiceLineCreate,
-    InvoiceLineResponse,
-    InvoiceLineUpdate,
-    InvoiceListResponse,
-    InvoiceResponse,
-    InvoiceUpdate,
-)
-from app.schemas.match import (
-    MatchConfirmationCreate,
-    MatchConfirmationResponse,
-    MatchCreate,
-    MatchDetailResponse,
-    MatchLineDetailResponse,
-    MatchListResponse,
-    MatchResponse,
-    MatchScoreSummary,
-    MatchUpdate,
-)
-from app.schemas.purchase_order import (
-    PurchaseOrderCreate,
-    PurchaseOrderDetailResponse,
-    PurchaseOrderLineCreate,
-    PurchaseOrderLineResponse,
-    PurchaseOrderLineUpdate,
-    PurchaseOrderListResponse,
-    PurchaseOrderResponse,
-    PurchaseOrderUpdate,
-)
-from app.schemas.supplier import (
+from src.app.schemas.supplier import (
     SupplierCreate,
-    SupplierListResponse,
-    SupplierResponse,
     SupplierUpdate,
+    SupplierResponse,
+    SupplierListResponse,
+)
+from src.app.schemas.purchase_order import (
+    PurchaseOrderCreate,
+    PurchaseOrderUpdate,
+    PurchaseOrderResponse,
+    PurchaseOrderListResponse,
+    PurchaseOrderLineCreate,
+    PurchaseOrderLineUpdate,
+    PurchaseOrderLineResponse,
+)
+from src.app.schemas.invoice import (
+    InvoiceCreate,
+    InvoiceUpdate,
+    InvoiceResponse,
+    InvoiceListResponse,
+    InvoiceLineCreate,
+    InvoiceLineUpdate,
+    InvoiceLineResponse,
+)
+from src.app.schemas.delivery_note import (
+    DeliveryNoteCreate,
+    DeliveryNoteUpdate,
+    DeliveryNoteResponse,
+    DeliveryNoteListResponse,
+    DeliveryNoteLineCreate,
+    DeliveryNoteLineUpdate,
+    DeliveryNoteLineResponse,
+)
+from src.app.schemas.matching import (
+    MatchRequest,
+    MatchResponse,
+    MatchResultResponse,
+    MatchScoreResponse,
+    MatchReviewRequest,
+    MatchDecisionResponse,
+)
+from src.app.schemas.balance import (
+    BalanceResponse,
+    BalanceListResponse,
+    BalanceUpdateRequest,
+)
+from src.app.schemas.auth import (
+    Token,
+    TokenData,
+    LoginRequest,
 )
 
 __all__ = [
-    # Auth
-    "LoginRequest",
-    "RefreshTokenRequest",
-    "Token",
-    "TokenPayload",
+    # User
     "UserCreate",
-    "UserInDB",
-    "UserResponse",
     "UserUpdate",
-    # Balance
-    "BalanceLedgerCreate",
-    "BalanceLedgerDetailResponse",
-    "BalanceLedgerListResponse",
-    "BalanceLedgerResponse",
-    "BalanceLedgerUpdate",
-    "PurchaseOrderBalanceSummary",
-    "SupplierBalanceSummary",
-    # Base
-    "ErrorDetail",
-    "ErrorResponse",
-    "PaginatedResponse",
-    "PaginationParams",
-    "SuccessResponse",
-    "UUIDSchema",
-    # Delivery Note
-    "DeliveryNoteCreate",
-    "DeliveryNoteDetailResponse",
-    "DeliveryNoteLineCreate",
-    "DeliveryNoteLineResponse",
-    "DeliveryNoteLineUpdate",
-    "DeliveryNoteListResponse",
-    "DeliveryNoteResponse",
-    "DeliveryNoteUpdate",
-    # Invoice
-    "InvoiceCreate",
-    "InvoiceDetailResponse",
-    "InvoiceLineCreate",
-    "InvoiceLineResponse",
-    "InvoiceLineUpdate",
-    "InvoiceListResponse",
-    "InvoiceResponse",
-    "InvoiceUpdate",
-    # Match
-    "MatchConfirmationCreate",
-    "MatchConfirmationResponse",
-    "MatchCreate",
-    "MatchDetailResponse",
-    "MatchLineDetailResponse",
-    "MatchListResponse",
-    "MatchResponse",
-    "MatchScoreSummary",
-    "MatchUpdate",
-    # Purchase Order
-    "PurchaseOrderCreate",
-    "PurchaseOrderDetailResponse",
-    "PurchaseOrderLineCreate",
-    "PurchaseOrderLineResponse",
-    "PurchaseOrderLineUpdate",
-    "PurchaseOrderListResponse",
-    "PurchaseOrderResponse",
-    "PurchaseOrderUpdate",
+    "UserResponse",
+    "UserListResponse",
     # Supplier
     "SupplierCreate",
-    "SupplierListResponse",
-    "SupplierResponse",
     "SupplierUpdate",
+    "SupplierResponse",
+    "SupplierListResponse",
+    # Purchase Order
+    "PurchaseOrderCreate",
+    "PurchaseOrderUpdate",
+    "PurchaseOrderResponse",
+    "PurchaseOrderListResponse",
+    "PurchaseOrderLineCreate",
+    "PurchaseOrderLineUpdate",
+    "PurchaseOrderLineResponse",
+    # Invoice
+    "InvoiceCreate",
+    "InvoiceUpdate",
+    "InvoiceResponse",
+    "InvoiceListResponse",
+    "InvoiceLineCreate",
+    "InvoiceLineUpdate",
+    "InvoiceLineResponse",
+    # Delivery Note
+    "DeliveryNoteCreate",
+    "DeliveryNoteUpdate",
+    "DeliveryNoteResponse",
+    "DeliveryNoteListResponse",
+    "DeliveryNoteLineCreate",
+    "DeliveryNoteLineUpdate",
+    "DeliveryNoteLineResponse",
+    # Matching
+    "MatchRequest",
+    "MatchResponse",
+    "MatchResultResponse",
+    "MatchScoreResponse",
+    "MatchReviewRequest",
+    "MatchDecisionResponse",
+    # Balance
+    "BalanceResponse",
+    "BalanceListResponse",
+    "BalanceUpdateRequest",
+    # Auth
+    "Token",
+    "TokenData",
+    "LoginRequest",
 ]

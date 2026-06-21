@@ -1,59 +1,63 @@
-// src/app/database.py
-"""Database connection and session management."""
+# src/app/database.py
+"""
+Database connection and session management.
+Supports both async (asyncpg) and sync (psycopg2) connections.
+"""
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from sqlalchemy import MetaData
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import create_engine
 
-from app.config import settings
+from src.app.config import get_settings
 
-# Naming convention for constraints
-convention = {
-    "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-    "ck": "ck_%(table_name)s_%(constraint_name)s",
-    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s",
-}
+settings = get_settings()
 
-metadata = MetaData(naming_convention=convention)
-
-
-class Base(DeclarativeBase):
-    """SQLAlchemy declarative base class."""
-
-    metadata = metadata
-
-
-# Create async engine
-engine = create_async_engine(
+# Async engine for FastAPI
+async_engine = create_async_engine(
     settings.database_url,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_timeout=settings.database_pool_timeout,
     echo=settings.debug,
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
 )
 
-# Create async session factory
-async_session_factory = async_sessionmaker(
-    engine,
+# Async session factory
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
     autoflush=False,
 )
 
+# Sync engine for Alembic migrations
+sync_engine = create_engine(
+    settings.database_url_sync,
+    echo=settings.debug,
+    pool_pre_ping=True,
+    pool_size=5,
+)
+
+SyncSessionLocal = sessionmaker(
+    bind=sync_engine,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
+    pass
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency that provides a database session."""
-    async with async_session_factory() as session:
+    """
+    Dependency that provides an async database session.
+    Automatically handles commit/rollback and cleanup.
+    """
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
@@ -66,24 +70,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 @asynccontextmanager
 async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """Context manager for database sessions."""
-    async with async_session_factory() as session:
+    """
+    Context manager for database sessions outside of request handlers.
+    Useful for background tasks and scripts.
+    """
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 async def init_db() -> None:
     """Initialize database tables."""
-    async with engine.begin() as conn:
+    async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db() -> None:
     """Close database connections."""
-    await engine.dispose()
+    await async_engine.dispose()

@@ -1,82 +1,50 @@
-# docker-compose.yml
-# Local development environment: PostgreSQL + PGBouncer + API service
+version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ap_postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-appassword}
-      POSTGRES_DB: ${POSTGRES_DB:-apautomation}
-      POSTGRES_HOST_AUTH_METHOD: md5
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apuser} -d ${POSTGRES_DB:-apautomation}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ap_network
-
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: ap_pgbouncer
-    environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@postgres:5432/${POSTGRES_DB:-apautomation}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 100
-      DEFAULT_POOL_SIZE: 20
-      RESERVE_POOL_SIZE: 5
-      RESERVE_POOL_TIMEOUT: 5
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ap_network
-
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ap_api
-    environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-apuser}:${POSTGRES_PASSWORD:-appassword}@${PGBOUNCER_HOST:-localhost}:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-apautomation}"
-      DATABASE_POOL_SIZE: 20
-      DATABASE_MAX_OVERFLOW: 10
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-use-32-chars}
-      JWT_ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
-      THRESHOLD_HIGH: 0.95
-      THRESHOLD_MID: 0.75
-      THRESHOLD_LOW: 0.50
-      TOLERANCE_PRICE: 0.02
-      TOLERANCE_QTY: 0.05
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/finaro_ap
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@db:5432/finaro_ap
+      - DEBUG=true
+      - SECRET_KEY=dev-secret-key-change-in-production
     depends_on:
-      pgbouncer:
-        condition: service_started
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    command: >
+      sh -c "alembic upgrade head && uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finaro_ap
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - ap_network
-    volumes:
-      - .:/app
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@finaro.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
 
 volumes:
   postgres_data:
-
-networks:
-  ap_network:
-    driver: bridge

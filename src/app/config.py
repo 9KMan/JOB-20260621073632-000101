@@ -1,73 +1,92 @@
-// src/app/config.py
-"""Application configuration management."""
-
-import os
+# src/app/config.py
+"""
+Application configuration using Pydantic Settings.
+All configuration is loaded from environment variables.
+"""
 from functools import lru_cache
-from typing import Optional
+from typing import List
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore",
+        case_sensitive=False,
+        extra="ignore"
     )
 
     # Application
-    APP_NAME: str = "FinaRo AP Automation"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
-
+    app_name: str = Field(default="FinaRo AP Automation", alias="APP_NAME")
+    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
+    debug: bool = Field(default=False, alias="DEBUG")
+    
+    # Security
+    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
+    algorithm: str = Field(default="HS256", alias="ALGORITHM")
+    access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://finaro:finaro_secret@localhost:5432/finaro"
-    DATABASE_POOL_SIZE: int = 5
-    DATABASE_MAX_OVERFLOW: int = 10
-    DATABASE_POOL_TIMEOUT: int = 30
-    DATABASE_POOL_RECYCLE: int = 3600
-
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
-
-    # Authentication
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/finaro_ap",
+        alias="DATABASE_URL"
+    )
+    database_url_sync: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/finaro_ap",
+        alias="DATABASE_URL_SYNC"
+    )
+    
     # CORS
-    CORS_ORIGINS: list[str] = ["*"]
-
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-
-    # Matching Engine Weights
-    MATCHING_LINE_WEIGHT: float = 0.70
-    MATCHING_AMOUNT_WEIGHT: float = 0.20
-    MATCHING_DATE_WEIGHT: float = 0.10
-
-    # Matching Thresholds
-    MATCHING_AUTO_APPROVE_THRESHOLD: float = 0.95
-    MATCHING_HUMAN_REVIEW_THRESHOLD: float = 0.70
+    cors_origins: List[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8080"],
+        alias="CORS_ORIGINS"
+    )
+    
+    # Matching Engine Configuration
+    matching_weight_line_level: float = Field(
+        default=0.70,
+        alias="MATCHING_WEIGHT_LINE_LEVEL",
+        ge=0,
+        le=1
+    )
+    matching_weight_amount: float = Field(
+        default=0.20,
+        alias="MATCHING_WEIGHT_AMOUNT",
+        ge=0,
+        le=1
+    )
+    matching_weight_date: float = Field(
+        default=0.10,
+        alias="MATCHING_WEIGHT_DATE",
+        ge=0,
+        le=1
+    )
+    auto_approve_threshold: float = Field(
+        default=0.95,
+        alias="AUTO_APPROVE_THRESHOLD",
+        ge=0,
+        le=1
+    )
+    human_review_threshold: float = Field(
+        default=0.70,
+        alias="HUMAN_REVIEW_THRESHOLD",
+        ge=0,
+        le=1
+    )
 
     @property
-    def sync_database_url(self) -> str:
-        """Convert async database URL to sync version."""
-        return self.DATABASE_URL.replace("+asyncpg", "").replace("+asyncpg", "")
-
-    def get_database_config(self) -> dict:
-        """Get SQLAlchemy database configuration."""
-        return {
-            "pool_size": self.DATABASE_POOL_SIZE,
-            "max_overflow": self.DATABASE_MAX_OVERFLOW,
-            "pool_timeout": self.DATABASE_POOL_TIMEOUT,
-            "pool_recycle": self.DATABASE_POOL_RECYCLE,
-            "echo": self.DEBUG,
-        }
+    def total_matching_weight(self) -> float:
+        """Validate that matching weights sum to 1.0"""
+        total = (
+            self.matching_weight_line_level 
+            + self.matching_weight_amount 
+            + self.matching_weight_date
+        )
+        return round(total, 2)
 
 
 @lru_cache()

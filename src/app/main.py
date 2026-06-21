@@ -1,61 +1,47 @@
-// src/app/main.py
-"""FastAPI application entry point for FinaRo AP Automation."""
-
-import logging
+# src/app/main.py
+"""
+FinaRo AP Automation Core Engine - FastAPI Application Entry Point
+"""
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.app.config import get_settings
-from src.api import api_router
-from src.database import engine, Base
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from src.app.database import init_db, close_db
+from src.app.api.v1 import api_router
 
 settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan handler for startup and shutdown."""
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan events."""
     # Startup
-    logger.info("Starting FinaRo AP Automation Engine...")
-    
-    # Create database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    logger.info("Database initialized successfully")
-    
+    await init_db()
     yield
-    
     # Shutdown
-    logger.info("Shutting down FinaRo AP Automation Engine...")
-    await engine.dispose()
-    logger.info("Database connections closed")
+    await close_db()
 
 
-# Create FastAPI application
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
+    title=settings.app_name,
+    version=settings.app_version,
     description="""
-    ## FinaRo AP Automation Core Engine
+    FinaRo AP Automation Core Engine
     
     A 3-Way Matching Engine for Invoice × Delivery Note × Purchase Order reconciliation.
     
-    ### Features
-    - **Layer 1 - Anchoring**: Uses PO as single source of truth
-    - **Layer 2 - Cascade Matching**: Multi-directional document matching
-    - **Layer 3 - Balance Resolution**: Partial matches and balance tracking
-    - **Decision Routing**: Auto-approve, Human review, or Dispute workflow
+    ## Features
+    - **Layer 1 - PO Anchoring**: Establish deterministic anchors using Purchase Orders
+    - **Layer 2 - Cascade Matching**: Match documents with weighted scoring
+    - **Layer 3 - Balance Resolution**: Track partial matches and balances
+    - **Decision Routing**: CONFIRMED → AUTO-APPROVE, PENDING → HUMAN_REVIEW, REJECTED → DISPUTE
+    
+    ## Authentication
+    JWT-based authentication with HS256 algorithm.
     """,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -63,31 +49,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests."""
-    logger.info(f"Request: {request.method} {request.url.path}")
-    response = await call_next(request)
-    logger.info(f"Response: {response.status_code}")
-    return response
-
-
 # Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions globally."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle uncaught exceptions."""
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -97,27 +72,25 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Include API router
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+# Include API routes
+app.include_router(api_router, prefix="/api/v1")
 
 
-# Health check endpoint
-@app.get("/health", tags=["Health"])
-async def health_check():
-    """Health check endpoint for monitoring."""
+@app.get("/health")
+async def health_check() -> dict:
+    """Health check endpoint."""
     return {
         "status": "healthy",
-        "service": settings.APP_NAME,
-        "version": settings.APP_VERSION,
+        "service": settings.app_name,
+        "version": settings.app_version,
     }
 
 
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint with API information."""
+@app.get("/")
+async def root() -> dict:
+    """Root endpoint."""
     return {
-        "service": settings.APP_NAME,
-        "version": settings.APP_VERSION,
+        "message": "Welcome to FinaRo AP Automation Core Engine",
         "docs": "/docs",
         "health": "/health",
     }
