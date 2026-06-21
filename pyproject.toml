@@ -1,26 +1,43 @@
-# pyproject.toml
+// pyproject.toml
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
-name = "ap-automation-core"
-version = "1.0.0"
-description = "AP Automation Core Engine for Finaro - Invoice/PO/Delivery Note Matching"
+name = "ap-automation-engine"
+version = "0.1.0"
+description = "AP Automation Core Engine — Finaro"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
 authors = [
-    { name = "Finaro Engineering", email = "engineering@finaro.com" }
+    { name = "Finaro", email = "dev@finaro.com" }
 ]
+keywords = ["ap", "automation", "invoicing", "matching"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+]
+
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy[asyncio]>=2.0.25",
+    "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
-    "alembic>=1.13.1",
+    "alembic>=1.13.0",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.9",
-    "email-validator>=2.1.0",
-    "httpx>=0.27.0",
+    "greenlet>=3.0.0",
+    "psycopg2-binary>=2.9.9",
 ]
 
 [project.optional-dependencies]
@@ -31,24 +48,62 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
+    "types-python-jose>=3.3.0",
+    "types-passlib>=1.7.4",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.urls]
+Homepage = "https://github.com/9KMan/JOB-20260621073632-000101"
+Documentation = "https://github.com/9KMan/JOB-20260621073632-000101#readme"
+Repository = "https://github.com/9KMan/JOB-20260621073632-000101"
+Issues = "https://github.com/9KMan/JOB-20260621073632-000101/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ap_automation"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.coverage.run]
+source = ["services", "models", "core"]
+omit = ["*/tests/*", "*/migrations/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]
 
 [tool.ruff]
-line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "N", "W", "UP"]
+line-length = 100
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
@@ -56,7 +111,25 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
 
-[tool.hatch.build.targets.wheel]
-packages = ["core", "models", "api", "services"]
+[[tool.mypy.overrides]]
+module = [
+    "pydantic.*",
+    "fastapi.*",
+    "uvicorn.*",
+    "sqlalchemy.*",
+    "alembic.*",
+    "asyncpg.*",
+]
+ignore_missing_imports = true

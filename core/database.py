@@ -1,90 +1,66 @@
-# core/database.py
-"""Async SQLAlchemy database session management."""
+// core/database.py
+"""Async SQLAlchemy database session management.
+
+Provides async database sessions and engine management for the application.
+All database operations should use these session factories.
+"""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Annotated, Any
 
+from fastapi import Depends
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
+    AsyncEngine,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.pool import NullPool
 
 from core.config import get_settings
 
+
 settings = get_settings()
 
-# Create async engine with appropriate pool settings
-engine: AsyncEngine = create_async_engine(
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base class.
+
+    All database models should inherit from this class.
+    Provides common table arguments and type annotations.
+    """
+
+    pass
+
+
+# Create async engine
+async_engine: AsyncEngine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    pool_timeout=settings.database_pool_timeout,
     pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=10,
-    pool_recycle=3600,
+    echo=settings.database_echo,
 )
 
-# Async session factory
+# Create async session factory
 AsyncSessionLocal = async_sessionmaker(
-    engine,
+    bind=async_engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autoflush=False,
     autocommit=False,
+    autoflush=False,
 )
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency that provides a database session.
-    
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for getting async database sessions.
+
     Yields:
-        AsyncSession: SQLAlchemy async session
+        AsyncSession: Database session that auto-closes after use.
+
+    Example:
         
-    Example:
-        @app.get("/items")
-        async def get_items(db: AsyncSession = Depends(get_db_session)):
-            ...
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-@asynccontextmanager
-async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for database sessions outside of request context.
-    
-    Example:
-        async with get_db_context() as db:
-            result = await db.execute(select(Model))
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-async def init_db() -> None:
-    """Initialize database connection pool."""
-    async with engine.begin() as conn:
-        pass  # Connection pool is created lazily
-
-
-async def close_db() -> None:
-    """Close database connection pool."""
-    await engine.dispose()
