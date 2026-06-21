@@ -1,10 +1,11 @@
 # models/enums.py
-"""SQLAlchemy and Pydantic enum definitions."""
-import enum
+"""Status enums and decision types for the matching engine."""
+
+from enum import Enum
 
 
-class InvoiceStatus(str, enum.Enum):
-    """Invoice status enumeration."""
+class InvoiceStatus(str, Enum):
+    """Invoice status enum."""
 
     DRAFT = "draft"
     PENDING = "pending"
@@ -13,100 +14,57 @@ class InvoiceStatus(str, enum.Enum):
     EXCEPTION = "exception"
     APPROVED = "approved"
     REJECTED = "rejected"
-    PAID = "paid"
     CANCELLED = "cancelled"
 
 
-class PurchaseOrderStatus(str, enum.Enum):
-    """Purchase order status enumeration."""
+class PurchaseOrderStatus(str, Enum):
+    """Purchase order status enum."""
 
     DRAFT = "draft"
     ACTIVE = "active"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
     CLOSED = "closed"
     CANCELLED = "cancelled"
 
 
-class DeliveryNoteStatus(str, enum.Enum):
-    """Delivery note status enumeration."""
+class DeliveryNoteStatus(str, Enum):
+    """Delivery note status enum."""
 
     DRAFT = "draft"
     CONFIRMED = "confirmed"
     PARTIALLY_MATCHED = "partially_matched"
-    MATCHED = "matched"
+    FULLY_MATCHED = "fully_matched"
     CANCELLED = "cancelled"
 
 
-class MatchDecision(str, enum.Enum):
-    """Matching decision types."""
+class MatchDecision(str, Enum):
+    """Matching engine decision types."""
 
-    AUTO_APPROVE = "auto_approve"
-    REVIEW = "review"
+    AUTO_APPROVED = "auto_approved"
+    ONE_CLICK_REVIEW = "one_click_review"
     EXCEPTION = "exception"
-    REJECT = "reject"
-
-
-class MatchStatus(str, enum.Enum):
-    """Match record status."""
-
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    DISMISSED = "dismissed"
-
-
-class ExceptionType(str, enum.Enum):
-    """Exception types for matching exceptions."""
-
-    PRICE_VARIANCE = "price_variance"
-    QUANTITY_VARIANCE = "quantity_variance"
-    MISSING_PO = "missing_po"
-    MISSING_INVOICE = "missing_invoice"
-    DUPLICATE_INVOICE = "duplicate_invoice"
-    UNMATCHED_LINES = "unmatched_lines"
-    OVER_DELIVERY = "over_delivery"
-    UNDER_DELIVERY = "under_delivery"
-    TAX_VARIANCE = "tax_variance"
-    CURRENCY_MISMATCH = "currency_mismatch"
-    VENDOR_MISMATCH = "vendor_mismatch"
-
-
-class ExceptionResolution(str, enum.Enum):
-    """Exception resolution types."""
-
-    APPROVED_AS_IS = "approved_as_is"
-    ADJUSTED = "adjusted"
     MANUAL_REVIEW = "manual_review"
-    ESCALATED = "escalated"
-    DISMISSED = "dismissed"
     REJECTED = "rejected"
+    NO_MATCH = "no_match"
 
 
-class LineType(str, enum.Enum):
-    """Line item types."""
+class ExceptionType(str, Enum):
+    """Exception types for matching failures."""
 
-    STANDARD = "standard"
-    SERVICE = "service"
-    MISCELLANEOUS = "miscellaneous"
-    DISCOUNT = "discount"
-    TAX = "tax"
-    SHIPPING = "shipping"
+    PRICE_MISMATCH = "price_mismatch"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_PO = "missing_po"
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DATE_MISMATCH = "date_mismatch"
+    PARTIAL_MATCH = "partial_match"
+    MULTIPLE_MATCHES = "multiple_matches"
+    NO_MATCH_FOUND = "no_match_found"
+    TOLERANCE_EXCEEDED = "tolerance_exceeded"
 
 
-class CrossRefConfidence(str, enum.Enum):
-    """Confidence levels for cross-reference learning."""
+class MatchConfidence(str, Enum):
+    """Match confidence levels."""
 
-    LOW = "low"
-    MEDIUM = "medium"
     HIGH = "high"
-    CONFIRMED = "confirmed"
-
-
-class CrossRefStatus(str, enum.Enum):
-    """Cross-reference record status."""
-
-    ACTIVE = "active"
-    PROMOTED = "promoted"
-    DEMOTED = "demoted"
-    ARCHIVED = "archived"
+    MEDIUM = "medium"
+    LOW = "low"
+    NONE = "none"

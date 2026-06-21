@@ -1,37 +1,33 @@
-# src/models/__init__.py
-"""SQLAlchemy models for AP Automation Core Engine.
-
-This module exports all database models for easy importing.
-"""
-
-from models.base import Base, TimestampMixin
-from models.balance_ledger import BalanceLedger
-from models.cross_ref import CrossRef
-from models.delivery_note import DeliveryNote
-from models.enums import (
-    DecisionType,
+// src/models/__init__.py
+"""SQLAlchemy database models."""
+from src.models.base import Base, TimestampMixin
+from src.models.document import (
+    Document,
+    DocumentLine,
     DocumentStatus,
-    ExceptionReason,
-    ExceptionStatus,
-    MatchStatus,
+    DocumentType,
 )
-from models.invoice import Invoice
-from models.purchase_order import PurchaseOrder
+from src.models.matching import (
+    MatchConfidence,
+    MatchDecision,
+    MatchResult,
+    MatchScore,
+    MatchingRecord,
+)
+from src.models.user import User, UserRole
 
 __all__ = [
-    # Base and mixins
     "Base",
     "TimestampMixin",
-    # Enums
+    "Document",
+    "DocumentLine",
     "DocumentStatus",
-    "MatchStatus",
-    "DecisionType",
-    "ExceptionStatus",
-    "ExceptionReason",
-    # Models
-    "Invoice",
-    "PurchaseOrder",
-    "DeliveryNote",
-    "BalanceLedger",
-    "CrossRef",
+    "DocumentType",
+    "MatchingRecord",
+    "MatchScore",
+    "MatchConfidence",
+    "MatchDecision",
+    "MatchResult",
+    "User",
+    "UserRole",
 ]

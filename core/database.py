@@ -1,33 +1,50 @@
 # core/database.py
-"""
-Async SQLAlchemy database session management.
-"""
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+"""Async SQLAlchemy session management."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import NullPool
+from sqlalchemy.orm import DeclarativeBase
 
-from core.config import settings
-from models.base import Base
+from core.config import get_settings
 
-# Create async engine
+settings = get_settings()
+
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+metadata = MetaData(naming_convention=convention)
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
+
+    metadata = metadata
+
+
 engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DATABASE_ECHO,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    settings.database.database_url,
+    pool_size=settings.database.database_pool_size,
+    max_overflow=settings.database.database_max_overflow,
+    pool_timeout=settings.database.database_pool_timeout,
+    echo=settings.database.database_echo,
     pool_pre_ping=True,
-    poolclass=NullPool if settings.DEBUG else None,
+    pool_recycle=3600,
 )
 
-# Create async session factory
-AsyncSessionLocal = async_sessionmaker(
+async_session_maker = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
@@ -37,11 +54,8 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency that provides an async database session.
-    Yields a session and ensures proper cleanup after use.
-    """
-    async with AsyncSessionLocal() as session:
+    """Dependency for getting async database session."""
+    async with async_session_maker() as session:
         try:
             yield session
             await session.commit()
@@ -52,55 +66,26 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Alternative database session getter without auto-commit.
-    Use this when you need explicit transaction control.
-    """
-    async with AsyncSessionLocal() as session:
-        yield session
-
-
 @asynccontextmanager
 async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager for database sessions.
-    Useful for service layer operations.
-    """
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
+    """Context manager for getting async database session."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 
 async def init_db() -> None:
-    """
-    Initialize database by creating all tables.
-    Should only be used in development/testing.
-    """
+    """Initialize database tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
-async def drop_db() -> None:
-    """
-    Drop all database tables.
-    Should only be used in testing.
-    """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-
-async def run_migrations() -> None:
-    """Run database migrations using Alembic."""
-    from alembic.config import Config
-    from alembic import command
-
-    alembic_cfg = Config("alembic.ini")
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda sync_conn: command.upgrade(alembic_cfg, "head")
-        )
+async def close_db() -> None:
+    """Close database connections."""
+    await engine.dispose()

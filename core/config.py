@@ -1,16 +1,112 @@
 # core/config.py
-"""
-Application configuration using pydantic-settings.
-"""
+"""Application configuration using pydantic-settings."""
+
 from functools import lru_cache
-from typing import List
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+class DatabaseSettings(BaseSettings):
+    """Database configuration settings."""
+
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appassword@localhost:5432/apautomation",
+        description="PostgreSQL connection URL with asyncpg driver",
+    )
+    database_pool_size: int = Field(default=20, ge=1, description="Connection pool size")
+    database_max_overflow: int = Field(default=10, ge=0, description="Max pool overflow")
+    database_pool_timeout: int = Field(default=30, ge=1, description="Pool timeout in seconds")
+    database_echo: bool = Field(default=False, description="Echo SQL queries")
+
+    model_config = SettingsConfigDict(env_prefix="DATABASE_")
+
+
+class JWTSettings(BaseSettings):
+    """JWT authentication settings."""
+
+    jwt_secret_key: str = Field(
+        default="your-secret-key-change-in-production",
+        description="Secret key for JWT signing (HS256)",
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_access_token_expire_minutes: int = Field(
+        default=30, ge=1, description="Access token expiration in minutes"
+    )
+    jwt_refresh_token_expire_days: int = Field(
+        default=7, ge=1, description="Refresh token expiration in days"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="JWT_")
+
+
+class ThresholdSettings(BaseSettings):
+    """Matching threshold configuration settings."""
+
+    threshold_high: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve threshold (score >= threshold_high)",
+    )
+    threshold_mid: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="1-click review threshold (score >= threshold_mid)",
+    )
+    threshold_low: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Exception threshold (score >= threshold_low)",
+    )
+    tolerance_price: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Price match tolerance percentage",
+    )
+    tolerance_qty: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Quantity match tolerance percentage",
+    )
+
+    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
+
+
+class LoggingSettings(BaseSettings):
+    """Logging configuration settings."""
+
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+    log_format: str = Field(
+        default="json",
+        description="Log format (json, text)",
+    )
+
+    model_config = SettingsConfigDict(env_prefix="LOG_")
+
+
+class AppSettings(BaseSettings):
+    """Main application settings."""
+
+    app_name: str = Field(default="AP Automation Core Engine", description="Application name")
+    app_version: str = Field(default="0.1.0", description="Application version")
+    app_description: str = Field(
+        default="AP Automation Core Engine for FinaRo - Invoice Matching System",
+        description="Application description",
+    )
+    debug: bool = Field(default=False, description="Debug mode")
+    cors_origins: list[str] = Field(
+        default=["*"],
+        description="CORS allowed origins",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -18,91 +114,23 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Application
-    APP_NAME: str = "AP Automation Core"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = False
 
-    # Database
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
-        description="Async PostgreSQL connection string",
-    )
-    DATABASE_ECHO: bool = False
-    DATABASE_POOL_SIZE: int = 20
-    DATABASE_MAX_OVERFLOW: int = 10
+class Settings(BaseSettings):
+    """Combined settings for the application."""
 
-    # JWT Authentication
-    JWT_SECRET_KEY: str = Field(
-        default="changeme-in-production",
-        description="HS256 secret key for JWT signing",
-    )
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
+    thresholds: ThresholdSettings = Field(default_factory=ThresholdSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    app: AppSettings = Field(default_factory=AppSettings)
 
-    # Matching Thresholds
-    THRESHOLD_HIGH: int = Field(
-        default=95,
-        description="Auto-approve threshold (percentage)",
-    )
-    THRESHOLD_MID: int = Field(
-        default=70,
-        description="1-click review threshold (percentage)",
-    )
-    THRESHOLD_LOW: int = Field(
-        default=40,
-        description="Exception threshold (percentage)",
-    )
-
-    # Tolerance Settings
-    TOLERANCE_PRICE: float = Field(
-        default=5.0,
-        description="Price match tolerance percentage",
-    )
-    TOLERANCE_QTY: float = Field(
-        default=10.0,
-        description="Quantity match tolerance percentage",
-    )
-
-    # CORS
-    CORS_ORIGINS: List[str] = Field(
-        default=["*"],
-        description="Allowed CORS origins",
-    )
-
-    # API
-    API_V1_PREFIX: str = "/api/v1"
-
-    @property
-    def database_sync_url(self) -> str:
-        """Get synchronous database URL for migrations."""
-        return self.DATABASE_URL.replace("+asyncpg", "").replace(
-            "postgresql+asyncpg", "postgresql"
-        )
-
-    def is_auto_approve(self, score: float) -> bool:
-        """Check if score qualifies for auto-approve."""
-        return score >= self.THRESHOLD_HIGH
-
-    def is_review(self, score: float) -> bool:
-        """Check if score requires 1-click review."""
-        return self.THRESHOLD_MID <= score < self.THRESHOLD_HIGH
-
-    def is_exception(self, score: float) -> bool:
-        """Check if score requires exception handling."""
-        return self.THRESHOLD_LOW <= score < self.THRESHOLD_MID
-
-    def is_reject(self, score: float) -> bool:
-        """Check if score should be auto-rejected."""
-        return score < self.THRESHOLD_LOW
+    @classmethod
+    def from_env(cls, prefix: Optional[str] = None) -> "Settings":
+        """Load settings from environment variables."""
+        return cls()
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
-
-
-# Global settings instance
-settings = get_settings()
+    return Settings.from_env()

@@ -1,83 +1,93 @@
-// models/purchase_order.py
-"""Purchase Order model."""
+# models/purchase_order.py
+"""PurchaseOrder and PurchaseOrderLine SQLAlchemy models."""
 
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, TYPE_CHECKING
-from datetime import date
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, String, Numeric, Date, ForeignKey, Text, Integer
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from models.base import BaseModel
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    from models.user import User
-    from models.invoice import Invoice
-    from models.delivery_note import DeliveryNote
+    from models.balance_ledger import BalanceLedger
+    from models.cross_ref import CrossRef
 
 
-class PurchaseOrder(Base, BaseModel):
-    """Purchase Order model — single source of truth in Layer 1."""
+class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Purchase order model representing PO documents."""
 
     __tablename__ = "purchase_orders"
+    __table_args__ = (
+        Index("ix_purchase_orders_vendor_number", "vendor_number"),
+        Index("ix_purchase_orders_po_number", "po_number"),
+        Index("ix_purchase_orders_status", "status"),
+        {"schema": "public"},
+    )
 
-    po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    supplier_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    expected_delivery_date: Mapped[date] = mapped_column(Date, nullable=True)
+    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    po_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    po_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    delivery_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
-    notes: Mapped[str] = mapped_column(Text, nullable=True)
-    
-    # Foreign keys
-    created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True
-    )
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # Relationships
-    created_by_user: Mapped["User"] = relationship("User", back_populates="purchase_orders")
-    lines: Mapped[List["POLine"]] = relationship(
-        "POLine", 
+    lines: Mapped[list["PurchaseOrderLine"]] = relationship(
+        "PurchaseOrderLine",
         back_populates="purchase_order",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
-    invoices: Mapped[List["Invoice"]] = relationship("Invoice", back_populates="purchase_order")
-    delivery_notes: Mapped[List["DeliveryNote"]] = relationship("DeliveryNote", back_populates="purchase_order")
+    balance_ledger: Mapped[list["BalanceLedger"]] = relationship(
+        "BalanceLedger",
+        back_populates="purchase_order",
+        cascade="all, delete-orphan",
+    )
+    cross_refs: Mapped[list["CrossRef"]] = relationship(
+        "CrossRef",
+        back_populates="purchase_order",
+        cascade="all, delete-orphan",
+    )
 
-    def __repr__(self) -> str:
-        return f"<PurchaseOrder {self.po_number}>"
 
+class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Purchase order line item model."""
 
-class POLine(Base, BaseModel):
-    """Purchase Order Line Item."""
+    __tablename__ = "purchase_order_lines"
+    __table_args__ = (
+        Index("ix_po_lines_po_id", "purchase_order_id"),
+        Index("ix_po_lines_line_number", "purchase_order_id", "line_number"),
+        {"schema": "public"},
+    )
 
-    __tablename__ = "po_lines"
-
-    po_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+    purchase_order_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("public.purchase_orders.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
     )
-    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    item_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str] = mapped_column(String(500), nullable=True)
+    line_number: Mapped[int] = mapped_column(nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     line_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    uom: Mapped[str] = mapped_column(String(20), default="EA", nullable=False)
+    tax_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Relationships
-    purchase_order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", back_populates="lines")
-
-    def __repr__(self) -> str:
-        return f"<POLine {self.line_number}: {self.item_code}>"
-
-
-import uuid
+    purchase_order: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder",
+        back_populates="lines",
+    )

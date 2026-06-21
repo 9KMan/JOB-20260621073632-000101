@@ -1,6 +1,34 @@
-// api/__init__.py
-"""API package."""
+# api/__init__.py
+"""API package for FastAPI routes and schemas."""
 
-from api.routes import auth, invoices, delivery_notes, purchase_orders, matching
+from api.schemas import (
+    InvoiceCreate,
+    InvoiceUpdate,
+    InvoiceResponse,
+    PurchaseOrderCreate,
+    PurchaseOrderResponse,
+    DeliveryNoteCreate,
+    DeliveryNoteResponse,
+    MatchTriggerRequest,
+    MatchDecisionResponse,
+    ExceptionResponse,
+    ExceptionResolveRequest,
+    PaginatedResponse,
+    ErrorResponse,
+)
 
-__all__ = ["auth", "invoices", "delivery_notes", "purchase_orders", "matching"]
+__all__ = [
+    "InvoiceCreate",
+    "InvoiceUpdate",
+    "InvoiceResponse",
+    "PurchaseOrderCreate",
+    "PurchaseOrderResponse",
+    "DeliveryNoteCreate",
+    "DeliveryNoteResponse",
+    "MatchTriggerRequest",
+    "MatchDecisionResponse",
+    "ExceptionResponse",
+    "ExceptionResolveRequest",
+    "PaginatedResponse",
+    "ErrorResponse",
+]

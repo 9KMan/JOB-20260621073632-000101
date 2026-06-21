@@ -1,157 +1,100 @@
 # models/cross_ref.py
-"""Cross-reference learning table for invoice-to-PO matching patterns."""
-import uuid
+"""CrossRef SQLAlchemy model for learning loop and cross-reference matching."""
+
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import CrossRefConfidence, CrossRefStatus
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from models.delivery_note import DeliveryNote
+    from models.invoice import Invoice
+    from models.purchase_order import PurchaseOrder
 
 
-class CrossReference(Base, UUIDMixin, TimestampMixin):
-    """
-    Cross-reference table for learning matching patterns.
-    Stores confirmed matches to improve future matching accuracy.
-    """
+class CrossRef(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Cross-reference table for learning loop and confirmed matches."""
 
-    __tablename__ = "cross_references"
+    __tablename__ = "cross_ref"
     __table_args__ = (
-        Index("ix_cross_references_vendor_id", "vendor_id"),
-        Index("ix_cross_references_product_code", "product_code"),
-        Index("ix_cross_references_confidence", "confidence"),
-        Index("ix_cross_references_status", "status"),
+        Index("ix_cross_ref_invoice_id", "invoice_id"),
+        Index("ix_cross_ref_po_id", "purchase_order_id"),
+        Index("ix_cross_ref_dn_id", "delivery_note_id"),
+        Index("ix_cross_ref_vendor_number", "vendor_number"),
+        Index("ix_cross_ref_match_signature", "match_signature"),
+        {"schema": "public"},
     )
 
-    # Vendor context
-    vendor_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-    )
-    vendor_code: Mapped[Optional[str]] = mapped_column(
-        String(50),
+    invoice_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("public.invoices.id", ondelete="CASCADE"),
         nullable=True,
     )
-
-    # Product context
-    product_code: Mapped[Optional[str]] = mapped_column(
-        String(100),
+    purchase_order_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("public.purchase_orders.id", ondelete="CASCADE"),
         nullable=True,
     )
-    product_name_pattern: Mapped[Optional[str]] = mapped_column(
-        String(255),
+    delivery_note_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("public.delivery_notes.id", ondelete="CASCADE"),
         nullable=True,
     )
-
-    # Matching criteria (learned from confirmed matches)
-    po_line_description: Mapped[str] = mapped_column(
-        String(500),
+    vendor_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    match_signature: Mapped[str] = mapped_column(String(255), nullable=False)
+    confidence_score: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("1.0000"),
         nullable=False,
     )
-    invoice_line_description: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
-    description_match_score: Mapped[float] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-    )
-
-    # Price tolerance (learned)
-    price_tolerance_percentage: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        default=Decimal("5.00"),
-    )
-
-    # Quantity tolerance (learned)
-    quantity_tolerance_percentage: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        default=Decimal("10.00"),
-    )
-
-    # Confidence and status
-    confidence: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default=CrossRefConfidence.MEDIUM.value,
-    )
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default=CrossRefStatus.ACTIVE.value,
-    )
-
-    # Promotion tracking
     match_count: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
         nullable=False,
-        default=0,
     )
-    success_count: Mapped[int] = mapped_column(
-        nullable=False,
-        default=0,
-    )
-    success_rate: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-    )
-
-    # First and last match timestamps
-    first_match_at: Mapped[Optional[str]] = mapped_column(
-        String(19),
-        nullable=True,
-    )
-    last_match_at: Mapped[Optional[str]] = mapped_column(
-        String(19),
-        nullable=True,
-    )
-    last_success_at: Mapped[Optional[str]] = mapped_column(
-        String(19),
-        nullable=True,
-    )
-
-    # Source match
-    source_invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    source_invoice_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-    source_po_line_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-    )
-
-    # Auto-promotion settings
-    auto_promote: Mapped[bool] = mapped_column(
+    is_promoted: Mapped[bool] = mapped_column(
         Boolean,
+        default=False,
         nullable=False,
-        default=True,
     )
-    promotion_threshold: Mapped[int] = mapped_column(
+    is_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
         nullable=False,
-        default=5,
     )
-
-    # Notes
-    notes: Mapped[Optional[str]] = mapped_column(
-        Text,
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
+    confirmed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    metadata_json: Mapped[str | None] = mapped_column(String(2000), nullable=True)
 
-    # Relationships
-    vendor = relationship("Vendor")
+    invoice: Mapped["Invoice | None"] = relationship(
+        "Invoice",
+        back_populates="cross_refs",
+    )
+    purchase_order: Mapped["PurchaseOrder | None"] = relationship(
+        "PurchaseOrder",
+        back_populates="cross_refs",
+    )
+    delivery_note: Mapped["DeliveryNote | None"] = relationship(
+        "DeliveryNote",
+        back_populates="cross_refs",
+    )

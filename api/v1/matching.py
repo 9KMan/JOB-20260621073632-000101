@@ -1,218 +1,259 @@
 # api/v1/matching.py
-"""Matching engine endpoints."""
+"""Matching engine trigger and decision endpoints."""
 
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db_session
+from api.schemas import (
+    MatchTriggerRequest,
+    MatchDecisionResponse,
+    MatchScoreDetail,
+    ErrorResponse,
+)
+from core.database import get_db
 from core.config import get_settings
-from models import Invoice
+from models import Invoice, InvoiceStatus, MatchDecision
 from services.anchoring import AnchoringService
 from services.cascade import CascadeService
 from services.scoring import ScoringService
-from api.schemas import (
-    BaseResponse,
-    MatchTriggerRequest,
-    MatchResult,
-    MatchDecisionRequest,
-)
 
 router = APIRouter()
 
 
 @router.post(
     "/trigger",
-    response_model=BaseResponse[MatchResult],
-    summary="Trigger matching for an invoice",
-    description="Run the matching engine on an invoice to find PO and DN matches.",
+    response_model=MatchDecisionResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+    },
 )
 async def trigger_matching(
     request: MatchTriggerRequest,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[MatchResult]:
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MatchDecisionResponse:
     """Trigger the matching engine for an invoice."""
     settings = get_settings()
-    
-    # Get invoice
-    result = await db.execute(
-        select(Invoice).where(Invoice.id == request.invoice_id)
-    )
+
+    result = await db.execute(select(Invoice).where(Invoice.id == request.invoice_id))
     invoice = result.scalar_one_or_none()
-    
+
     if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice {request.invoice_id} not found",
-        )
-    
-    # Run matching pipeline
-    try:
-        # Layer 1: PO Anchoring
-        anchoring_service = AnchoringService(db)
-        anchoring_result = await anchoring_service.anchor_invoice_to_po(
-            invoice, 
-            match_all_lines=request.match_all_lines
-        )
-        
-        if not anchoring_result.po_found:
-            # No PO match possible
-            return BaseResponse(
-                success=True,
-                data=MatchResult(
-                    invoice_id=invoice.id,
-                    invoice_number=invoice.invoice_number,
-                    match_status="exception",
-                    decision="no_match",
-                    overall_score=0,
-                    lines=[],
-                    exception_reason="No matching purchase order found",
-                ),
-                message="No matching PO found",
-            )
-        
-        # Layer 2: Line Matching Cascade
-        cascade_service = CascadeService(db)
-        cascade_result = await cascade_service.match_lines(
-            invoice,
-            anchoring_result.matched_po,
-            anchoring_result.matched_lines,
-        )
-        
-        # Layer 3: Scoring
-        scoring_service = ScoringService(db, settings)
-        score_result = await scoring_service.calculate_match_score(
-            invoice,
-            cascade_result,
-        )
-        
-        # Determine decision based on score
-        decision = scoring_service.determine_decision(score_result.overall_score)
-        
-        # Update invoice with match results
-        invoice.match_score = score_result.overall_score
-        invoice.match_decision = decision.value
-        invoice.status = "matched" if decision.value == "auto_approved" else "exception"
-        
-        if decision.value == "exception":
-            invoice.exception_reason = score_result.exception_reasons[0] if score_result.exception_reasons else None
-        
-        await db.commit()
-        
-        return BaseResponse(
-            success=True,
-            data=MatchResult(
-                invoice_id=invoice.id,
-                invoice_number=invoice.invoice_number,
-                match_status="matched",
-                decision=decision.value,
-                overall_score=score_result.overall_score,
-                lines=score_result.line_scores,
-                exception_reason=invoice.exception_reason,
-            ),
-            message=f"Matching complete. Decision: {decision.value}",
-        )
-        
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Matching failed: {str(e)}",
+            detail=f"Invoice with ID {request.invoice_id} not found",
         )
 
-
-@router.post(
-    "/decision",
-    response_model=BaseResponse[dict],
-    summary="Submit match decision",
-    description="Approve or reject a match decision for an invoice.",
-)
-async def submit_decision(
-    request: MatchDecisionRequest,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[dict]:
-    """Submit a match decision for an invoice."""
-    # Get invoice
-    result = await db.execute(
-        select(Invoice).where(Invoice.id == request.invoice_id)
-    )
-    invoice = result.scalar_one_or_none()
-    
-    if not invoice:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice {request.invoice_id} not found",
-        )
-    
-    # Update invoice with decision
-    if request.decision == "approve":
-        invoice.status = "approved"
-        invoice.match_decision = "manual_approved"
-    elif request.decision == "reject":
-        invoice.status = "rejected"
-        invoice.match_decision = "manual_rejected"
-    elif request.decision == "exception":
-        invoice.status = "exception"
-        invoice.match_decision = "exception"
-        invoice.exception_reason = request.reason
-    else:
+    if not request.force_rematch and invoice.status in [
+        InvoiceStatus.MATCHED.value,
+        InvoiceStatus.APPROVED.value,
+    ]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid decision: {request.decision}",
+            detail=f"Invoice is already in {invoice.status} status",
         )
-    
-    await db.commit()
-    
-    return BaseResponse(
-        success=True,
-        data={
-            "invoice_id": str(invoice.id),
-            "status": invoice.status,
-            "decision": invoice.match_decision,
-        },
-        message=f"Invoice {request.decision}d successfully",
-    )
+
+    invoice.status = InvoiceStatus.MATCHING.value
+    await db.flush()
+
+    try:
+        anchoring_service = AnchoringService(db)
+        matched_po, anchor_score = await anchoring_service.anchor_invoice_to_po(invoice)
+
+        if not matched_po:
+            invoice.status = InvoiceStatus.EXCEPTION.value
+            await db.flush()
+            return MatchDecisionResponse(
+                invoice_id=invoice.id,
+                decision=MatchDecision.NO_MATCH.value,
+                confidence_score=Decimal("0.0"),
+                score_breakdown=[],
+                matched_po_id=None,
+                matched_po_number=None,
+                matched_lines=[],
+                exceptions=["No matching purchase order found"],
+                match_timestamp=datetime.now(timezone.utc),
+            )
+
+        cascade_service = CascadeService(db)
+        line_matches = await cascade_service.cascade_match_lines(invoice, matched_po)
+
+        scoring_service = ScoringService(db)
+        score_breakdown, total_score = await scoring_service.calculate_match_score(
+            invoice, matched_po, line_matches, anchor_score
+        )
+
+        decision = scoring_service.determine_decision(
+            total_score,
+            settings.thresholds.threshold_high,
+            settings.thresholds.threshold_mid,
+            settings.thresholds.threshold_low,
+        )
+
+        if decision == MatchDecision.AUTO_APPROVED.value:
+            invoice.status = InvoiceStatus.APPROVED.value
+            invoice.approved_at = datetime.now(timezone.utc)
+        elif decision == MatchDecision.ONE_CLICK_REVIEW.value:
+            invoice.status = InvoiceStatus.PENDING.value
+        else:
+            invoice.status = InvoiceStatus.EXCEPTION.value
+
+        await db.flush()
+
+        return MatchDecisionResponse(
+            invoice_id=invoice.id,
+            decision=decision,
+            confidence_score=total_score,
+            score_breakdown=[
+                MatchScoreDetail(
+                    component=sd.component,
+                    score=sd.score,
+                    weight=sd.weight,
+                    weighted_score=sd.weighted_score,
+                )
+                for sd in score_breakdown
+            ],
+            matched_po_id=matched_po.id,
+            matched_po_number=matched_po.po_number,
+            matched_lines=[
+                {
+                    "invoice_line_id": lm.invoice_line_id,
+                    "po_line_id": lm.po_line_id,
+                    "match_score": float(lm.match_score),
+                }
+                for lm in line_matches
+            ],
+            exceptions=[],
+            match_timestamp=datetime.now(timezone.utc),
+        )
+
+    except Exception as e:
+        invoice.status = InvoiceStatus.EXCEPTION.value
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Matching engine error: {str(e)}",
+        )
 
 
 @router.get(
-    "/result/{invoice_id}",
-    response_model=BaseResponse[MatchResult],
-    summary="Get match result for an invoice",
+    "/decision/{invoice_id}",
+    response_model=MatchDecisionResponse,
+    responses={
+        404: {"model": ErrorResponse},
+    },
 )
-async def get_match_result(
-    invoice_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-) -> BaseResponse[MatchResult]:
-    """Get the matching result for an invoice."""
-    result = await db.execute(
-        select(Invoice).where(Invoice.id == invoice_id)
-    )
+async def get_match_decision(
+    invoice_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MatchDecisionResponse:
+    """Get the current match decision for an invoice."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
     invoice = result.scalar_one_or_none()
-    
+
     if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Invoice {invoice_id} not found",
+            detail=f"Invoice with ID {invoice_id} not found",
         )
-    
-    if not invoice.match_score:
+
+    return MatchDecisionResponse(
+        invoice_id=invoice.id,
+        decision=invoice.status,
+        confidence_score=Decimal("0.0"),
+        score_breakdown=[],
+        matched_po_id=None,
+        matched_po_number=invoice.po_reference,
+        matched_lines=[],
+        exceptions=[],
+        match_timestamp=datetime.now(timezone.utc),
+    )
+
+
+@router.post(
+    "/approve/{invoice_id}",
+    response_model=MatchDecisionResponse,
+    responses={
+        404: {"model": ErrorResponse},
+    },
+)
+async def approve_invoice(
+    invoice_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MatchDecisionResponse:
+    """Approve a matched invoice."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    invoice = result.scalar_one_or_none()
+
+    if not invoice:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No match result found for invoice {invoice_id}",
+            detail=f"Invoice with ID {invoice_id} not found",
         )
-    
-    return BaseResponse(
-        success=True,
-        data=MatchResult(
-            invoice_id=invoice.id,
-            invoice_number=invoice.invoice_number,
-            match_status=invoice.status,
-            decision=invoice.match_decision or "pending",
-            overall_score=invoice.match_score,
-            lines=[],  # Would need to reconstruct from line scores
-            exception_reason=invoice.exception_reason,
-        ),
+
+    if invoice.status != InvoiceStatus.PENDING.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invoice is not in pending status (current: {invoice.status})",
+        )
+
+    invoice.status = InvoiceStatus.APPROVED.value
+    invoice.approved_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    return MatchDecisionResponse(
+        invoice_id=invoice.id,
+        decision=MatchDecision.AUTO_APPROVED.value,
+        confidence_score=Decimal("0.0"),
+        score_breakdown=[],
+        matched_po_id=None,
+        matched_po_number=invoice.po_reference,
+        matched_lines=[],
+        exceptions=[],
+        match_timestamp=datetime.now(timezone.utc),
+    )
+
+
+@router.post(
+    "/reject/{invoice_id}",
+    response_model=MatchDecisionResponse,
+    responses={
+        404: {"model": ErrorResponse},
+    },
+)
+async def reject_invoice(
+    invoice_id: str,
+    reason: str = Query(..., description="Rejection reason"),
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MatchDecisionResponse:
+    """Reject a matched invoice."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    invoice = result.scalar_one_or_none()
+
+    if not invoice:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Invoice with ID {invoice_id} not found",
+        )
+
+    invoice.status = InvoiceStatus.REJECTED.value
+    invoice.rejected_at = datetime.now(timezone.utc)
+    invoice.rejection_reason = reason
+    await db.flush()
+
+    return MatchDecisionResponse(
+        invoice_id=invoice.id,
+        decision=MatchDecision.REJECTED.value,
+        confidence_score=Decimal("0.0"),
+        score_breakdown=[],
+        matched_po_id=None,
+        matched_po_number=invoice.po_reference,
+        matched_lines=[],
+        exceptions=[reason],
+        match_timestamp=datetime.now(timezone.utc),
     )
