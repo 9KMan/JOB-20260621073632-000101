@@ -1,16 +1,20 @@
-// api/v1/router.py
-"""API v1 router aggregator.
-
-Combines all v1 route modules into a single router.
-"""
+# api/v1/router.py
+"""API v1 router aggregator."""
 
 from fastapi import APIRouter
 
-from api.v1 import invoices, purchase_orders, delivery_notes, matching, exceptions
+from api.v1 import (
+    invoices,
+    purchase_orders,
+    delivery_notes,
+    matching,
+    exceptions,
+)
+
 
 api_router = APIRouter()
 
-# Include all domain routers
+# Include all v1 route modules
 api_router.include_router(
     invoices.router,
     prefix="/invoices",
@@ -29,7 +33,7 @@ api_router.include_router(
 api_router.include_router(
     matching.router,
     prefix="/matching",
-    tags=["Matching Engine"],
+    tags=["Matching"],
 )
 api_router.include_router(
     exceptions.router,

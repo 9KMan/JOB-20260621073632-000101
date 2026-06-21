@@ -1,25 +1,12 @@
-// core/__init__.py
-"""Core package for AP Automation Engine.
+# core/__init__.py
+"""Core package initialization."""
 
-This package contains configuration, database session management,
-and security utilities shared across the application.
-"""
-
-from core.config import get_settings, Settings
-from core.database import (
-    get_db_session,
-    AsyncSessionLocal,
-    init_db,
-    close_db,
-    engine,
-)
+from core.config import settings
+from core.database import get_db_session, engine, async_session_factory
 
 __all__ = [
-    "get_settings",
-    "Settings",
+    "settings",
     "get_db_session",
-    "AsyncSessionLocal",
-    "init_db",
-    "close_db",
     "engine",
+    "async_session_factory",
 ]

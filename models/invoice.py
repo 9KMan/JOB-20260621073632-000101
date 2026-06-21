@@ -1,91 +1,99 @@
-// models/invoice.py
-"""Invoice and InvoiceLine SQLAlchemy models.
-
-Represents vendor invoices with line items for matching
-against purchase orders and delivery notes.
-"""
+# models/invoice.py
+"""Invoice and InvoiceLine SQLAlchemy models."""
 
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    Date,
     ForeignKey,
     Index,
     Numeric,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+    relationship,
+)
 
-from models.base import Base, TimestampMixin, UUIDMixin
-from models.enums import Currency, InvoiceStatus
+from models.base import BaseModel
+from models.enums import InvoiceStatus, LineStatus
+
 
 if TYPE_CHECKING:
     from models.balance_ledger import BalanceLedger
-    from models.cross_ref import CrossRef
+    from models.purchase_order import PurchaseOrderLine
 
 
-class Invoice(Base, UUIDMixin, TimestampMixin):
-    """Vendor invoice model.
-
-    Contains header information and relationships to line items.
+class Invoice(BaseModel):
+    """
+    Invoice model representing supplier invoices.
+    
+    Attributes:
+        invoice_number: Unique invoice identifier
+        vendor_id: External vendor identifier
+        vendor_name: Vendor display name
+        invoice_date: Date on the invoice
+        due_date: Payment due date
+        subtotal: Invoice subtotal amount
+        tax_amount: Tax amount
+        total_amount: Total invoice amount
+        currency: Currency code (ISO 4217)
+        status: Current invoice status
+        notes: Optional notes/comments
+        matched_po_id: Reference to matched purchase order
+        matched_dn_id: Reference to matched delivery note
+        exception_count: Number of exceptions on this invoice
+        matched_at: Timestamp when invoice was matched
     """
 
     __tablename__ = "invoices"
-    __table_args__ = (
-        Index("ix_invoices_vendor_id", "vendor_id"),
-        Index("ix_invoices_status", "status"),
-        Index("ix_invoices_invoice_date", "invoice_date"),
-        Index("ix_invoices_created_at", "created_at"),
-        UniqueConstraint("vendor_id", "invoice_number", name="uq_vendor_invoice"),
-    )
 
-    # Vendor Information
+    # Core invoice fields
+    invoice_number: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        unique=True,
+        index=True,
+        doc="Unique invoice number from vendor",
+    )
     vendor_id: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         index=True,
-        doc="Vendor/supplier identifier from ERP",
+        doc="Vendor identifier from ERP",
     )
-    vendor_name: Mapped[str | None] = mapped_column(
+    vendor_name: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
-        doc="Vendor display name",
+        nullable=False,
+        doc="Vendor name",
     )
-    vendor_tax_id: Mapped[str | None] = mapped_column(
-        String(50),
+    
+    # Dates
+    invoice_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        doc="Date on the invoice",
+    )
+    due_date: Mapped[date | None] = mapped_column(
+        Date,
         nullable=True,
-        doc="Vendor tax identification number",
+        doc="Payment due date",
+    )
+    received_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        default=date.today,
+        doc="Date invoice was received in system",
     )
 
-    # Invoice Details
-    invoice_number: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        doc="Vendor's invoice number",
-    )
-    invoice_date: Mapped[str] = mapped_column(
-        String(10),
-        nullable=False,
-        doc="Invoice date (YYYY-MM-DD)",
-    )
-    due_date: Mapped[str | None] = mapped_column(
-        String(10),
-        nullable=True,
-        doc="Payment due date (YYYY-MM-DD)",
-    )
-
-    # Financial Information
-    currency: Mapped[str] = mapped_column(
-        String(3),
-        nullable=False,
-        default="USD",
-        doc="Currency code (ISO 4217)",
-    )
+    # Financial amounts
     subtotal: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
@@ -96,69 +104,105 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         Numeric(15, 2),
         nullable=False,
         default=Decimal("0.00"),
-        doc="Total tax amount",
+        doc="Tax amount",
     )
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
         default=Decimal("0.00"),
-        doc="Invoice total amount",
+        doc="Total invoice amount",
     )
-    tax_rate: Mapped[Decimal | None] = mapped_column(
-        Numeric(5, 4),
-        nullable=True,
-        doc="Tax rate applied (e.g., 0.0825 for 8.25%)",
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="USD",
+        doc="Currency code (ISO 4217)",
+    )
+    exchange_rate: Mapped[Decimal] = mapped_column(
+        Numeric(15, 6),
+        nullable=False,
+        default=Decimal("1.000000"),
+        doc="Exchange rate to base currency",
     )
 
-    # Status and Processing
-    status: Mapped[str] = mapped_column(
+    # Status and workflow
+    status: Mapped[InvoiceStatus] = mapped_column(
         String(20),
         nullable=False,
-        default=InvoiceStatus.DRAFT.value,
+        default=InvoiceStatus.PENDING,
         index=True,
         doc="Current invoice status",
-    )
-    matching_decision: Mapped[str | None] = mapped_column(
-        String(30),
-        nullable=True,
-        doc="Matching engine decision",
-    )
-    match_score: Mapped[float | None] = mapped_column(
-        Numeric(5, 2),
-        nullable=True,
-        doc="Match confidence score (0-100)",
-    )
-
-    # Additional Fields
-    payment_terms: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        doc="Payment terms (e.g., NET 30)",
     )
     notes: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
-        doc="Additional notes or comments",
-    )
-    is_credit_memo: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        doc="Whether this is a credit memo",
+        doc="Optional notes or comments",
     )
 
-    # Reconciliation
+    # Matching references
     matched_po_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_orders.id", ondelete="SET NULL"),
         nullable=True,
-        doc="Matched purchase order ID",
+        index=True,
+        doc="Reference to matched purchase order",
     )
     matched_dn_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_notes.id", ondelete="SET NULL"),
         nullable=True,
-        doc="Matched delivery note ID",
+        index=True,
+        doc="Reference to matched delivery note",
+    )
+    match_decision: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+        doc="Match decision made",
+    )
+    match_score: Mapped[int | None] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+        doc="Match score percentage",
+    )
+    matched_at: Mapped[datetime | None] = mapped_column(
+        nullable=True,
+        doc="Timestamp when matched",
+    )
+
+    # Exception tracking
+    exception_count: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False,
+        doc="Number of exceptions on this invoice",
+    )
+
+    # Approval workflow
+    approved_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="User who approved the invoice",
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        nullable=True,
+        doc="Timestamp of approval",
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Reason for rejection if rejected",
+    )
+
+    # ERP reference
+    erp_invoice_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        doc="Invoice ID in ERP system",
+    )
+    payment_reference: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Payment reference number",
     )
 
     # Relationships
@@ -168,85 +212,65 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    cross_refs: Mapped[list["CrossRef"]] = relationship(
-        "CrossRef",
-        back_populates="invoice",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
-    balance_ledger_entries: Mapped[list["BalanceLedger"]] = relationship(
-        "BalanceLedger",
-        back_populates="invoice",
-        cascade="all, delete-orphan",
-        lazy="selectin",
+
+    __table_args__ = (
+        Index("ix_invoices_vendor_date", "vendor_id", "invoice_date"),
+        Index("ix_invoices_status_matched", "status", "matched_po_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<Invoice {self.invoice_number} from {self.vendor_id}>"
+        return f"<Invoice(id={self.id}, number={self.invoice_number}, status={self.status})>"
 
 
-class InvoiceLine(Base, UUIDMixin, TimestampMixin):
-    """Individual line item on an invoice.
-
-    Each line represents a single product or service with
-    quantity and price information.
+class InvoiceLine(BaseModel):
+    """
+    Invoice line item model.
+    
+    Attributes:
+        line_number: Line item number
+        description: Line item description
+        quantity: Invoice quantity
+        unit_price: Price per unit
+        line_total: Total amount for this line
+        matched_po_line_id: Reference to matched PO line
+        matched_dn_line_id: Reference to matched delivery note line
+        status: Line matching status
     """
 
     __tablename__ = "invoice_lines"
-    __table_args__ = (
-        Index("ix_invoice_lines_invoice_id", "invoice_id"),
-        Index("ix_invoice_lines_line_number", "invoice_id", "line_number"),
-    )
 
-    # Foreign Key
+    # Parent reference
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
-        doc="Parent invoice ID",
+        doc="Reference to parent invoice",
     )
 
-    # Line Details
-    line_number: Mapped[int] = mapped_column(
+    # Line details
+    line_number: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
-        doc="Line item sequence number",
+        doc="Line item number",
     )
-    description: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-        doc="Line item description",
-    )
-
-    # Product Information
     sku: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         index=True,
-        doc="Product SKU/UPC",
+        doc="Product SKU",
     )
-    product_code: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        doc="Internal product code",
-    )
-    barcode: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        doc="Product barcode",
+    description: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        doc="Line item description",
     )
 
-    # Quantity and Pricing
+    # Quantities and amounts
     quantity: Mapped[Decimal] = mapped_column(
-        Numeric(15, 4),
+        Numeric(15, 3),
         nullable=False,
-        default=Decimal("1"),
-        doc="Invoiced quantity",
-    )
-    unit_of_measure: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        doc="Unit of measure (e.g., EA, KG, M)",
+        doc="Invoice quantity",
     )
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 4),
@@ -256,26 +280,59 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
     line_total: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,
-        doc="Total line amount (qty * unit_price)",
+        doc="Total amount for this line",
     )
-    tax_amount: Mapped[Decimal | None] = mapped_column(
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        doc="Tax rate",
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
-        nullable=True,
-        doc="Line-level tax amount",
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Tax amount for this line",
     )
 
-    # Matching Reference
-    po_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    # Match references
+    matched_po_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("purchase_order_lines.id", ondelete="SET NULL"),
         nullable=True,
-        doc="Matched purchase order line ID",
+        index=True,
+        doc="Reference to matched PO line",
     )
-    dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
+    matched_dn_line_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("delivery_note_lines.id", ondelete="SET NULL"),
         nullable=True,
-        doc="Matched delivery note line ID",
+        index=True,
+        doc="Reference to matched delivery note line",
+    )
+    match_type: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        doc="Type of match made",
+    )
+    match_score: Mapped[int | None] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+        doc="Match score for this line",
+    )
+
+    # Status
+    status: Mapped[LineStatus] = mapped_column(
+        String(20),
+        nullable=False,
+        default=LineStatus.PENDING,
+        index=True,
+        doc="Line matching status",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Line-specific notes",
     )
 
     # Relationships
@@ -284,5 +341,10 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
         back_populates="lines",
     )
 
+    __table_args__ = (
+        Index("ix_invoice_lines_invoice_line", "invoice_id", "line_number"),
+        Index("ix_invoice_lines_sku", "sku"),
+    )
+
     def __repr__(self) -> str:
-        return f"<InvoiceLine {self.line_number}: {self.sku or 'No SKU'}>"
+        return f"<InvoiceLine(id={self.id}, line={self.line_number}, qty={self.quantity})>"

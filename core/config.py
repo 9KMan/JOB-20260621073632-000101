@@ -1,9 +1,5 @@
-// core/config.py
-"""Application configuration using pydantic-settings.
-
-All configuration is managed via environment variables.
-No hardcoded secrets or configuration values.
-"""
+# core/config.py
+"""Application configuration using pydantic-settings."""
 
 from functools import lru_cache
 from typing import Annotated
@@ -12,156 +8,182 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+class DatabaseSettings(BaseSettings):
+    """Database configuration settings."""
+
+    model_config = SettingsConfigDict(env_prefix="DATABASE_")
+
+    url: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        description="Async PostgreSQL connection URL",
+    )
+    echo: bool = Field(
+        default=False,
+        description="Echo SQL queries to stdout",
+    )
+    pool_size: int = Field(
+        default=20,
+        ge=1,
+        description="Connection pool size",
+    )
+    max_overflow: int = Field(
+        default=10,
+        ge=0,
+        description="Maximum pool overflow",
+    )
+    pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        description="Pool timeout in seconds",
+    )
+    pool_recycle: int = Field(
+        default=3600,
+        ge=0,
+        description="Connection recycle time in seconds",
+    )
+
+
+class JWTSettings(BaseSettings):
+    """JWT authentication settings."""
+
+    model_config = SettingsConfigDict(env_prefix="JWT_")
+
+    secret_key: str = Field(
+        default="changeme-in-production-use-strong-secret",
+        description="HS256 secret key for JWT signing",
+    )
+    algorithm: str = Field(
+        default="HS256",
+        description="JWT signing algorithm",
+    )
+    access_token_expire_minutes: int = Field(
+        default=30,
+        ge=1,
+        description="Access token expiry in minutes",
+    )
+    refresh_token_expire_days: int = Field(
+        default=7,
+        ge=1,
+        description="Refresh token expiry in days",
+    )
+
+
+class ThresholdSettings(BaseSettings):
+    """Matching threshold settings."""
+
+    model_config = SettingsConfigDict(env_prefix="THRESHOLD_")
+
+    high: int = Field(
+        default=95,
+        ge=0,
+        le=100,
+        description="Auto-approve threshold percentage",
+    )
+    mid: int = Field(
+        default=70,
+        ge=0,
+        le=100,
+        description="One-click review threshold percentage",
+    )
+    low: int = Field(
+        default=40,
+        ge=0,
+        le=100,
+        description="Exception threshold percentage",
+    )
+
+
+class ToleranceSettings(BaseSettings):
+    """Matching tolerance settings."""
+
+    model_config = SettingsConfigDict(env_prefix="TOLERANCE_")
+
+    price: float = Field(
+        default=5.0,
+        ge=0,
+        le=100,
+        description="Price match tolerance percentage",
+    )
+    qty: float = Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description="Quantity match tolerance percentage",
+    )
+
+
+class PGBouncerSettings(BaseSettings):
+    """PGBouncer connection settings."""
+
+    model_config = SettingsConfigDict(env_prefix="PGBOUNCER_")
+
+    host: str = Field(
+        default="localhost",
+        description="PGBouncer host",
+    )
+    port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+        description="PGBouncer port",
+    )
+
+
+class AppSettings(BaseSettings):
+    """Main application settings."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",
     )
 
-    # Database Configuration
-    database_url: Annotated[
-        str,
-        Field(
-            description="Async PostgreSQL connection string for SQLAlchemy",
-            examples=["postgresql+asyncpg://user:pass@host:5432/dbname"],
-        ),
-    ]
-    database_url_sync: Annotated[
-        str,
-        Field(
-            description="Sync PostgreSQL connection string for Alembic",
-            examples=["postgresql://user:pass@host:5432/dbname"],
-        ),
-    ]
-
-    # PGBouncer Configuration (optional)
-    pgbouncer_host: str | None = Field(
-        default=None,
-        description="PGBouncer host for connection pooling",
-    )
-    pgbouncer_port: int = Field(
-        default=5432,
-        description="PGBouncer port",
-        ge=1,
-        le=65535,
-    )
-
-    # JWT / Authentication
-    jwt_secret_key: Annotated[
-        str,
-        Field(
-            description="HS256 secret key for JWT token signing",
-            min_length=32,
-        ),
-    ]
-    jwt_algorithm: str = Field(
-        default="HS256",
-        description="JWT algorithm",
-    )
-    access_token_expire_minutes: int = Field(
-        default=30,
-        ge=1,
-        le=1440,
-        description="Access token expiration in minutes",
-    )
-    refresh_token_expire_days: int = Field(
-        default=7,
-        ge=1,
-        le=30,
-        description="Refresh token expiration in days",
-    )
-
-    # Matching Thresholds
-    threshold_high: Annotated[
-        float,
-        Field(
-            default=95.0,
-            ge=0.0,
-            le=100.0,
-            description="Auto-approve threshold percentage",
-        ),
-    ]
-    threshold_mid: Annotated[
-        float,
-        Field(
-            default=70.0,
-            ge=0.0,
-            le=100.0,
-            description="1-click review threshold percentage",
-        ),
-    ]
-    threshold_low: Annotated[
-        float,
-        Field(
-            default=40.0,
-            ge=0.0,
-            le=100.0,
-            description="Exception threshold percentage",
-        ),
-    ]
-
-    # Tolerance Settings
-    tolerance_price: Annotated[
-        float,
-        Field(
-            default=5.0,
-            ge=0.0,
-            le=100.0,
-            description="Price match tolerance percentage",
-        ),
-    ]
-    tolerance_qty: Annotated[
-        float,
-        Field(
-            default=10.0,
-            ge=0.0,
-            le=100.0,
-            description="Quantity match tolerance percentage",
-        ),
-    ]
-
-    # Application Settings
     app_name: str = Field(
-        default="AP Automation Engine",
+        default="AP Automation Core Engine",
         description="Application name",
     )
-    environment: str = Field(
-        default="development",
-        description="Runtime environment",
+    app_version: str = Field(
+        default="0.1.0",
+        description="Application version",
+    )
+    debug: bool = Field(
+        default=False,
+        description="Debug mode",
     )
     log_level: str = Field(
         default="INFO",
         description="Logging level",
     )
-    debug: bool = Field(
-        default=False,
-        description="Debug mode flag",
-    )
 
-    # API Settings
     api_v1_prefix: str = Field(
         default="/api/v1",
-        description="API v1 route prefix",
+        description="API v1 prefix",
     )
     cors_origins: list[str] = Field(
         default=["*"],
         description="CORS allowed origins",
     )
 
-    @field_validator("threshold_high", "threshold_mid", "threshold_low")
-    @classmethod
-    def validate_threshold_order(
-        cls, v: float, info: field_validator
-    ) -> float:
-        """Validate that thresholds are in correct order: high > mid > low."""
-        if info.field_name == "threshold_high":
-            return v
-        # Additional validation can be done at startup
-        return v
+    database: DatabaseSettings = Field(
+        default_factory=DatabaseSettings,
+        description="Database configuration",
+    )
+    jwt: JWTSettings = Field(
+        default_factory=JWTSettings,
+        description="JWT configuration",
+    )
+    threshold: ThresholdSettings = Field(
+        default_factory=ThresholdSettings,
+        description="Matching threshold configuration",
+    )
+    tolerance: ToleranceSettings = Field(
+        default_factory=ToleranceSettings,
+        description="Matching tolerance configuration",
+    )
+    pgbouncer: PGBouncerSettings = Field(
+        default_factory=PGBouncerSettings,
+        description="PGBouncer configuration",
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -170,14 +192,31 @@ class Settings(BaseSettings):
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         v_upper = v.upper()
         if v_upper not in valid_levels:
-            raise ValueError(f"log_level must be one of {valid_levels}")
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
         return v_upper
+
+
+class Settings(BaseSettings):
+    """Aggregated application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    app: AppSettings = Field(
+        default_factory=AppSettings,
+        description="Application configuration",
+    )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance.
-
-    Uses lru_cache to ensure settings are only loaded once.
-    """
+    """Get cached settings instance."""
     return Settings()
+
+
+# Global settings instance
+settings = get_settings()

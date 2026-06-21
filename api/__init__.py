@@ -1,57 +1,16 @@
-// api/__init__.py
-"""API package for AP Automation Engine.
-
-Contains route handlers, schemas, and API configuration.
-"""
+# api/__init__.py
+"""API package initialization."""
 
 from api.schemas import (
-    HealthResponse,
+    BaseResponse,
+    PaginatedResponse,
     ErrorResponse,
-    PaginationParams,
-    InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
-    InvoiceListResponse,
-    PurchaseOrderCreate,
-    PurchaseOrderResponse,
-    PurchaseOrderListResponse,
-    DeliveryNoteCreate,
-    DeliveryNoteResponse,
-    DeliveryNoteListResponse,
-    MatchingRequest,
-    MatchingResponse,
-    MatchingDecisionResponse,
-    ExceptionCreate,
-    ExceptionResponse,
-    ExceptionListResponse,
-    ExceptionResolution,
-    BalanceLedgerResponse,
-    CrossRefResponse,
-    CrossRefListResponse,
+    HealthResponse,
 )
 
 __all__ = [
-    "HealthResponse",
+    "BaseResponse",
+    "PaginatedResponse",
     "ErrorResponse",
-    "PaginationParams",
-    "InvoiceCreate",
-    "InvoiceUpdate",
-    "InvoiceResponse",
-    "InvoiceListResponse",
-    "PurchaseOrderCreate",
-    "PurchaseOrderResponse",
-    "PurchaseOrderListResponse",
-    "DeliveryNoteCreate",
-    "DeliveryNoteResponse",
-    "DeliveryNoteListResponse",
-    "MatchingRequest",
-    "MatchingResponse",
-    "MatchingDecisionResponse",
-    "ExceptionCreate",
-    "ExceptionResponse",
-    "ExceptionListResponse",
-    "ExceptionResolution",
-    "BalanceLedgerResponse",
-    "CrossRefResponse",
-    "CrossRefListResponse",
+    "HealthResponse",
 ]
