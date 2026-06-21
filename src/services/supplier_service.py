@@ -1,127 +1,93 @@
 // src/services/supplier_service.py
-"""Supplier service."""
-import uuid
+"""Supplier service for business logic."""
 from typing import Optional
+from uuid import UUID
 
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.supplier import Supplier
-from src.schemas.supplier import SupplierCreate, SupplierUpdate
+from src.services.base import BaseService
 
 
-class SupplierService:
+class SupplierService(BaseService[Supplier]):
     """Service for supplier operations."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: Session):
+        """Initialize supplier service."""
+        super().__init__(Supplier, db)
 
-    async def create_supplier(self, supplier_data: SupplierCreate) -> Supplier:
-        """Create a new supplier."""
-        supplier = Supplier(
-            code=supplier_data.code,
-            name=supplier_data.name,
-            email=supplier_data.email,
-            phone=supplier_data.phone,
-            address=supplier_data.address,
-            tax_id=supplier_data.tax_id,
-            is_active=supplier_data.is_active,
-        )
-        
-        self.db.add(supplier)
-        await self.db.commit()
-        await self.db.refresh(supplier)
-        
-        return supplier
-
-    async def get_supplier_by_id(self, supplier_id: uuid.UUID) -> Optional[Supplier]:
-        """Get a supplier by ID."""
-        result = await self.db.execute(
-            select(Supplier).where(
-                Supplier.id == supplier_id,
-                Supplier.is_deleted == False
-            )
-        )
-        return result.scalar_one_or_none()
-
-    async def get_supplier_by_code(self, code: str) -> Optional[Supplier]:
-        """Get a supplier by code."""
-        result = await self.db.execute(
-            select(Supplier).where(
-                Supplier.code == code,
-                Supplier.is_deleted == False
-            )
-        )
-        return result.scalar_one_or_none()
-
-    async def update_supplier(
-        self,
-        supplier_id: uuid.UUID,
-        supplier_data: SupplierUpdate
-    ) -> Optional[Supplier]:
-        """Update an existing supplier."""
-        supplier = await self.get_supplier_by_id(supplier_id)
+    def get_with_counts(self, id: UUID) -> Optional[dict]:
+        """Get supplier with related record counts."""
+        supplier = self.get(id)
         if not supplier:
             return None
-        
-        update_data = supplier_data.model_dump(exclude_unset=True)
-        
-        for field, value in update_data.items():
-            setattr(supplier, field, value)
-        
-        await self.db.commit()
-        await self.db.refresh(supplier)
-        
+
+        # Get counts
+        po_count = self.db.execute(
+            select(func.count()).where(
+                Supplier.purchase_orders.any(id=id)
+            )
+        ).scalar()
+
+        invoice_count = self.db.execute(
+            select(func.count()).where(
+                Supplier.invoices.any(id=id)
+            )
+        ).scalar()
+
+        dn_count = self.db.execute(
+            select(func.count()).where(
+                Supplier.delivery_notes.any(id=id)
+            )
+        ).scalar()
+
+        return {
+            **supplier.__dict__,
+            "purchase_orders_count": po_count,
+            "invoices_count": invoice_count,
+            "delivery_notes_count": dn_count,
+        }
+
+    def get_by_code(self, code: str) -> Optional[Supplier]:
+        """Get supplier by code."""
+        return self.get_by_field("code", code)
+
+    def get_by_tax_id(self, tax_id: str) -> Optional[Supplier]:
+        """Get supplier by tax ID."""
+        return self.get_by_field("tax_id", tax_id)
+
+    def get_active_suppliers(self) -> list[Supplier]:
+        """Get all active suppliers."""
+        stmt = select(Supplier).where(
+            Supplier.is_active == True,
+            Supplier.is_deleted == False,  # noqa: E712
+        ).order_by(Supplier.name)
+        return list(self.db.execute(stmt).scalars().all())
+
+    def create(self, data: dict) -> Supplier:
+        """Create a new supplier."""
+        supplier = Supplier(**data)
+        self.db.add(supplier)
+        self.db.flush()
+        self.db.refresh(supplier)
         return supplier
 
-    async def delete_supplier(self, supplier_id: uuid.UUID) -> bool:
-        """Soft delete a supplier."""
-        supplier = await self.get_supplier_by_id(supplier_id)
-        if not supplier:
-            return False
-        
-        supplier.soft_delete()
-        await self.db.commit()
-        
-        return True
+    def update(self, id: UUID, data: dict) -> Optional[Supplier]:
+        """Update a supplier."""
+        supplier = self.get(id)
+        if supplier:
+            for field, value in data.items():
+                if hasattr(supplier, field) and value is not None:
+                    setattr(supplier, field, value)
+            self.db.flush()
+            self.db.refresh(supplier)
+        return supplier
 
-    async def list_suppliers(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        is_active: Optional[bool] = None,
-        search: Optional[str] = None
-    ) -> tuple[list[Supplier], int]:
-        """List suppliers with pagination and filtering."""
-        query = select(Supplier).where(Supplier.is_deleted == False)
-        
-        if is_active is not None:
-            query = query.where(Supplier.is_active == is_active)
-        
-        if search:
-            search_term = f"%{search}%"
-            query = query.where(
-                (Supplier.code.ilike(search_term)) |
-                (Supplier.name.ilike(search_term))
-            )
-        
-        # Get total count
-        count_query = select(func.count(Supplier.id)).where(Supplier.is_deleted == False)
-        if is_active is not None:
-            count_query = count_query.where(Supplier.is_active == is_active)
-        if search:
-            search_term = f"%{search}%"
-            count_query = count_query.where(
-                (Supplier.code.ilike(search_term)) |
-                (Supplier.name.ilike(search_term))
-            )
-        
-        count_result = await self.db.execute(count_query)
-        total = count_result.scalar()
-        
-        # Get paginated results
-        query = query.offset(skip).limit(limit).order_by(Supplier.name)
-        result = await self.db.execute(query)
-        suppliers = result.scalars().all()
-        
-        return list(suppliers), total
+    def deactivate(self, id: UUID) -> Optional[Supplier]:
+        """Deactivate a supplier."""
+        return self.update(id, {"is_active": False})
+
+    def activate(self, id: UUID) -> Optional[Supplier]:
+        """Activate a supplier."""
+        return self.update(id, {"is_active": True})

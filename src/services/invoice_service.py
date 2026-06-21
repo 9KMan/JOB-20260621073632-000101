@@ -1,178 +1,167 @@
 // src/services/invoice_service.py
-"""Invoice service for invoice management."""
-from datetime import datetime
+"""Invoice service for business logic."""
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional, List
+from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func
 
-from src.models.invoice import Invoice, InvoiceLine
-from src.schemas.invoice import InvoiceCreate, InvoiceUpdate
+from src.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from src.services.base import BaseService
-from src.services.audit_service import AuditService
 
 
 class InvoiceService(BaseService[Invoice]):
-    """Service for Invoice management."""
+    """Service for Invoice operations."""
 
     def __init__(self, db: Session):
         """Initialize invoice service."""
         super().__init__(Invoice, db)
-        self.audit_service = AuditService(db)
 
-    def get_by_invoice_number(self, invoice_number: str) -> Optional[Invoice]:
+    def get_with_lines(self, id: UUID) -> Optional[Invoice]:
+        """Get invoice with lines eagerly loaded."""
+        stmt = (
+            select(Invoice)
+            .options(joinedload(Invoice.lines))
+            .options(joinedload(Invoice.supplier))
+            .where(
+                Invoice.id == id,
+                Invoice.is_deleted == False,  # noqa: E712
+            )
+        )
+        return self.db.execute(stmt).unique().scalar_one_or_none()
+
+    def get_by_number(self, invoice_number: str) -> Optional[Invoice]:
         """Get invoice by invoice number."""
-        return (
-            self.db.query(Invoice)
-            .filter(Invoice.invoice_number == invoice_number)
-            .first()
-        )
+        return self.get_by_field("invoice_number", invoice_number)
 
-    def get_by_supplier(self, supplier_id: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
-        """Get invoices by supplier."""
-        return (
-            self.db.query(Invoice)
-            .filter(Invoice.supplier_id == supplier_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
+    def get_by_supplier_and_number(
+        self, supplier_id: UUID, invoice_number: str
+    ) -> Optional[Invoice]:
+        """Get invoice by supplier and invoice number."""
+        stmt = select(Invoice).where(
+            Invoice.supplier_id == supplier_id,
+            Invoice.invoice_number == invoice_number,
+            Invoice.is_deleted == False,  # noqa: E712
         )
+        return self.db.execute(stmt).scalar_one_or_none()
 
-    def get_by_po(self, po_id: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
-        """Get invoices linked to a PO."""
-        return (
-            self.db.query(Invoice)
-            .filter(Invoice.po_id == po_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-
-    def get_pending_invoices(self, skip: int = 0, limit: int = 100) -> List[Invoice]:
-        """Get all pending invoices."""
-        return (
-            self.db.query(Invoice)
-            .filter(Invoice.status == "pending")
+    def get_pending_invoices(self) -> List[Invoice]:
+        """Get all pending invoices (not yet matched or approved)."""
+        stmt = (
+            select(Invoice)
             .options(joinedload(Invoice.lines))
-            .offset(skip)
-            .limit(limit)
-            .all()
+            .options(joinedload(Invoice.supplier))
+            .where(
+                Invoice.status == InvoiceStatus.RECEIVED,
+                Invoice.is_deleted == False,  # noqa: E712
+            )
+            .order_by(Invoice.invoice_date)
         )
+        return list(self.db.execute(stmt).scalars().all())
 
-    def get_by_status(self, status: str, skip: int = 0, limit: int = 100) -> List[Invoice]:
-        """Get invoices by status."""
-        return (
-            self.db.query(Invoice)
-            .filter(Invoice.status == status)
-            .options(joinedload(Invoice.lines))
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+    def create(self, data: dict) -> Invoice:
+        """Create a new invoice with lines."""
+        lines_data = data.pop("lines", [])
 
-    def create_invoice(self, invoice_data: InvoiceCreate, received_by: Optional[str] = None) -> Invoice:
-        """Create a new Invoice with lines."""
-        # Calculate totals
-        subtotal = sum(line.line_total for line in invoice_data.lines)
-        tax_amount = sum(line.tax_amount for line in invoice_data.lines)
-        total_amount = subtotal + tax_amount
+        # Calculate totals if not provided
+        subtotal = Decimal(str(data.get("subtotal", 0)))
+        tax_amount = Decimal(str(data.get("tax_amount", 0)))
+        total_amount = Decimal(str(data.get("total_amount", 0)))
 
-        # Create invoice data
-        invoice_dict = invoice_data.model_dump(exclude={"lines"})
-        invoice_dict["subtotal"] = subtotal
-        invoice_dict["tax_amount"] = tax_amount
-        invoice_dict["total_amount"] = total_amount
-        invoice_dict["receipt_date"] = datetime.utcnow()
-        if received_by:
-            invoice_dict["received_by"] = received_by
+        if subtotal == 0 and lines_data:
+            subtotal = sum(Decimal(str(line.get("line_total", 0))) for line in lines_data)
+            tax_amount = sum(Decimal(str(line.get("tax_amount", 0))) for line in lines_data)
+            total_amount = subtotal + tax_amount
 
-        # Create invoice with lines
-        invoice = Invoice(**invoice_dict)
+        invoice_data = {
+            **data,
+            "subtotal": subtotal,
+            "tax_amount": tax_amount,
+            "total_amount": total_amount,
+        }
+
+        invoice = Invoice(**invoice_data)
         self.db.add(invoice)
         self.db.flush()
 
         # Create lines
-        for line_data in invoice_data.lines:
-            line_dict = line_data.model_dump()
-            line = InvoiceLine(invoice_id=invoice.id, **line_dict)
+        for line_data in lines_data:
+            line_data["invoice_id"] = invoice.id
+            line = InvoiceLine(**line_data)
             self.db.add(line)
 
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(invoice)
-
-        # Audit log
-        self.audit_service.log_create(invoice, received_by)
-
         return invoice
 
-    def update_invoice(self, id: str, invoice_data: InvoiceUpdate) -> Optional[Invoice]:
-        """Update Invoice."""
-        invoice = self.get_by_id(id)
-        if not invoice:
-            return None
-
-        update_dict = invoice_data.model_dump(exclude_unset=True)
-        
-        # Audit before update
-        self.audit_service.log_update(invoice, update_dict, invoice.received_by)
-
-        return self.update(id, update_dict)
-
-    def match_invoice_to_po(self, invoice_id: str, po_id: str, matched_by: Optional[str] = None) -> Optional[Invoice]:
-        """Link invoice to a PO."""
-        invoice = self.get_by_id(invoice_id)
+    def update(self, id: UUID, data: dict) -> Optional[Invoice]:
+        """Update an invoice."""
+        invoice = self.get(id)
         if invoice:
-            invoice.po_id = po_id
-            self.db.commit()
-            self.db.refresh(invoice)
-            self.audit_service.log_update(
-                invoice, {"po_id": po_id, "matched_by": matched_by}, matched_by
-            )
-        return invoice
+            lines_data = data.pop("lines", None)
 
-    def update_match_status(self, invoice_id: str, match_score: Decimal, match_status: str) -> Optional[Invoice]:
-        """Update invoice match status."""
-        invoice = self.get_by_id(invoice_id)
-        if invoice:
-            invoice.match_score = match_score
-            invoice.match_status = match_status
-            self.db.commit()
+            for field, value in data.items():
+                if hasattr(invoice, field) and value is not None:
+                    setattr(invoice, field, value)
+
+            if lines_data is not None:
+                # Update lines
+                for line_data in lines_data:
+                    line_id = line_data.pop("id", None)
+                    if line_id:
+                        line = self.db.get(InvoiceLine, line_id)
+                        if line:
+                            for field, value in line_data.items():
+                                if hasattr(line, field) and value is not None:
+                                    setattr(line, field, value)
+                    else:
+                        line_data["invoice_id"] = invoice.id
+                        line = InvoiceLine(**line_data)
+                        self.db.add(line)
+
+            self.db.flush()
             self.db.refresh(invoice)
         return invoice
 
-    def approve_invoice(self, invoice_id: str, approved_by: str) -> Optional[Invoice]:
-        """Approve an invoice."""
-        invoice = self.get_by_id(invoice_id)
-        if invoice:
-            invoice.status = "approved"
-            invoice.approved_by = approved_by
-            invoice.approved_at = datetime.utcnow()
-            self.db.commit()
-            self.db.refresh(invoice)
-            self.audit_service.log_update(
-                invoice, {"status": "approved", "approved_by": approved_by}, approved_by
-            )
-        return invoice
+    def update_status(self, id: UUID, status: InvoiceStatus) -> Optional[Invoice]:
+        """Update invoice status."""
+        return self.update(
+            id, {"status": status.value if isinstance(status, InvoiceStatus) else status}
+        )
 
-    def reject_invoice(self, invoice_id: str, rejected_by: str, reason: Optional[str] = None) -> Optional[Invoice]:
-        """Reject an invoice."""
-        invoice = self.get_by_id(invoice_id)
-        if invoice:
-            invoice.status = "rejected"
-            invoice.notes = f"{invoice.notes or ''} | Rejected: {reason}".strip(" |")
-            self.db.commit()
-            self.db.refresh(invoice)
-            self.audit_service.log_update(
-                invoice, {"status": "rejected", "reason": reason}, rejected_by
-            )
-        return invoice
+    def get_multi_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        supplier_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[List[Invoice], int]:
+        """Get invoices with pagination and filters."""
+        stmt = (
+            select(Invoice)
+            .options(joinedload(Invoice.supplier))
+            .options(joinedload(Invoice.lines))
+            .where(Invoice.is_deleted == False)  # noqa: E712
+        )
 
-    def mark_as_paid(self, invoice_id: str, payment_reference: str) -> Optional[Invoice]:
-        """Mark invoice as paid."""
-        invoice = self.get_by_id(invoice_id)
-        if invoice:
-            invoice.status = "paid"
-            invoice.payment_reference = payment_reference
-            self.db.commit()
-            self.db.refresh(invoice)
-        return invoice
+        if supplier_id:
+            stmt = stmt.where(Invoice.supplier_id == supplier_id)
+
+        if status:
+            stmt = stmt.where(Invoice.status == status)
+
+        if search:
+            stmt = stmt.where(Invoice.invoice_number.ilike(f"%{search}%"))
+
+        # Count
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = self.db.execute(count_stmt).scalar()
+
+        # Paginate
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size).order_by(Invoice.created_at.desc())
+
+        items = list(self.db.execute(stmt).unique().scalars().all())
+        return items, total

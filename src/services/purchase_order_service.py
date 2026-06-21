@@ -1,172 +1,180 @@
 // src/services/purchase_order_service.py
-"""Purchase Order service for PO management."""
-from datetime import date
+"""Purchase Order service for business logic."""
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional, List
+from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func
 
-from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from src.schemas.purchase_order import PurchaseOrderCreate, PurchaseOrderUpdate
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine, POStatus
+from src.models.supplier import Supplier
 from src.services.base import BaseService
-from src.services.audit_service import AuditService
 
 
 class PurchaseOrderService(BaseService[PurchaseOrder]):
-    """Service for Purchase Order management."""
+    """Service for Purchase Order operations."""
 
     def __init__(self, db: Session):
         """Initialize PO service."""
         super().__init__(PurchaseOrder, db)
-        self.audit_service = AuditService(db)
 
-    def get_by_po_number(self, po_number: str) -> Optional[PurchaseOrder]:
-        """Get PO by PO number."""
-        return (
-            self.db.query(PurchaseOrder)
-            .filter(PurchaseOrder.po_number == po_number)
-            .first()
-        )
-
-    def get_by_supplier(self, supplier_id: str, skip: int = 0, limit: int = 100) -> List[PurchaseOrder]:
-        """Get POs by supplier."""
-        return (
-            self.db.query(PurchaseOrder)
-            .filter(PurchaseOrder.supplier_id == supplier_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-
-    def get_open_pos(self, skip: int = 0, limit: int = 100) -> List[PurchaseOrder]:
-        """Get all open POs."""
-        return (
-            self.db.query(PurchaseOrder)
-            .filter(PurchaseOrder.status.in_(["open", "partial"]))
+    def get_with_lines(self, id: UUID) -> Optional[PurchaseOrder]:
+        """Get PO with lines eagerly loaded."""
+        stmt = (
+            select(PurchaseOrder)
             .options(joinedload(PurchaseOrder.lines))
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-
-    def get_by_po_number_and_supplier(self, po_number: str, supplier_id: str) -> Optional[PurchaseOrder]:
-        """Get PO by number and supplier for anchoring."""
-        return (
-            self.db.query(PurchaseOrder)
-            .filter(
-                PurchaseOrder.po_number == po_number,
-                PurchaseOrder.supplier_id == supplier_id,
+            .options(joinedload(PurchaseOrder.supplier))
+            .where(
+                PurchaseOrder.id == id,
+                PurchaseOrder.is_deleted == False,  # noqa: E712
             )
-            .options(joinedload(PurchaseOrder.lines))
-            .first()
         )
+        return self.db.execute(stmt).unique().scalar_one_or_none()
 
-    def create_po(self, po_data: PurchaseOrderCreate, created_by: Optional[str] = None) -> PurchaseOrder:
-        """Create a new Purchase Order with lines."""
-        # Check for duplicate
-        existing = self.get_by_po_number(po_data.po_number)
-        if existing:
-            raise ValueError(f"PO with number {po_data.po_number} already exists")
+    def get_by_number(self, po_number: str) -> Optional[PurchaseOrder]:
+        """Get PO by PO number."""
+        return self.get_by_field("po_number", po_number)
 
+    def get_open_pos_for_supplier(self, supplier_id: UUID) -> List[PurchaseOrder]:
+        """Get all open POs for a supplier (for anchoring)."""
+        stmt = (
+            select(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.lines))
+            .where(
+                PurchaseOrder.supplier_id == supplier_id,
+                PurchaseOrder.status.in_([
+                    POStatus.SUBMITTED,
+                    POStatus.APPROVED,
+                    POStatus.PARTIALLY_RECEIVED,
+                ]),
+                PurchaseOrder.is_deleted == False,  # noqa: E712
+            )
+            .order_by(PurchaseOrder.order_date.desc())
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def find_po_by_reference(
+        self, supplier_id: UUID, po_reference: str
+    ) -> Optional[PurchaseOrder]:
+        """Find PO by supplier and PO reference number."""
+        stmt = (
+            select(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.lines))
+            .where(
+                PurchaseOrder.supplier_id == supplier_id,
+                PurchaseOrder.po_number == po_reference,
+                PurchaseOrder.is_deleted == False,  # noqa: E712
+            )
+        )
+        return self.db.execute(stmt).unique().scalar_one_or_none()
+
+    def create(self, data: dict) -> PurchaseOrder:
+        """Create a new PO with lines."""
+        lines_data = data.pop("lines", [])
+        
         # Calculate totals
-        subtotal = sum(line.line_total for line in po_data.lines)
-        tax_amount = sum(line.tax_amount for line in po_data.lines)
+        subtotal = sum(Decimal(str(line.get("line_total", 0))) for line in lines_data)
+        tax_amount = sum(Decimal(str(line.get("tax_amount", 0))) for line in lines_data)
         total_amount = subtotal + tax_amount
 
-        # Create PO data
-        po_dict = po_data.model_dump(exclude={"lines"})
-        po_dict["subtotal"] = subtotal
-        po_dict["tax_amount"] = tax_amount
-        po_dict["total_amount"] = total_amount
-        if created_by:
-            po_dict["created_by"] = created_by
+        po_data = {
+            **data,
+            "subtotal": subtotal,
+            "tax_amount": tax_amount,
+            "total_amount": total_amount,
+        }
 
-        # Create PO with lines
-        po = PurchaseOrder(**po_dict)
+        po = PurchaseOrder(**po_data)
         self.db.add(po)
-        self.db.flush()  # Get PO ID
+        self.db.flush()
 
         # Create lines
-        for line_data in po_data.lines:
-            line_dict = line_data.model_dump()
-            line = PurchaseOrderLine(purchase_order_id=po.id, **line_dict)
+        for line_data in lines_data:
+            line_data["po_id"] = po.id
+            line = PurchaseOrderLine(**line_data)
             self.db.add(line)
 
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(po)
-
-        # Audit log
-        self.audit_service.log_create(po, created_by)
-
         return po
 
-    def update_po(self, id: str, po_data: PurchaseOrderUpdate) -> Optional[PurchaseOrder]:
-        """Update Purchase Order."""
-        po = self.get_by_id(id)
-        if not po:
-            return None
-
-        update_dict = po_data.model_dump(exclude_unset=True)
-        
-        # Audit before update
-        self.audit_service.log_update(po, update_dict, po.created_by)
-
-        return self.update(id, update_dict)
-
-    def close_po(self, id: str) -> Optional[PurchaseOrder]:
-        """Close a PO."""
-        po = self.get_by_id(id)
+    def update(self, id: UUID, data: dict) -> Optional[PurchaseOrder]:
+        """Update a PO."""
+        po = self.get(id)
         if po:
-            po.status = "closed"
-            self.db.commit()
+            lines_data = data.pop("lines", None)
+            
+            for field, value in data.items():
+                if hasattr(po, field) and value is not None:
+                    setattr(po, field, value)
+
+            if lines_data is not None:
+                # Update lines
+                for line_data in lines_data:
+                    line_id = line_data.pop("id", None)
+                    if line_id:
+                        line = self.db.get(PurchaseOrderLine, line_id)
+                        if line:
+                            for field, value in line_data.items():
+                                if hasattr(line, field) and value is not None:
+                                    setattr(line, field, value)
+                    else:
+                        line_data["po_id"] = po.id
+                        line = PurchaseOrderLine(**line_data)
+                        self.db.add(line)
+
+            self.db.flush()
             self.db.refresh(po)
-            self.audit_service.log_update(
-                po, {"status": "closed"}, po.created_by
-            )
         return po
 
-    def update_po_totals(self, po: PurchaseOrder) -> PurchaseOrder:
-        """Recalculate and update PO totals."""
-        # Recalculate from lines
-        subtotal = sum(Decimal(str(line.line_total)) for line in po.lines)
-        tax_amount = sum(Decimal(str(line.tax_amount)) for line in po.lines)
-        total_received = sum(Decimal(str(line.quantity_received)) for line in po.lines)
-        total_invoiced = sum(Decimal(str(line.quantity_invoiced)) for line in po.lines)
+    def update_status(self, id: UUID, status: POStatus) -> Optional[PurchaseOrder]:
+        """Update PO status."""
+        return self.update(id, {"status": status.value if isinstance(status, POStatus) else status})
 
-        po.subtotal = subtotal
-        po.tax_amount = tax_amount
-        po.total_amount = subtotal + tax_amount
-        po.total_received = total_received
-        po.total_invoiced = total_invoiced
-
-        # Update status based on received/invoiced amounts
-        if po.total_received >= po.total_amount or po.total_invoiced >= po.total_amount:
-            po.status = "closed"
-        elif po.total_received > 0 or po.total_invoiced > 0:
-            po.status = "partial"
-
-        self.db.commit()
-        self.db.refresh(po)
-        return po
-
-    def update_line_received(self, po_line_id: str, quantity: Decimal) -> Optional[PurchaseOrderLine]:
-        """Update received quantity on PO line."""
-        line = self.db.query(PurchaseOrderLine).filter(PurchaseOrderLine.id == po_line_id).first()
+    def update_received_quantity(
+        self, po_line_id: UUID, received_qty: Decimal
+    ) -> Optional[PurchaseOrderLine]:
+        """Update received quantity for a PO line."""
+        line = self.db.get(PurchaseOrderLine, po_line_id)
         if line:
-            line.quantity_received = quantity
-            self.db.commit()
+            line.received_quantity = received_qty
+            self.db.flush()
             self.db.refresh(line)
         return line
 
-    def update_line_invoiced(self, po_line_id: str, quantity: Decimal) -> Optional[PurchaseOrderLine]:
-        """Update invoiced quantity on PO line."""
-        line = self.db.query(PurchaseOrderLine).filter(PurchaseOrderLine.id == po_line_id).first()
-        if line:
-            line.quantity_invoiced = quantity
-            self.db.commit()
-            self.db.refresh(line)
-        return line
+    def get_multi_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        supplier_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[List[PurchaseOrder], int]:
+        """Get POs with pagination and filters."""
+        stmt = (
+            select(PurchaseOrder)
+            .options(joinedload(PurchaseOrder.supplier))
+            .options(joinedload(PurchaseOrder.lines))
+            .where(PurchaseOrder.is_deleted == False)  # noqa: E712
+        )
 
-    def get_line_by_id(self, line_id: str) -> Optional[PurchaseOrderLine]:
-        """Get PO line by ID."""
-        return self.db.query(PurchaseOrderLine).filter(PurchaseOrderLine.id == line_id).first()
+        if supplier_id:
+            stmt = stmt.where(PurchaseOrder.supplier_id == supplier_id)
+
+        if status:
+            stmt = stmt.where(PurchaseOrder.status == status)
+
+        if search:
+            stmt = stmt.where(PurchaseOrder.po_number.ilike(f"%{search}%"))
+
+        # Count
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = self.db.execute(count_stmt).scalar()
+
+        # Paginate
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size).order_by(PurchaseOrder.created_at.desc())
+
+        items = list(self.db.execute(stmt).unique().scalars().all())
+        return items, total

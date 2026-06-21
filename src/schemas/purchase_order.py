@@ -1,72 +1,100 @@
-# src/schemas/purchase_order.py
-from datetime import date, datetime
+// src/schemas/purchase_order.py
+"""Purchase Order schemas."""
 from decimal import Decimal
-from typing import Optional, List
+from typing import List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from src.schemas.common import TimestampMixinSchema, UUIDMixinSchema
+from src.schemas.common import BaseSchema, PaginatedResponse, TimestampMixin, SoftDeleteMixin
+from src.schemas.supplier import SupplierSummary
 
 
-# Line Items
-class PurchaseOrderLineItemBase(BaseModel):
-    """Base schema for PO line items."""
-    line_number: int = Field(ge=1)
-    item_code: str = Field(max_length=100)
-    description: str = Field(max_length=500)
-    quantity: Decimal = Field(ge=0)
-    unit_price: Decimal = Field(ge=0)
-    line_total: Decimal = Field(ge=0)
+class PurchaseOrderLineBase(BaseSchema):
+    """Base PO line schema."""
+    line_number: int = Field(..., ge=1)
+    item_code: Optional[str] = Field(None, max_length=100)
+    description: str = Field(..., min_length=1)
+    quantity: Decimal = Field(..., ge=Decimal("0"))
+    unit_of_measure: str = Field(default="EA", max_length=20)
+    unit_price: Decimal = Field(..., ge=Decimal("0"))
+    line_total: Decimal = Field(..., ge=Decimal("0"))
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    expected_quantity: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    received_quantity: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
 
 
-class PurchaseOrderLineItemCreate(PurchaseOrderLineItemBase):
-    """Schema for creating PO line items."""
+class PurchaseOrderLineCreate(PurchaseOrderLineBase):
+    """Schema for creating PO line."""
     pass
 
 
-class PurchaseOrderLineItemResponse(PurchaseOrderLineItemBase, UUIDMixinSchema):
-    """Schema for PO line item response."""
-    purchase_order_id: str
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {"from_attributes": True}
+class PurchaseOrderLineResponse(PurchaseOrderLineBase, TimestampMixin):
+    """Schema for PO line response."""
+    id: UUID
+    po_id: UUID
 
 
-# Purchase Order
-class PurchaseOrderBase(BaseModel):
-    """Base schema for Purchase Orders."""
-    po_number: str = Field(max_length=50)
-    supplier_id: str = Field(max_length=100)
-    supplier_name: str = Field(max_length=255)
-    order_date: date
-    expected_delivery_date: Optional[date] = None
-    subtotal: Decimal = Field(ge=0)
-    tax_amount: Decimal = Field(ge=0, default=Decimal("0.00"))
-    total_amount: Decimal = Field(ge=0)
+class PurchaseOrderBase(BaseSchema):
+    """Base PO schema."""
+    po_number: str = Field(..., min_length=1, max_length=50)
+    supplier_id: UUID
+    order_date: str  # ISO date string
+    expected_delivery_date: Optional[str] = None
     currency: str = Field(default="USD", max_length=3)
-    status: str = Field(default="OPEN", max_length=20)
+    subtotal: Decimal = Field(default=Decimal("0"))
+    tax_amount: Decimal = Field(default=Decimal("0"))
+    total_amount: Decimal = Field(default=Decimal("0"))
     notes: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    """Schema for creating Purchase Orders."""
-    line_items: List[PurchaseOrderLineItemCreate] = []
+    """Schema for creating a PO."""
+    lines: List[PurchaseOrderLineCreate] = Field(default_factory=list)
 
 
-class PurchaseOrderUpdate(BaseModel):
-    """Schema for updating Purchase Orders."""
-    supplier_name: Optional[str] = None
-    expected_delivery_date: Optional[date] = None
+class PurchaseOrderUpdate(BaseSchema):
+    """Schema for updating a PO."""
+    supplier_id: Optional[UUID] = None
+    order_date: Optional[str] = None
+    expected_delivery_date: Optional[str] = None
+    currency: Optional[str] = Field(None, max_length=3)
     subtotal: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
     total_amount: Optional[Decimal] = None
-    status: Optional[str] = None
     notes: Optional[str] = None
 
 
-class PurchaseOrderResponse(PurchaseOrderBase, UUIDMixinSchema, TimestampMixinSchema):
-    """Schema for Purchase Order response."""
-    line_items: List[PurchaseOrderLineItemResponse] = []
-    
-    model_config = {"from_attributes": True}
+class PurchaseOrderLineSummary(BaseSchema):
+    """Lightweight PO line summary."""
+    id: UUID
+    line_number: int
+    description: str
+    quantity: Decimal
+    received_quantity: Decimal
+    unit_price: Decimal
+
+
+class PurchaseOrderResponse(PurchaseOrderBase, TimestampMixin, SoftDeleteMixin):
+    """Schema for PO response."""
+    id: UUID
+    status: str
+    supplier: Optional[SupplierSummary] = None
+    lines: List[PurchaseOrderLineResponse] = Field(default_factory=list)
+    matched_invoices_count: Optional[int] = 0
+    total_matched_amount: Optional[Decimal] = Decimal("0")
+
+
+class PurchaseOrderListResponse(PaginatedResponse[PurchaseOrderResponse]):
+    """Schema for paginated PO list."""
+    pass
+
+
+class PurchaseOrderSummary(BaseSchema):
+    """Lightweight PO summary."""
+    id: UUID
+    po_number: str
+    status: str
+    total_amount: Decimal
+    supplier_name: Optional[str] = None

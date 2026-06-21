@@ -1,159 +1,150 @@
 // src/services/delivery_note_service.py
-"""Delivery Note service for DN management."""
-from datetime import datetime
+"""Delivery Note service for business logic."""
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional, List
+from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func
 
-from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
-from src.schemas.delivery_note import DeliveryNoteCreate, DeliveryNoteUpdate
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine, DeliveryNoteStatus
 from src.services.base import BaseService
-from src.services.audit_service import AuditService
 
 
 class DeliveryNoteService(BaseService[DeliveryNote]):
-    """Service for Delivery Note management."""
+    """Service for Delivery Note operations."""
 
     def __init__(self, db: Session):
         """Initialize DN service."""
         super().__init__(DeliveryNote, db)
-        self.audit_service = AuditService(db)
 
-    def get_by_dn_number(self, dn_number: str) -> Optional[DeliveryNote]:
+    def get_with_lines(self, id: UUID) -> Optional[DeliveryNote]:
+        """Get DN with lines eagerly loaded."""
+        stmt = (
+            select(DeliveryNote)
+            .options(joinedload(DeliveryNote.lines))
+            .options(joinedload(DeliveryNote.supplier))
+            .where(
+                DeliveryNote.id == id,
+                DeliveryNote.is_deleted == False,  # noqa: E712
+            )
+        )
+        return self.db.execute(stmt).unique().scalar_one_or_none()
+
+    def get_by_number(self, dn_number: str) -> Optional[DeliveryNote]:
         """Get DN by DN number."""
-        return (
-            self.db.query(DeliveryNote)
-            .filter(DeliveryNote.dn_number == dn_number)
-            .first()
-        )
+        return self.get_by_field("dn_number", dn_number)
 
-    def get_by_supplier(self, supplier_id: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
-        """Get DNs by supplier."""
-        return (
-            self.db.query(DeliveryNote)
-            .filter(DeliveryNote.supplier_id == supplier_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
+    def get_by_supplier_and_number(
+        self, supplier_id: UUID, dn_number: str
+    ) -> Optional[DeliveryNote]:
+        """Get DN by supplier and DN number."""
+        stmt = select(DeliveryNote).where(
+            DeliveryNote.supplier_id == supplier_id,
+            DeliveryNote.dn_number == dn_number,
+            DeliveryNote.is_deleted == False,  # noqa: E712
         )
+        return self.db.execute(stmt).scalar_one_or_none()
 
-    def get_by_po(self, po_id: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
-        """Get DNs linked to a PO."""
-        return (
-            self.db.query(DeliveryNote)
-            .filter(DeliveryNote.po_id == po_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-
-    def get_pending_dns(self, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
-        """Get all pending DNs."""
-        return (
-            self.db.query(DeliveryNote)
-            .filter(DeliveryNote.status == "pending")
+    def get_pending_dns(self) -> List[DeliveryNote]:
+        """Get all pending DNs (for matching)."""
+        stmt = (
+            select(DeliveryNote)
             .options(joinedload(DeliveryNote.lines))
-            .offset(skip)
-            .limit(limit)
-            .all()
+            .options(joinedload(DeliveryNote.supplier))
+            .where(
+                DeliveryNote.status == DeliveryNoteStatus.ISSUED,
+                DeliveryNote.is_deleted == False,  # noqa: E712
+            )
+            .order_by(DeliveryNote.issue_date)
         )
+        return list(self.db.execute(stmt).scalars().all())
 
-    def get_by_status(self, status: str, skip: int = 0, limit: int = 100) -> List[DeliveryNote]:
-        """Get DNs by status."""
-        return (
-            self.db.query(DeliveryNote)
-            .filter(DeliveryNote.status == status)
-            .options(joinedload(DeliveryNote.lines))
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+    def create(self, data: dict) -> DeliveryNote:
+        """Create a new DN with lines."""
+        lines_data = data.pop("lines", [])
 
-    def create_dn(self, dn_data: DeliveryNoteCreate, received_by: Optional[str] = None) -> DeliveryNote:
-        """Create a new Delivery Note with lines."""
-        # Check for duplicate
-        existing = self.get_by_dn_number(dn_data.dn_number)
-        if existing:
-            raise ValueError(f"DN with number {dn_data.dn_number} already exists")
-
-        # Calculate totals
-        subtotal = sum(line.line_total for line in dn_data.lines)
-        tax_amount = sum(line.line_total * Decimal("0.10") for line in dn_data.lines)  # Assume 10% tax
-        total_amount = subtotal + tax_amount
-
-        # Create DN data
-        dn_dict = dn_data.model_dump(exclude={"lines"})
-        dn_dict["subtotal"] = subtotal
-        dn_dict["tax_amount"] = tax_amount
-        dn_dict["total_amount"] = total_amount
-        dn_dict["receipt_date"] = datetime.utcnow()
-        if received_by:
-            dn_dict["received_by"] = received_by
-
-        # Create DN with lines
-        dn = DeliveryNote(**dn_dict)
+        dn = DeliveryNote(**data)
         self.db.add(dn)
         self.db.flush()
 
         # Create lines
-        for line_data in dn_data.lines:
-            line_dict = line_data.model_dump()
-            line = DeliveryNoteLine(delivery_note_id=dn.id, **line_dict)
+        for line_data in lines_data:
+            line_data["dn_id"] = dn.id
+            line = DeliveryNoteLine(**line_data)
             self.db.add(line)
 
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(dn)
-
-        # Audit log
-        self.audit_service.log_create(dn, received_by)
-
         return dn
 
-    def update_dn(self, id: str, dn_data: DeliveryNoteUpdate) -> Optional[DeliveryNote]:
-        """Update Delivery Note."""
-        dn = self.get_by_id(id)
-        if not dn:
-            return None
-
-        update_dict = dn_data.model_dump(exclude_unset=True)
-        
-        # Audit before update
-        self.audit_service.log_update(dn, update_dict, dn.received_by)
-
-        return self.update(id, update_dict)
-
-    def link_to_po(self, dn_id: str, po_id: str, matched_by: Optional[str] = None) -> Optional[DeliveryNote]:
-        """Link DN to a PO."""
-        dn = self.get_by_id(dn_id)
+    def update(self, id: UUID, data: dict) -> Optional[DeliveryNote]:
+        """Update a DN."""
+        dn = self.get(id)
         if dn:
-            dn.po_id = po_id
-            self.db.commit()
-            self.db.refresh(dn)
-            self.audit_service.log_update(
-                dn, {"po_id": po_id, "matched_by": matched_by}, matched_by
-            )
-        return dn
+            lines_data = data.pop("lines", None)
 
-    def update_match_status(self, dn_id: str, match_score: Decimal, match_status: str) -> Optional[DeliveryNote]:
-        """Update DN match status."""
-        dn = self.get_by_id(dn_id)
-        if dn:
-            dn.match_score = match_score
-            dn.match_status = match_status
-            self.db.commit()
+            for field, value in data.items():
+                if hasattr(dn, field) and value is not None:
+                    setattr(dn, field, value)
+
+            if lines_data is not None:
+                # Update lines
+                for line_data in lines_data:
+                    line_id = line_data.pop("id", None)
+                    if line_id:
+                        line = self.db.get(DeliveryNoteLine, line_id)
+                        if line:
+                            for field, value in line_data.items():
+                                if hasattr(line, field) and value is not None:
+                                    setattr(line, field, value)
+                    else:
+                        line_data["dn_id"] = dn.id
+                        line = DeliveryNoteLine(**line_data)
+                        self.db.add(line)
+
+            self.db.flush()
             self.db.refresh(dn)
         return dn
 
-    def mark_as_received(self, dn_id: str, received_by: str) -> Optional[DeliveryNote]:
-        """Mark DN as received."""
-        dn = self.get_by_id(dn_id)
-        if dn:
-            dn.status = "received"
-            dn.received_by = received_by
-            self.db.commit()
-            self.db.refresh(dn)
-            self.audit_service.log_update(
-                dn, {"status": "received", "received_by": received_by}, received_by
-            )
-        return dn
+    def update_status(self, id: UUID, status: DeliveryNoteStatus) -> Optional[DeliveryNote]:
+        """Update DN status."""
+        return self.update(
+            id, {"status": status.value if isinstance(status, DeliveryNoteStatus) else status}
+        )
+
+    def get_multi_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        supplier_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[List[DeliveryNote], int]:
+        """Get DNs with pagination and filters."""
+        stmt = (
+            select(DeliveryNote)
+            .options(joinedload(DeliveryNote.supplier))
+            .options(joinedload(DeliveryNote.lines))
+            .where(DeliveryNote.is_deleted == False)  # noqa: E712
+        )
+
+        if supplier_id:
+            stmt = stmt.where(DeliveryNote.supplier_id == supplier_id)
+
+        if status:
+            stmt = stmt.where(DeliveryNote.status == status)
+
+        if search:
+            stmt = stmt.where(DeliveryNote.dn_number.ilike(f"%{search}%"))
+
+        # Count
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = self.db.execute(count_stmt).scalar()
+
+        # Paginate
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size).order_by(DeliveryNote.created_at.desc())
+
+        items = list(self.db.execute(stmt).unique().scalars().all())
+        return items, total

@@ -1,46 +1,56 @@
-# src/schemas/auth.py
-from datetime import datetime
+// src/schemas/auth.py
+"""Authentication schemas."""
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from src.schemas.common import BaseSchema, TimestampMixin
 
 
-class Token(BaseModel):
-    """Token response schema."""
+class Token(BaseSchema):
+    """JWT token response."""
     access_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
-class TokenPayload(BaseModel):
-    """Token payload schema."""
-    sub: str  # User ID
-    exp: datetime
-    iat: datetime
+class TokenData(BaseSchema):
+    """Token payload data."""
+    user_id: Optional[UUID] = None
+    email: Optional[str] = None
+    is_superuser: bool = False
 
 
-class UserCreate(BaseModel):
-    """User creation schema."""
+class UserBase(BaseSchema):
+    """Base user schema."""
     email: EmailStr
-    password: str = Field(min_length=8)
     full_name: Optional[str] = None
 
 
-class UserLogin(BaseModel):
-    """User login schema."""
-    email: EmailStr
-    password: str
+class UserCreate(UserBase):
+    """Schema for creating a user."""
+    password: str = Field(..., min_length=8)
 
 
-class UserResponse(BaseModel):
-    """User response schema."""
-    id: str
-    email: str
-    full_name: Optional[str]
+class UserUpdate(BaseSchema):
+    """Schema for updating a user."""
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    password: Optional[str] = Field(None, min_length=8)
+    is_active: Optional[bool] = None
+
+
+class UserResponse(UserBase, TimestampMixin):
+    """Schema for user response."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: UUID
     is_active: bool
     is_superuser: bool
-    last_login: Optional[datetime]
-    created_at: datetime
-    updated_at: datetime
-    
-    model_config = {"from_attributes": True}
+
+
+class LoginRequest(BaseSchema):
+    """Login request schema."""
+    username: str = Field(..., min_length=1)  # email as username
+    password: str = Field(..., min_length=1)

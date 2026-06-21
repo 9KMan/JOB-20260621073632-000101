@@ -1,22 +1,32 @@
-# src/models/__init__.py
-from src.models.base import Base, TimestampMixin
+// src/models/__init__.py
+"""SQLAlchemy models for FinaRo AP Automation."""
+from src.models.base import BaseModel, TimestampMixin, SoftDeleteMixin
 from src.models.user import User
-from src.models.purchase_order import PurchaseOrder
-from src.models.invoice import Invoice
-from src.models.delivery_note import DeliveryNote
-from src.models.match import Match, MatchStatus, MatchType
-from src.models.balance import Balance, BalanceType
+from src.models.supplier import Supplier
+from src.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from src.models.invoice import Invoice, InvoiceLine
+from src.models.delivery_note import DeliveryNote, DeliveryNoteLine
+from src.models.matching import (
+    MatchRecord,
+    MatchDecision,
+    BalanceLedger,
+    CrossReference,
+)
 
 __all__ = [
-    "Base",
+    "BaseModel",
     "TimestampMixin",
+    "SoftDeleteMixin",
     "User",
+    "Supplier",
     "PurchaseOrder",
+    "PurchaseOrderLine",
     "Invoice",
+    "InvoiceLine",
     "DeliveryNote",
-    "Match",
-    "MatchStatus",
-    "MatchType",
-    "Balance",
-    "BalanceType",
+    "DeliveryNoteLine",
+    "MatchRecord",
+    "MatchDecision",
+    "BalanceLedger",
+    "CrossReference",
 ]

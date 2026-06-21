@@ -4,58 +4,55 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
-class DatabaseConfig(BaseModel):
-    """Database configuration."""
-    url: str = Field(default_factory=lambda: os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/finaro_ap"
-    ))
-    pool_size: int = int(os.getenv("DB_POOL_SIZE", "10"))
-    max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
-    echo: bool = os.getenv("DB_ECHO", "false").lower() == "true"
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
 
+    # Application
+    APP_NAME: str = "FinaRo AP Automation"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = Field(default=False)
+    API_V1_PREFIX: str = "/api/v1"
 
-class JWTConfig(BaseModel):
-    """JWT configuration."""
-    secret_key: str = Field(default_factory=lambda: os.getenv(
-        "JWT_SECRET_KEY",
-        "your-super-secret-key-change-in-production"
-    ))
-    algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
-    access_token_expire_minutes: int = int(os.getenv(
-        "JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"
-    ))
+    # Database
+    DATABASE_URL: str = Field(
+        default="postgresql://postgres:postgres@localhost:5432/finaro"
+    )
+    DATABASE_POOL_SIZE: int = Field(default=5)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30)
+    DATABASE_ECHO: bool = Field(default=False)
 
+    # Authentication
+    SECRET_KEY: str = Field(default="change-me-in-production")
+    ALGORITHM: str = Field(default="HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
 
-class AppConfig(BaseModel):
-    """Application configuration."""
-    name: str = "FinaRo AP Automation"
-    version: str = "1.0.0"
-    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
-    api_v1_prefix: str = "/api/v1"
-    
-    # Matching weights
-    match_weight_line_level: float = 0.70
-    match_weight_amount: float = 0.20
-    match_weight_date: float = 0.10
-    
-    # Auto-approval threshold (0.0 to 1.0)
-    auto_approve_threshold: float = 0.95
-    
-    # Database settings
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    
-    # JWT settings
-    jwt: JWTConfig = Field(default_factory=JWTConfig)
+    # Matching Engine Weights
+    MATCHING_LINE_WEIGHT: float = Field(default=0.70)
+    MATCHING_AMOUNT_WEIGHT: float = Field(default=0.20)
+    MATCHING_DATE_WEIGHT: float = Field(default=0.10)
+
+    # Decision Thresholds
+    AUTO_APPROVE_THRESHOLD: float = Field(default=0.95)
+    HUMAN_REVIEW_THRESHOLD: float = Field(default=0.70)
+
+    # CORS
+    CORS_ORIGINS: list[str] = Field(default=["*"])
+
+    # Logging
+    LOG_LEVEL: str = Field(default="INFO")
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
 @lru_cache()
-def get_config() -> AppConfig:
-    """Get cached application configuration."""
-    return AppConfig()
-
-
-config = get_config()
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()

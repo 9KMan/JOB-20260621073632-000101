@@ -1,60 +1,54 @@
 // src/schemas/supplier.py
-"""Supplier-related Pydantic schemas."""
-
-from datetime import datetime
-from typing import Optional
+"""Supplier schemas."""
+from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from src.schemas.base import BaseSchema, TimestampMixin
+from src.schemas.common import BaseSchema, PaginatedResponse, TimestampMixin, SoftDeleteMixin
 
 
 class SupplierBase(BaseSchema):
     """Base supplier schema."""
-
-    code: str = Field(min_length=1, max_length=50)
-    name: str = Field(min_length=1, max_length=255)
-    email: Optional[str] = Field(default=None, max_length=255)
-    phone: Optional[str] = Field(default=None, max_length=50)
+    name: str = Field(..., min_length=1, max_length=255)
+    code: str = Field(..., min_length=1, max_length=50)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = None
-    tax_id: Optional[str] = Field(default=None, max_length=50)
-    payment_terms: Optional[str] = Field(default=None, max_length=100)
-    bank_details: Optional[str] = None
+    tax_id: Optional[str] = Field(None, max_length=50)
     is_active: bool = True
 
 
 class SupplierCreate(SupplierBase):
-    """Schema for creating a new supplier."""
-
+    """Schema for creating a supplier."""
     pass
 
 
 class SupplierUpdate(BaseSchema):
     """Schema for updating a supplier."""
-
-    code: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    email: Optional[str] = Field(default=None, max_length=255)
-    phone: Optional[str] = Field(default=None, max_length=50)
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = None
-    tax_id: Optional[str] = Field(default=None, max_length=50)
-    payment_terms: Optional[str] = Field(default=None, max_length=100)
-    bank_details: Optional[str] = None
+    tax_id: Optional[str] = Field(None, max_length=50)
     is_active: Optional[bool] = None
 
 
-class SupplierResponse(SupplierBase, TimestampMixin):
+class SupplierResponse(SupplierBase, TimestampMixin, SoftDeleteMixin):
     """Schema for supplier response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
+    purchase_orders_count: Optional[int] = 0
+    invoices_count: Optional[int] = 0
+    delivery_notes_count: Optional[int] = 0
+
+
+class SupplierListResponse(PaginatedResponse[SupplierResponse]):
+    """Schema for paginated supplier list."""
+    pass
 
 
 class SupplierSummary(BaseSchema):
-    """Schema for supplier summary in nested responses."""
-
+    """Lightweight supplier summary."""
     id: UUID
-    code: str
     name: str
+    code: str
