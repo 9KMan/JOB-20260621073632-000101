@@ -1,4 +1,4 @@
-# docker-compose.yml
+// docker-compose.yml
 version: "3.9"
 
 services:
@@ -6,51 +6,67 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: ap-automation-api
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://finaro:changeme@postgres:5432/finaro_ap
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - DATABASE_URL=postgresql+asyncpg://apuser:appass@postgres:5432/apautomation
+      - PGBOUNCER_HOST=pgbouncer
+      - PGBOUNCER_PORT=5432
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-supersecretkey-change-in-production}
       - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
       - THRESHOLD_HIGH=95
       - THRESHOLD_MID=70
       - THRESHOLD_LOW=40
-      - TOLERANCE_PRICE=0.05
-      - TOLERANCE_QTY=0.10
+      - TOLERANCE_PRICE=5
+      - TOLERANCE_QTY=10
       - LOG_LEVEL=INFO
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
         condition: service_healthy
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    restart: unless-stopped
+      start_period: 40s
 
   postgres:
     image: postgres:15-alpine
+    container_name: ap-automation-postgres
     environment:
-      - POSTGRES_USER=finaro
-      - POSTGRES_PASSWORD=changeme
-      - POSTGRES_DB=finaro_ap
+      - POSTGRES_USER=apuser
+      - POSTGRES_PASSWORD=appass
+      - POSTGRES_DB=apautomation
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finaro -d finaro_ap"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U apuser -d apautomation"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  pgBouncer:
+  pgbouncer:
     image: edoburu/pgbouncer:latest
+    container_name: ap-automation-pgbouncer
     environment:
-      - DATABASE_URL=postgresql://finaro:changeme@postgres:5432/finaro_ap
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=apautomation
+      - DATABASE_USER=apuser
+      - DATABASE_PASSWORD=appass
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
@@ -60,10 +76,10 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pgb杀cur", "-h", "localhost", "-p", "5432", "-U", "finaro", "-d", "finaro_ap"]
+      test: ["CMD", "pgbourg", "-h", "localhost", "-p", "5432"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
 volumes:
   postgres_data:

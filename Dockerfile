@@ -1,45 +1,43 @@
-# Dockerfile
-FROM python:3.11-slim AS builder
-
-WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy dependency files
-COPY pyproject.toml ./
-
-# Install dependencies
-RUN pip install --no-cache-dir --prefix=/install -e .
-
-# Production image
+// Dockerfile
 FROM python:3.11-slim
 
-WORKDIR /app
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install runtime dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    build-essential \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
+# Create app directory
+WORKDIR /app
+
+# Install uv for faster package installation
+RUN pip install --upgrade pip && \
+    pip install uv
+
+# Copy project files
+COPY pyproject.toml ./
+
+# Install Python dependencies
+RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Copy application code
-COPY --chown=1000:1000 . .
+COPY . .
 
 # Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser && chown -R appuser:appuser /app
+RUN adduser --disabled-password --gecos '' appuser && \
+    chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Run with uvicorn
-CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

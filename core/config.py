@@ -1,10 +1,10 @@
-# core/config.py
+// core/config.py
 """Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,88 +18,97 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Application
+    app_name: str = "AP Automation Engine"
+    app_version: str = "0.1.0"
+    debug: bool = Field(default=False, validation_alias="DEBUG")
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+
     # Database
-    database_url: Annotated[
-        str,
-        Field(
-            description="PostgreSQL connection string with asyncpg driver",
-            examples=["postgresql+asyncpg://user:pass@localhost:5432/dbname"],
-        ),
-    ]
+    database_url: str = Field(
+        default="postgresql+asyncpg://apuser:appass@localhost:5432/apautomation",
+        validation_alias="DATABASE_URL",
+    )
+    pgbouncer_host: Optional[str] = Field(default=None, validation_alias="PGBOUNCER_HOST")
+    pgbouncer_port: int = Field(default=5432, validation_alias="PGBOUNCER_PORT")
+    database_pool_size: int = Field(default=20, validation_alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=10, validation_alias="DATABASE_MAX_OVERFLOW")
 
     # JWT Authentication
-    jwt_secret_key: Annotated[
-        str,
-        Field(
-            description="HS256 secret key for JWT signing",
-            min_length=32,
-        ),
-    ]
-    jwt_algorithm: Annotated[
-        str,
-        Field(default="HS256", description="JWT algorithm"),
-    ]
-    jwt_access_token_expire_minutes: Annotated[
-        int,
-        Field(default=30, ge=5, le=1440, description="Access token expiry in minutes"),
-    ]
+    jwt_secret_key: str = Field(
+        default="supersecretkey-change-in-production",
+        validation_alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(
+        default=30, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
+    refresh_token_expire_days: int = Field(
+        default=7, validation_alias="REFRESH_TOKEN_EXPIRE_DAYS"
+    )
 
     # Matching Thresholds
-    threshold_high: Annotated[
-        float,
-        Field(default=95.0, ge=0, le=100, description="Auto-approve threshold"),
-    ]
-    threshold_mid: Annotated[
-        float,
-        Field(default=70.0, ge=0, le=100, description="1-click review threshold"),
-    ]
-    threshold_low: Annotated[
-        float,
-        Field(default=40.0, ge=0, le=100, description="Exception threshold"),
-    ]
+    threshold_high: int = Field(
+        default=95,
+        validation_alias="THRESHOLD_HIGH",
+        description="Auto-approve threshold (percentage)",
+    )
+    threshold_mid: int = Field(
+        default=70,
+        validation_alias="THRESHOLD_MID",
+        description="1-click review threshold (percentage)",
+    )
+    threshold_low: int = Field(
+        default=40,
+        validation_alias="THRESHOLD_LOW",
+        description="Exception threshold (percentage)",
+    )
 
-    # Tolerance Settings
-    tolerance_price: Annotated[
-        float,
-        Field(default=0.05, ge=0, le=1, description="Price match tolerance (5%)"),
-    ]
-    tolerance_qty: Annotated[
-        float,
-        Field(default=0.10, ge=0, le=1, description="Quantity match tolerance (10%)"),
-    ]
+    # Matching Tolerances
+    tolerance_price: float = Field(
+        default=5.0,
+        validation_alias="TOLERANCE_PRICE",
+        description="Price match tolerance percentage",
+    )
+    tolerance_qty: float = Field(
+        default=10.0,
+        validation_alias="TOLERANCE_QTY",
+        description="Quantity match tolerance percentage",
+    )
 
-    # Application
-    app_name: Annotated[str, Field(default="AP Automation Core Engine")]
-    app_version: Annotated[str, Field(default="0.1.0")]
-    debug: Annotated[bool, Field(default=False)]
-    log_level: Annotated[str, Field(default="INFO")]
-
-    @field_validator("log_level")
-    @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Validate log level is a valid Python log level."""
-        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-        upper_v = v.upper()
-        if upper_v not in valid_levels:
-            raise ValueError(f"log_level must be one of {valid_levels}")
-        return upper_v
-
-    @property
-    def pool_size(self) -> int:
-        """Get database pool size from connection string or use default."""
-        return 20
+    # Learning Loop
+    learning_confidence_boost: float = Field(
+        default=5.0,
+        description="Confidence boost for confirmed matches in learning loop",
+    )
+    learning_min_confirmations: int = Field(
+        default=3,
+        description="Minimum confirmations before promoting to high-confidence match",
+    )
 
     @property
-    def max_overflow(self) -> int:
-        """Get max overflow from connection string or use default."""
-        return 10
+    def effective_database_url(self) -> str:
+        """Get the effective database URL, considering PGBouncer."""
+        if self.pgbouncer_host:
+            return self.database_url.replace(
+                "localhost",
+                f"{self.pgbouncer_host}:{self.pgbouncer_port}",
+            )
+        return self.database_url
+
+    def get_threshold_for_decision(self, score: float) -> str:
+        """Determine decision based on score and thresholds."""
+        if score >= self.threshold_high:
+            return "auto_approve"
+        elif score >= self.threshold_mid:
+            return "review"
+        elif score >= self.threshold_low:
+            return "exception"
+        else:
+            return "reject"
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
-
-
-# Global settings instance
-settings = get_settings()
