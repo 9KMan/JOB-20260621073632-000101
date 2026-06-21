@@ -1,201 +1,309 @@
 // src/services/balance_service.py
-"""Balance tracking service for partial matches."""
+"""
+Balance Resolution Service
+
+Handles balance tracking for partial matches, split invoices, and multi-delivery scenarios.
+"""
+
 import logging
-from datetime import datetime
+from typing import List, Optional, Dict
 from decimal import Decimal
-from typing import Optional
 from uuid import UUID
+from datetime import datetime
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 
-from src.models.balance import BalanceLedger, BalanceLedgerEntry
-from src.models.delivery_note import DeliveryNote
-from src.models.invoice import Invoice
-from src.models.purchase_order import PurchaseOrder
+from src.models.models import (
+    PurchaseOrder, PurchaseOrderLine,
+    Invoice, InvoiceLine,
+    DeliveryNote, DeliveryNoteLine,
+    BalanceLedger
+)
 
 logger = logging.getLogger(__name__)
 
 
 class BalanceService:
-    """Service for tracking document balances."""
-    
-    def __init__(self, db: AsyncSession):
+    """Service for balance resolution operations."""
+
+    def __init__(self, db: Session):
         self.db = db
-    
-    async def create_balance_entry(
+
+    def get_po_line_balance(
         self,
-        document_type: str,
-        document_id: UUID,
-        document_number: str,
-        original_amount: Decimal,
-    ) -> BalanceLedger:
-        """Create initial balance entry for a document."""
-        balance = BalanceLedger(
-            document_type=document_type,
-            document_id=document_id,
-            document_number=document_number,
-            original_amount=original_amount,
-            matched_amount=Decimal("0.00"),
-            pending_amount=original_amount,
-            balance_status="OPEN",
-        )
-        self.db.add(balance)
-        await self.db.flush()
-        await self.db.refresh(balance)
-        return balance
-    
-    async def record_match(
-        self,
-        document_type: str,
-        document_id: UUID,
-        match_id: UUID,
-        match_amount: Decimal,
-        reference_type: str,
-        reference_id: UUID,
-        reference_number: str,
-    ) -> Optional[BalanceLedger]:
-        """Record a match against a document's balance."""
-        result = await self.db.execute(
-            select(BalanceLedger).where(
-                BalanceLedger.document_type == document_type,
-                BalanceLedger.document_id == document_id,
-                BalanceLedger.is_deleted == False,
-            )
-        )
-        balance = result.scalar_one_or_none()
+        po_line_id: UUID
+    ) -> Dict[str, Decimal]:
+        """Get balance for a specific PO line."""
+        po_line = self.db.query(PurchaseOrderLine).filter(
+            PurchaseOrderLine.id == po_line_id
+        ).first()
         
-        if not balance:
-            logger.warning(f"No balance found for {document_type}:{document_id}")
-            return None
+        if not po_line:
+            return {"ordered": Decimal("0"), "invoiced": Decimal("0"), "delivered": Decimal("0")}
         
-        new_matched = balance.matched_amount + match_amount
-        new_pending = balance.original_amount - new_matched
+        ordered = Decimal(str(po_line.quantity))
         
-        balance.matched_amount = new_matched
-        balance.pending_amount = new_pending
+        # Calculate invoiced quantity
+        invoiced = Decimal("0")
+        invoice_lines = self.db.query(InvoiceLine).filter(
+            InvoiceLine.po_line_id == po_line_id
+        ).all()
+        for line in invoice_lines:
+            invoiced += Decimal(str(line.quantity))
         
-        if new_pending <= Decimal("0.00"):
-            balance.balance_status = "CLOSED"
-            balance.closed_at = datetime.utcnow()
-        
-        entry = BalanceLedgerEntry(
-            balance_ledger_id=balance.id,
-            match_id=match_id,
-            entry_type="MATCH",
-            amount=match_amount,
-            balance_after=new_pending,
-            reference_document_type=reference_type,
-            reference_document_id=reference_id,
-            reference_document_number=reference_number,
-        )
-        self.db.add(entry)
-        
-        await self.db.flush()
-        await self.db.refresh(balance)
-        return balance
-    
-    async def reverse_match(
-        self,
-        document_type: str,
-        document_id: UUID,
-        match_id: UUID,
-        amount: Decimal,
-    ) -> Optional[BalanceLedger]:
-        """Reverse a match and restore the balance."""
-        result = await self.db.execute(
-            select(BalanceLedger).where(
-                BalanceLedger.document_type == document_type,
-                BalanceLedger.document_id == document_id,
-                BalanceLedger.is_deleted == False,
-            )
-        )
-        balance = result.scalar_one_or_none()
-        
-        if not balance:
-            return None
-        
-        new_matched = max(Decimal("0.00"), balance.matched_amount - amount)
-        new_pending = balance.original_amount - new_matched
-        
-        balance.matched_amount = new_matched
-        balance.pending_amount = new_pending
-        balance.balance_status = "PARTIAL" if new_pending > Decimal("0.00") else "CLOSED"
-        
-        if balance.balance_status == "CLOSED":
-            balance.closed_at = datetime.utcnow()
-        
-        entry = BalanceLedgerEntry(
-            balance_ledger_id=balance.id,
-            match_id=match_id,
-            entry_type="REVERSE",
-            amount=amount,
-            balance_after=new_pending,
-        )
-        self.db.add(entry)
-        
-        await self.db.flush()
-        await self.db.refresh(balance)
-        return balance
-    
-    async def get_balance_for_document(
-        self,
-        document_type: str,
-        document_id: UUID,
-    ) -> Optional[BalanceLedger]:
-        """Get balance entry for a document."""
-        result = await self.db.execute(
-            select(BalanceLedger)
-            .where(
-                BalanceLedger.document_type == document_type,
-                BalanceLedger.document_id == document_id,
-                BalanceLedger.is_deleted == False,
-            )
-            .options(selectinload(BalanceLedger.entries))
-        )
-        return result.scalar_one_or_none()
-    
-    async def get_open_balances(
-        self,
-        document_type: Optional[str] = None,
-        include_partial: bool = True,
-    ) -> list[BalanceLedger]:
-        """Get all open balances, optionally filtered by document type."""
-        query = select(BalanceLedger).where(BalanceLedger.is_deleted == False)
-        
-        if document_type:
-            query = query.where(BalanceLedger.document_type == document_type)
-        
-        if include_partial:
-            query = query.where(BalanceLedger.balance_status.in_(["OPEN", "PARTIAL"]))
-        else:
-            query = query.where(BalanceLedger.balance_status == "OPEN")
-        
-        query = query.order_by(BalanceLedger.created_at.desc())
-        
-        result = await self.db.execute(query)
-        return list(result.scalars().all())
-    
-    async def get_balance_summary(self) -> dict:
-        """Get summary of all balances."""
-        balances = await self.get_open_balances(include_partial=True)
-        
-        total_original = sum(b.original_amount for b in balances)
-        total_matched = sum(b.matched_amount for b in balances)
-        total_pending = sum(b.pending_amount for b in balances)
-        
-        open_count = sum(1 for b in balances if b.balance_status == "OPEN")
-        partial_count = sum(1 for b in balances if b.balance_status == "PARTIAL")
+        # Calculate delivered quantity
+        delivered = Decimal("0")
+        dn_lines = self.db.query(DeliveryNoteLine).filter(
+            DeliveryNoteLine.po_line_id == po_line_id
+        ).all()
+        for line in dn_lines:
+            delivered += Decimal(str(line.quantity))
         
         return {
-            "total_documents": len(balances),
-            "open_documents": open_count,
-            "partial_documents": partial_count,
-            "total_original_amount": total_original,
-            "total_matched_amount": total_matched,
-            "total_pending_amount": total_pending,
-            "match_percentage": (
-                (total_matched / total_original * 100).quantize(Decimal("0.01"))
-                if total_original > 0 else Decimal("0.00")
-            ),
+            "ordered": ordered,
+            "invoiced": invoiced,
+            "delivered": delivered,
+            "open_to_invoice": max(Decimal("0"), ordered - invoiced),
+            "open_to_deliver": max(Decimal("0"), ordered - delivered)
         }
+
+    def get_po_balance_summary(self, po_id: UUID) -> Dict:
+        """Get balance summary for entire PO."""
+        po = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+        
+        if not po:
+            return {"error": "PO not found"}
+        
+        line_balances = []
+        for line in po.lines:
+            line_balances.append({
+                "line_id": str(line.id),
+                "line_number": line.line_number,
+                "description": line.description,
+                **self.get_po_line_balance(line.id)
+            })
+        
+        # Calculate totals
+        total_ordered = sum(lb["ordered"] for lb in line_balances)
+        total_invoiced = sum(lb["invoiced"] for lb in line_balances)
+        total_delivered = sum(lb["delivered"] for lb in line_balances)
+        
+        return {
+            "po_id": str(po.id),
+            "po_number": po.po_number,
+            "total_amount": po.total_amount,
+            "lines": line_balances,
+            "summary": {
+                "total_ordered": total_ordered,
+                "total_invoiced": total_invoiced,
+                "total_delivered": total_delivered,
+                "invoiced_percentage": float(total_invoiced / total_ordered * 100) if total_ordered > 0 else 0,
+                "delivered_percentage": float(total_delivered / total_ordered * 100) if total_ordered > 0 else 0
+            }
+        }
+
+    def create_partial_invoice_balance(
+        self,
+        invoice_id: UUID,
+        po_id: UUID,
+        line_amounts: Dict[UUID, Decimal]
+    ) -> List[BalanceLedger]:
+        """Create balance entries for partial invoice."""
+        balances = []
+        
+        for po_line_id, amount in line_amounts.items():
+            balance = BalanceLedger(
+                document_type="INVOICE",
+                document_id=invoice_id,
+                document_line_id=po_line_id,
+                balance_type="INVOICED",
+                amount=amount,
+                related_document_type="PO",
+                related_document_id=po_id,
+                notes=f"Partial invoice allocation"
+            )
+            balances.append(balance)
+            self.db.add(balance)
+        
+        self.db.commit()
+        logger.info(f"Created partial invoice balance for invoice {invoice_id}")
+        return balances
+
+    def create_partial_delivery_balance(
+        self,
+        dn_id: UUID,
+        po_id: UUID,
+        line_amounts: Dict[UUID, Decimal]
+    ) -> List[BalanceLedger]:
+        """Create balance entries for partial delivery."""
+        balances = []
+        
+        for po_line_id, amount in line_amounts.items():
+            balance = BalanceLedger(
+                document_type="DN",
+                document_id=dn_id,
+                document_line_id=po_line_id,
+                balance_type="DELIVERED",
+                amount=amount,
+                related_document_type="PO",
+                related_document_id=po_id,
+                notes=f"Partial delivery allocation"
+            )
+            balances.append(balance)
+            self.db.add(balance)
+        
+        self.db.commit()
+        logger.info(f"Created partial delivery balance for DN {dn_id}")
+        return balances
+
+    def record_payment(self, invoice_id: UUID, amount: Decimal, notes: Optional[str] = None) -> Invoice:
+        """Record payment for an invoice."""
+        invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        
+        if not invoice:
+            raise ValueError(f"Invoice {invoice_id} not found")
+        
+        new_paid = invoice.amount_paid + amount
+        invoice.amount_paid = min(new_paid, invoice.total_amount)
+        
+        # Update status if fully paid
+        if invoice.amount_paid >= invoice.total_amount:
+            invoice.status = "PAID"
+        
+        # Create balance ledger entry
+        balance = BalanceLedger(
+            document_type="INVOICE",
+            document_id=invoice_id,
+            balance_type="PAID",
+            amount=amount,
+            related_document_type="INVOICE",
+            related_document_id=invoice_id,
+            notes=notes or f"Payment recorded"
+        )
+        self.db.add(balance)
+        self.db.commit()
+        self.db.refresh(invoice)
+        
+        logger.info(f"Recorded payment of {amount} for invoice {invoice.invoice_number}")
+        return invoice
+
+    def get_vendor_balance_summary(self, vendor_id: UUID) -> Dict:
+        """Get balance summary for all PO balances related to a vendor."""
+        # Get all open POs for vendor
+        pos = self.db.query(PurchaseOrder).filter(
+            and_(
+                PurchaseOrder.vendor_id == vendor_id,
+                PurchaseOrder.status == "OPEN",
+                PurchaseOrder.is_deleted == False
+            )
+        ).all()
+        
+        summary = {
+            "vendor_id": str(vendor_id),
+            "total_open_po": len(pos),
+            "total_open_amount": Decimal("0"),
+            "total_invoiced_amount": Decimal("0"),
+            "total_delivered_amount": Decimal("0"),
+            "total_paid_amount": Decimal("0"),
+            "purchase_orders": []
+        }
+        
+        for po in pos:
+            po_balance = self.get_po_balance_summary(po.id)
+            summary["total_open_amount"] += Decimal(str(po.total_amount))
+            summary["purchase_orders"].append(po_balance)
+            
+            # Calculate amounts from balance
+            for inv in po.invoices:
+                if not inv.is_deleted:
+                    summary["total_invoiced_amount"] += Decimal(str(inv.total_amount))
+                    summary["total_paid_amount"] += Decimal(str(inv.amount_paid))
+            
+            for dn in po.delivery_notes:
+                if not dn.is_deleted:
+                    summary["total_delivered_amount"] += Decimal(str(dn.total_amount))
+        
+        summary["outstanding_balance"] = (
+            summary["total_invoiced_amount"] - summary["total_paid_amount"]
+        )
+        
+        return summary
+
+    def get_balance_ledger_entries(
+        self,
+        document_type: Optional[str] = None,
+        document_id: Optional[UUID] = None,
+        balance_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List[BalanceLedger]:
+        """Get balance ledger entries with optional filters."""
+        query = self.db.query(BalanceLedger)
+        
+        if document_type:
+            query = query.filter(BalanceLedger.document_type == document_type)
+        if document_id:
+            query = query.filter(BalanceLedger.document_id == document_id)
+        if balance_type:
+            query = query.filter(BalanceLedger.balance_type == balance_type)
+        
+        return query.order_by(BalanceLedger.created_at.desc()).limit(limit).all()
+
+    def reconcile_balance_discrepancies(
+        self,
+        po_id: UUID
+    ) -> Dict[str, List]:
+        """Identify and return balance discrepancies for a PO."""
+        po_balance = self.get_po_balance_summary(po_id)
+        discrepancies = {
+            "over_invoiced": [],
+            "under_invoiced": [],
+            "over_delivered": [],
+            "under_delivered": [],
+            "payment_discrepancies": []
+        }
+        
+        for line in po_balance.get("lines", []):
+            line_id = UUID(line["line_id"])
+            
+            # Check invoicing discrepancies
+            if line["invoiced"] > line["ordered"]:
+                discrepancies["over_invoiced"].append({
+                    "line_id": str(line_id),
+                    "line_number": line["line_number"],
+                    "description": line["description"],
+                    "ordered": str(line["ordered"]),
+                    "invoiced": str(line["invoiced"]),
+                    "difference": str(line["invoiced"] - line["ordered"])
+                })
+            elif line["invoiced"] < line["ordered"] * Decimal("0.9"):  # 10% threshold
+                discrepancies["under_invoiced"].append({
+                    "line_id": str(line_id),
+                    "line_number": line["line_number"],
+                    "description": line["description"],
+                    "ordered": str(line["ordered"]),
+                    "invoiced": str(line["invoiced"]),
+                    "difference": str(line["ordered"] - line["invoiced"])
+                })
+            
+            # Check delivery discrepancies
+            if line["delivered"] > line["ordered"]:
+                discrepancies["over_delivered"].append({
+                    "line_id": str(line_id),
+                    "line_number": line["line_number"],
+                    "description": line["description"],
+                    "ordered": str(line["ordered"]),
+                    "delivered": str(line["delivered"]),
+                    "difference": str(line["delivered"] - line["ordered"])
+                })
+            elif line["delivered"] < line["ordered"] * Decimal("0.9"):
+                discrepancies["under_delivered"].append({
+                    "line_id": str(line_id),
+                    "line_number": line["line_number"],
+                    "description": line["description"],
+                    "ordered": str(line["ordered"]),
+                    "delivered": str(line["delivered"]),
+                    "difference": str(line["ordered"] - line["delivered"])
+                })
+        
+        return discrepancies

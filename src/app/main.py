@@ -1,56 +1,37 @@
 // src/app/main.py
-"""FastAPI application entry point."""
-import logging
-from contextlib import asynccontextmanager
-from datetime import datetime
-
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+import logging
+import time
 
-from src.app.config import get_settings
-from src.app.database import close_db, init_db
-from src.api import auth, invoices, delivery_notes, matching, purchase_orders, suppliers
-from src.api.health import router as health_router
-
-settings = get_settings()
+from src.app.config import settings
+from src.app.database import engine, Base
+from src.api.v1 import routes
+from src.models.models import PurchaseOrder, Invoice, DeliveryNote
 
 # Configure logging
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
-    logger.info("Starting FinaRo AP Automation Engine...")
-    await init_db()
-    logger.info("Database initialized successfully")
-    yield
-    logger.info("Shutting down FinaRo AP Automation Engine...")
-    await close_db()
-    logger.info("Database connections closed")
-
+# Create database tables
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="3-Way Matching Engine for Invoice × Delivery Note × Purchase Order",
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
-    lifespan=lifespan,
+    version=settings.VERSION,
+    description="3-Way Matching Engine for Accounts Payable Automation",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
 )
 
-# Middleware
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,40 +41,62 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all incoming requests."""
-    start_time = datetime.utcnow()
-    response = await call_next(request)
-    duration = (datetime.utcnow() - start_time).total_seconds()
-    logger.info(
-        f"{request.method} {request.url.path} - {response.status_code} - {duration:.3f}s"
+    start_time = time.time()
+    logger.info(f"Request: {request.method} {request.url.path}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
+        logger.info(f"Response: {response.status_code} ({process_time:.3f}s)")
+        return response
+    except Exception as e:
+        logger.error(f"Request failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError exceptions."""
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)}
     )
-    return response
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler."""
-    logger.exception(f"Unhandled exception: {exc}")
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle general exceptions."""
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error", "type": type(exc).__name__},
+        status_code=500,
+        content={"detail": "Internal server error"}
     )
 
 
-# Include routers
-app.include_router(health_router, tags=["Health"])
-app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Authentication"])
-app.include_router(suppliers.router, prefix=f"{settings.API_V1_PREFIX}/suppliers", tags=["Suppliers"])
-app.include_router(purchase_orders.router, prefix=f"{settings.API_V1_PREFIX}/purchase-orders", tags=["Purchase Orders"])
-app.include_router(delivery_notes.router, prefix=f"{settings.API_V1_PREFIX}/delivery-notes", tags=["Delivery Notes"])
-app.include_router(invoices.router, prefix=f"{settings.API_V1_PREFIX}/invoices", tags=["Invoices"])
-app.include_router(matching.router, prefix=f"{settings.API_V1_PREFIX}/matching", tags=["Matching"])
+# Include API routes
+app.include_router(routes.router, prefix="/api/v1")
 
 
 @app.get("/")
 async def root():
     """Root endpoint."""
     return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "status": "operational",
+        "app": settings.APP_NAME,
+        "version": settings.VERSION,
+        "status": "running"
     }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("src.app.main:app", host="0.0.0.0", port=8000, reload=True)
